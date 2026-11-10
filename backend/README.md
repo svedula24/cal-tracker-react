@@ -17,10 +17,12 @@ One table, `foods` (`db/schema.sql`): one row per USDA food, nutrients per 100 g
 | `carbs_per_100g` | 1005, carbohydrate by difference (a negative value is stored as 0, as in the app's mapper) |
 | `fat_per_100g` | 1004 |
 
-A nutrient the source does not report is **NULL**, never 0; the schema also
-rejects negative values. Every USDA food is loaded, including the few with no
-energy value (NULL calories); the app's bundled JSON (`npm run build:foods`)
-drops those, so the two lists differ by exactly that set. The loader checks
+Only foods that report all four nutrients (calories, protein, carbs, fat) are
+loaded; the loader skips the rest (51 of 13,649 in the current releases, all of
+them also missing energy) and prints how many per dataset. The schema makes the
+four columns NOT NULL and rejects negative values. A reported 0 is kept. The
+app's bundled JSON (`npm run build:foods`) drops foods with no energy value, which
+today is the same set. The loader checks
 each nutrient's unit (and each record's dataType and description): a load with
 any unmappable record loads nothing and lists every bad record, by dataset and
 fdc_id, before exiting. Details: `kalo/usda/nutrients.py`.
