@@ -1,9 +1,7 @@
 // Kalo verification spec, consumed by e2e/verify.mjs (`npm run verify`).
 // Flows share one browser page and run in order: Home's seed checks first (the
-// first launch must match the reference screenshots), then the logging and
-// secondary screens, then cross-screen checks.
+// first launch must match the reference screenshots), then the logging screens.
 import * as logging from './flows/logging.mjs';
-import * as secondary from './flows/secondary.mjs';
 
 const go = async (page, url, wait) => {
   await page.goto(url, { waitUntil: 'networkidle' });
@@ -120,23 +118,5 @@ const home = [
   },
 ];
 
-const crossScreen = [
-  {
-    name: 'logged exercise adds to Calories burned on Home',
-    run: async (page, base, { wait }) => {
-      await page.goto(base + '/log-exercise', { waitUntil: 'networkidle' });
-      await wait(500);
-      await btn(page, '15 minutes').click();
-      await page.getByRole('button', { name: 'Log exercise', exact: true }).last().click();
-      await wait(500);
-      await go(page, base + '/', wait);
-      await btn(page, 'Page 3').click();
-      // 30 min Run (logging flow) + 15 min, both Medium: 263 + 131 = 394; plus 202 from steps.
-      await must(page, '394 cal', 'exercise calories');
-      await must(page, '596', 'total calories burned');
-    },
-  },
-];
-
-export const routes = ['/', ...logging.routes, ...secondary.routes, '/daily-score'];
-export const flows = [...home, ...logging.flows, ...secondary.flows, ...crossScreen];
+export const routes = ['/', ...logging.routes, '/daily-score', '/score-info'];
+export const flows = [...home, ...logging.flows];

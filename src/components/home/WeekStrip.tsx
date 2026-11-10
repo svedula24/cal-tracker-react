@@ -3,7 +3,7 @@ import Svg, { Circle } from 'react-native-svg';
 
 import { cardShadow } from '@/components/Screen';
 import { Ring } from '@/components/Ring';
-import { dayBudget, useDayLogs, useEntries, useExercise, useGoals } from '@/lib/data';
+import { dayBudget, useDayLogs, useEntries, useGoals } from '@/lib/data';
 import { dayStatus, sum, weekStrip } from '@/lib/nutrition';
 import { tokens } from '@/lib/tokens';
 
@@ -14,14 +14,13 @@ export function WeekStrip({ selected, onSelect, todayProgress }: { selected: str
   const entries = useEntries().items;
   const { goals } = useGoals();
   const logs = useDayLogs().items;
-  const exercise = useExercise().items;
   const days = weekStrip();
   return (
     <View className="flex-row justify-between px-[8px]">
       {days.map((d) => {
         const active = d.key === selected;
         const eaten = sum(entries.filter((e) => e.date === d.key)).calories;
-        const status = dayStatus(eaten, dayBudget(goals.calories, logs.find((l) => l.id === d.key), exercise, d.key));
+        const status = dayStatus(eaten, dayBudget(goals.calories, logs.find((l) => l.id === d.key)));
         return (
           <Pressable
             key={d.key}

@@ -3,7 +3,6 @@ import {
   ChevronsUpDown,
   Droplet,
   Drumstick,
-  Dumbbell,
   Flame,
   Footprints,
   GlassWater,
@@ -78,7 +77,7 @@ export function CalorieCard({ eaten, budget, rollover, burned }: { eaten: number
         </Pressable>
         <View className="mt-[9px] flex-row">
           {rollover > 0 ? <Chip icon={<History size={11} color={c.foreground} strokeWidth={2.4} />} text={`+${rollover}`} label="Rollover calories" /> : null}
-          {burned > 0 ? <Chip icon={<Dumbbell size={11} color={c.muted} strokeWidth={2.4} />} text={`+${burned}`} label="Calories burned added" /> : null}
+          {burned > 0 ? <Chip icon={<Footprints size={11} color={c.muted} strokeWidth={2.4} />} text={`+${burned}`} label="Calories burned added" /> : null}
         </View>
       </View>
       <Ring size={107} stroke={7.5} progress={budget ? eaten / budget : 0} color={c.foreground}>
@@ -175,7 +174,7 @@ export function StepsCard({ steps, goal }: { steps: number; goal: number }) {
   );
 }
 
-export function BurnedCard({ total, steps, exercise }: { total: number; steps: number; exercise: number }) {
+export function BurnedCard({ total }: { total: number }) {
   return (
     <Card className="h-[216px] flex-1 px-[16px] pt-[16px]">
       <Text className="text-[13.5px] text-muted">Calories burned</Text>
@@ -183,8 +182,7 @@ export function BurnedCard({ total, steps, exercise }: { total: number; steps: n
         <Text className="text-[24px] font-bold text-foreground">{total}</Text>
         <Text className="mb-[3px] ml-[3px] text-[13px] text-muted">cal</Text>
       </View>
-      <BurnRow icon={<Footprints size={17} color={c.foreground} />} label="Steps" value={steps} />
-      {exercise > 0 ? <BurnRow icon={<Dumbbell size={17} color={c.foreground} />} label="Exercise" value={exercise} /> : null}
+      <BurnRow icon={<Footprints size={17} color={c.foreground} />} label="Steps" value={total} />
     </Card>
   );
 }

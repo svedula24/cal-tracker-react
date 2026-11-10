@@ -1,39 +1,141 @@
 {
   "name": "Kalo",
-  "source": { "mode": "screenshots", "ref": "docs/screenshots/" },
+  "source": {
+    "mode": "screenshots",
+    "ref": "docs/screenshots/"
+  },
   "tokens": {
     "colors": {
-      "background": "#F6F6F8",
+      "background": "#FFFFFF",
       "card": "#FFFFFF",
       "foreground": "#111111",
-      "muted": "#8A8A8E",
-      "track": "#EEEEF2",
-      "border": "#E9E9EE",
-      "protein": "#D46A6A",
-      "carbs": "#D49A68",
-      "fat": "#6F96DB",
-      "fiber": "#A58AD8",
-      "sugar": "#E58EAB",
-      "sodium": "#D8B26A",
-      "good": "#4CAF6E",
-      "bad": "#D9534F"
+      "muted": "#8E8E93",
+      "faint": "#C7C7CC",
+      "track": "#EFEFF5",
+      "border": "#EEEEF3",
+      "protein": "#DF6767",
+      "carbs": "#DC9A69",
+      "fat": "#6A98DC",
+      "fiber": "#A089CD",
+      "sugar": "#E890AE",
+      "sodium": "#EAB771",
+      "good": "#28A96C",
+      "bad": "#E14945",
+      "water": "#5AA9E6",
+      "entry": "#F8F7FC",
+      "chip": "#F6F5FA",
+      "health": "#82DE7A",
+      "tabActive": "#E8E8EA",
+      "fab": "#1E1A24"
     },
-    "fonts": { "sans": "System" },
-    "spacing": { "screenX": 22, "cardGap": 10 },
-    "radii": { "card": 24, "pill": 999, "tile": 22 }
+    "fonts": {
+      "sans": "System"
+    },
+    "spacing": {
+      "screenX": 22,
+      "cardGap": 10
+    },
+    "radii": {
+      "card": 18,
+      "tile": 16,
+      "pill": 999
+    }
   },
-  "navigation": { "type": "mixed", "items": ["Home", "Progress", "Groups", "Profile"] },
+  "navigation": {
+    "type": "stack",
+    "items": [
+      "Home"
+    ]
+  },
   "screens": [
-    { "name": "Home", "route": "/", "states": ["macros", "micros", "activity", "add-menu"], "sourceShots": ["home-macros.jpeg", "home-micros.jpeg", "home-activity.jpeg", "home-add-menu.jpeg"], "transitionsTo": ["Daily Score", "Entry detail", "Log exercise", "Saved foods", "Food Database", "Scan food"], "spec": "docs/research/components/home.spec.md" },
-    { "name": "Daily Score", "route": "/daily-score", "states": ["modal"], "sourceShots": ["home-daily-score.jpeg"], "transitionsTo": ["Score info"], "spec": "docs/research/components/daily-score.spec.md" },
-    { "name": "Score info", "route": "/score-info", "states": ["default"], "spec": "docs/research/components/secondary-screens.spec.md" },
-    { "name": "Progress", "route": "/progress", "states": ["default"], "spec": "docs/research/components/secondary-screens.spec.md" },
-    { "name": "Groups", "route": "/groups", "states": ["coming-soon"], "spec": "docs/research/components/secondary-screens.spec.md" },
-    { "name": "Profile", "route": "/profile", "states": ["default"], "spec": "docs/research/components/secondary-screens.spec.md" },
-    { "name": "Food Database", "route": "/food-database", "states": ["default", "empty-search"], "transitionsTo": ["Home"], "spec": "docs/research/components/logging-screens.spec.md" },
-    { "name": "Saved foods", "route": "/saved-foods", "states": ["default", "empty"], "transitionsTo": ["Home"], "spec": "docs/research/components/logging-screens.spec.md" },
-    { "name": "Log exercise", "route": "/log-exercise", "states": ["default"], "transitionsTo": ["Home"], "spec": "docs/research/components/logging-screens.spec.md" },
-    { "name": "Scan food", "route": "/scan-food", "states": ["coming-soon"], "transitionsTo": ["Food Database"], "spec": "docs/research/components/logging-screens.spec.md" },
-    { "name": "Entry detail", "route": "/entry/[id]", "states": ["default"], "spec": "docs/research/components/logging-screens.spec.md" }
+    {
+      "name": "Home",
+      "route": "/",
+      "states": [
+        "macros",
+        "micros",
+        "activity",
+        "add-menu"
+      ],
+      "sourceShots": [
+        "home-macros.jpeg",
+        "home-micros.jpeg",
+        "home-activity.jpeg",
+        "home-add-menu.jpeg"
+      ],
+      "transitionsTo": [
+        "Daily Score",
+        "Entry detail",
+        "Saved foods",
+        "Food Database",
+        "Scan food"
+      ],
+      "spec": "docs/research/components/home.spec.md"
+    },
+    {
+      "name": "Daily Score",
+      "route": "/daily-score",
+      "states": [
+        "modal"
+      ],
+      "sourceShots": [
+        "home-daily-score.jpeg"
+      ],
+      "transitionsTo": [
+        "Score info"
+      ],
+      "spec": "docs/research/components/daily-score.spec.md"
+    },
+    {
+      "name": "Score info",
+      "route": "/score-info",
+      "states": [
+        "default"
+      ],
+      "spec": "docs/research/components/daily-score.spec.md"
+    },
+    {
+      "name": "Food Database",
+      "route": "/food-database",
+      "states": [
+        "default",
+        "empty-search"
+      ],
+      "transitionsTo": [
+        "Home"
+      ],
+      "spec": "docs/research/components/logging-screens.spec.md"
+    },
+    {
+      "name": "Saved foods",
+      "route": "/saved-foods",
+      "states": [
+        "default",
+        "empty"
+      ],
+      "transitionsTo": [
+        "Home"
+      ],
+      "spec": "docs/research/components/logging-screens.spec.md"
+    },
+    {
+      "name": "Scan food",
+      "route": "/scan-food",
+      "states": [
+        "coming-soon"
+      ],
+      "transitionsTo": [
+        "Food Database"
+      ],
+      "spec": "docs/research/components/logging-screens.spec.md"
+    },
+    {
+      "name": "Entry detail",
+      "route": "/entry/[id]",
+      "states": [
+        "default"
+      ],
+      "spec": "docs/research/components/logging-screens.spec.md"
+    }
   ]
 }
