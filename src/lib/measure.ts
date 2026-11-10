@@ -61,8 +61,8 @@ export function parseQty(text: string): number | null {
   if (!/^[\d.,]+$/.test(t)) return null;
   const normalized = /^\d{1,3}(,\d{3})+$/.test(t) ? t.replace(/,/g, '') : t.replace(',', '.');
   if (!/^\d*\.?\d+$/.test(normalized) && !/^\d+\.$/.test(normalized)) return null;
-  const n = Number(normalized);
-  return n > 0 && n <= MAX_QTY ? Math.round(n * 100) / 100 : null;
+  const n = Math.round(Number(normalized) * 100) / 100; // round first: "0.004" is 0, not a quantity
+  return n > 0 && n <= MAX_QTY ? n : null;
 }
 
 /** The quantity as shown in the field: "1", "1.5", "0.33". */
