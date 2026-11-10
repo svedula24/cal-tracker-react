@@ -7,17 +7,16 @@ import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeabl
 import { FoodRow } from '@/components/logging/FoodRow';
 import { PrimaryButton } from '@/components/logging/PrimaryButton';
 import { ComingSoon, PushedScreen } from '@/components/Screen';
-import { foodById, type Food } from '@/data/foods';
 import { useSavedFoods } from '@/lib/data';
+import { isSavedFood } from '@/lib/savedFoods';
 import { tokens } from '@/lib/tokens';
 
 export default function SavedFoods() {
   const saved = useSavedFoods();
   const [openId, setOpenId] = useState<string | null>(null);
-  // The snapshot wins: if a USDA refresh ever reuses an id for another food, the
-  // bookmark still shows what was saved. Entries from before the USDA data (old
-  // ids, no snapshot) resolve to nothing and are simply not listed.
-  const list = saved.items.map((s) => s.food ?? foodById.get(s.id)).filter((f): f is Food => !!f);
+  // Stored entries are cleaned when the list loads; this also skips any that
+  // couldn't be, so a bad entry can never break the screen.
+  const list = saved.items.filter(isSavedFood).map((s) => s.food);
 
   if (list.length === 0) {
     return (

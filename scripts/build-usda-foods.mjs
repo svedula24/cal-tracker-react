@@ -3,12 +3,13 @@
 // (Foundation Foods, SR Legacy, FNDDS), trimmed to what Kalo uses.
 // USDA data is public domain. Rerun when USDA publishes a new release:
 //   node scripts/build-usda-foods.mjs
-// Needs `curl` and `unzip`. Downloads go to a temp folder that is removed after.
+// Needs `curl`, `unzip` and Node 22.18+. Downloads go to a temp folder that is removed after.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { SEED_FDC_IDS } from '../src/lib/seedIds.ts';
 import { buildRows, FIELDS } from './usda/map.mjs';
 
 const BASE = 'https://fdc.nal.usda.gov/fdc-datasets/';
@@ -19,6 +20,7 @@ const DATASETS = [
   { file: 'FoodData_Central_survey_food_json_2024-10-31', key: 'SurveyFoods' },
 ];
 const OUT = 'src/data/usda-foods.json';
+const SEED_OUT = 'src/data/seed-foods.json'; // the demo seed's few foods (see src/lib/seedIds.ts)
 
 const work = mkdtempSync(join(tmpdir(), 'kalo-usda-'));
 try {
@@ -48,8 +50,13 @@ try {
     columns: ['fdcId', 'name', 'serving', ...FIELDS],
     rows,
   };
+  const byId = new Map(rows.map((r) => [r[0], r]));
+  const missing = SEED_FDC_IDS.filter((id) => !byId.has(id));
+  if (missing.length) throw new Error(`seed foods ${missing.join(', ')} are not in this release; update src/lib/seedIds.ts`);
   writeFileSync(OUT, JSON.stringify(out));
+  writeFileSync(SEED_OUT, JSON.stringify({ columns: out.columns, rows: SEED_FDC_IDS.map((id) => byId.get(id)) }) + '\n');
   console.log(`✓ ${OUT}: ${rows.length} foods, ${(JSON.stringify(out).length / 1e6).toFixed(1)} MB`);
+  console.log(`✓ ${SEED_OUT}: ${SEED_FDC_IDS.length} seed foods`);
 } finally {
   rmSync(work, { recursive: true, force: true });
 }

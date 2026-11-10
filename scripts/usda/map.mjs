@@ -86,15 +86,22 @@ export const cleanName = (s) =>
     .trim();
 
 /**
- * One compact row: [id, name, serving, calories, protein, carbs, fat, fiber, sugar, sodium],
- * nutrients scaled to the default serving. Null when the food can't be logged.
+ * One compact row ([id, name, serving, calories, protein, carbs, fat, fiber, sugar,
+ * sodium], nutrients scaled to the default serving) plus a completeness score
+ * used to pick between same-named records. Null when the food can't be logged.
  */
-export function toRow(food) {
+export function analyze(food) {
   const n = per100g(food);
   if (!n || !food.description) return null;
   const { label, grams } = defaultServing(food);
+  const hasPortion = label !== '100 g';
+  const serving = hasPortion ? `${label} (${round(grams, grams < 10 ? 1 : 0)} g)` : label;
+  // score = how complete the record is: nutrients reported, then a real portion.
+  return { row: makeRow(food, n, serving, grams), score: n.reported * 2 + (hasPortion ? 1 : 0) };
+}
+
+function makeRow(food, n, serving, grams) {
   const f = grams / 100;
-  const serving = label === '100 g' ? label : `${label} (${round(grams, grams < 10 ? 1 : 0)} g)`;
   return [
     food.fdcId,
     cleanName(food.description),
@@ -109,24 +116,19 @@ export function toRow(food) {
   ];
 }
 
-/** How complete a record is: nutrients reported, then whether it has a real serving. */
-const completeness = (food) => {
-  const n = per100g(food);
-  return n ? n.reported * 2 + (defaultServing(food).label === '100 g' ? 0 : 1) : -1;
-};
-
 /**
  * All datasets → rows, de-duplicated by name: the most complete record wins,
  * then the earlier dataset (Foundation, SR Legacy, FNDDS). Sorted by name.
  */
 export function buildRows(foods) {
   const ranked = foods
-    .map((food) => ({ food, score: completeness(food), rank: DATASET_RANK[food.dataType] ?? 9 }))
-    .sort((a, b) => b.score - a.score || a.rank - b.rank);
+    .map((food) => ({ a: analyze(food), rank: DATASET_RANK[food.dataType] ?? 9 }))
+    .filter((x) => x.a)
+    .sort((x, y) => y.a.score - x.a.score || x.rank - y.rank);
   const byName = new Map();
-  for (const { food } of ranked) {
-    const row = toRow(food);
-    if (row && !byName.has(row[1].toLowerCase())) byName.set(row[1].toLowerCase(), row);
+  for (const { a } of ranked) {
+    const key = a.row[1].toLowerCase();
+    if (!byName.has(key)) byName.set(key, a.row);
   }
   return [...byName.values()].sort((a, b) => a[1].localeCompare(b[1]));
 }

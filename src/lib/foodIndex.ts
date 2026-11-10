@@ -1,5 +1,6 @@
 // Offline search over the bundled foods. Pure (no React / React Native), so
-// Node can unit-test it: tests/foodIndex.test.mjs.
+// Node can unit-test it: tests/foodIndex.test.mjs. A plain scan of all ~13k
+// foods takes under 1 ms per query (measured), so there is no extra index.
 import type { Food } from '@/data/foods';
 
 const words = (s: string) => s.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);

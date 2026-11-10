@@ -50,15 +50,7 @@ export function FoodRow({
   );
 }
 
-export function BookmarkToggle({
-  name,
-  saved,
-  onPress,
-}: {
-  name: string;
-  saved: boolean;
-  onPress: () => void;
-}) {
+export function BookmarkToggle({ name, saved, onPress }: { name: string; saved: boolean; onPress: () => void }) {
   return (
     <Pressable
       accessibilityRole="button"

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { buildRows, cleanName, defaultServing, per100g, round, toRow } from '../scripts/usda/map.mjs';
+import { analyze, buildRows, cleanName, defaultServing, per100g, round } from '../scripts/usda/map.mjs';
 
 const nutrients = (map) => Object.entries(map).map(([id, amount]) => ({ nutrient: { id: Number(id) }, amount }));
 
@@ -18,7 +18,7 @@ test('per100g maps nutrient ids, with energy and sugar fallbacks', () => {
 
 test('a food without an energy value is skipped', () => {
   assert.equal(per100g({ foodNutrients: nutrients({ 1003: 5 }) }), null);
-  assert.equal(toRow({ fdcId: 1, description: 'X', foodNutrients: nutrients({ 1003: 5 }) }), null);
+  assert.equal(analyze({ fdcId: 1, description: 'X', foodNutrients: nutrients({ 1003: 5 }) }), null);
 });
 
 test('default serving: the named portion closest to 100 g', () => {
@@ -50,8 +50,8 @@ test('default serving: the named portion closest to 100 g', () => {
   assert.deepEqual(defaultServing({}), { label: '100 g', grams: 100 });
 });
 
-test('toRow scales nutrients to the default serving', () => {
-  const row = toRow({
+test('analyze scales nutrients to the default serving', () => {
+  const { row } = analyze({
     fdcId: 169640,
     description: 'Honey',
     foodNutrients: nutrients({ 1008: 304, 1005: 82.4, 2000: 82.1, 1093: 4 }),
@@ -73,7 +73,7 @@ test('names lose USDA program notes; duplicates keep the earlier dataset', () =>
 
 test('negative USDA values are clamped to 0; sub-gram servings keep a decimal', () => {
   assert.equal(per100g({ foodNutrients: nutrients({ 1008: 300, 1005: -0.7 }) }).carbs, 0);
-  const spray = toRow({
+  const { row: spray } = analyze({
     fdcId: 9,
     description: 'Oil, spray',
     foodNutrients: nutrients({ 1008: 800 }),
@@ -90,6 +90,13 @@ test('poor default portions are skipped when a better one exists', () => {
   assert.equal(defaultServing(milk).label, '1 cup');
   const onlyFlOz = { foodPortions: [{ portionDescription: '1 fl oz', gramWeight: 30 }] };
   assert.equal(defaultServing(onlyFlOz).label, '1 fl oz'); // nothing better: still used
+});
+
+test('completeness score: 2 per reported nutrient, +1 for a real portion', () => {
+  const portion = [{ amount: 1, modifier: 'cup', gramWeight: 200, measureUnit: { name: 'undetermined' } }];
+  assert.equal(analyze({ fdcId: 1, description: 'A', foodNutrients: nutrients({ 1008: 1 }) }).score, 2);
+  assert.equal(analyze({ fdcId: 1, description: 'A', foodNutrients: nutrients({ 1008: 1, 1003: 1 }) }).score, 4);
+  assert.equal(analyze({ fdcId: 1, description: 'A', foodNutrients: nutrients({ 1008: 1 }), foodPortions: portion }).score, 3);
 });
 
 test('round: no float artifacts', () => {

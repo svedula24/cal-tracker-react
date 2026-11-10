@@ -1,13 +1,20 @@
-// USDA FoodData Central ids the demo seed uses (src/lib/data.ts). Kept in a pure
-// module so tests/seedFoods.test.mjs can check they exist in usda-foods.json
-// after every `npm run build:foods`.
-export const PAST_DAY_FOODS: [name: string, hour: number, minute: number, id: string][] = [
-  ['Oatmeal', 8, 10, 'usda:2708383'],
-  ['Banana', 8, 15, 'usda:2709224'],
-  ['Chicken Burrito', 13, 0, 'usda:2708546'],
-  ['Brown Rice', 19, 5, 'usda:2708410'],
-  ['Greek Yogurt (plain)', 21, 0, 'usda:170894'],
-];
+// The few USDA foods the demo seed uses, from src/data/seed-foods.json (7 rows,
+// written by `npm run build:foods`), so app start never loads the 13k-food file.
+import type { Food } from '@/data/foods';
+import { rowToFood, type FoodRow } from '@/lib/foodRow';
+import { PAST_DAY_SEED, SAVED_SEED_IDS } from '@/lib/seedIds';
 
-/** Clif Bar, Greek yogurt, honey. */
-export const SAVED_FOOD_IDS = ['usda:2708118', 'usda:170894', 'usda:169640'];
+import seed from '../data/seed-foods.json';
+
+const byId = new Map((seed.rows as FoodRow[]).map((r) => [r[0], rowToFood(r)]));
+
+// The build script writes every seed id (and a test checks it); an id added to
+// seedIds.ts without a rebuild is skipped rather than breaking app start.
+export const PAST_DAY_FOODS: [name: string, hour: number, minute: number, food: Food][] = PAST_DAY_SEED.flatMap(
+  ([name, hour, minute, fdcId]): [string, number, number, Food][] => {
+    const food = byId.get(fdcId);
+    return food ? [[name, hour, minute, food]] : [];
+  },
+);
+
+export const SAVED_FOODS: Food[] = SAVED_SEED_IDS.flatMap((id) => byId.get(id) ?? []);
