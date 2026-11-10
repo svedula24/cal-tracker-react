@@ -70,8 +70,10 @@ test('parseQty: decimals, a decimal comma, thousands separators, and rejects the
   assert.equal(parseQty('0.333'), 0.33); // kept to 2 decimals, as shown
   assert.equal(parseQty('10000'), 10000);
   assert.equal(parseQty('12600'), 12600); // no upper bound
+  assert.equal(parseQty('999999999999999999'), 999999999999999999);
+  assert.equal(parseQty(qtyText(999999999999999999)), 999999999999999999); // round-trips through the field
   assert.equal(parseQty('2.'), 2);
-  for (const bad of ['', '0', '0.004', '-1', 'abc', '1,000,5', '1.2.3', '1e21', '0x10', '1 0', 'Infinity']) assert.equal(parseQty(bad), null, bad);
+  for (const bad of ['', '0', '0.004', '-1', 'abc', '1,000,5', '1.2.3', '1e21', '999999999999999999999', '0x10', '1 0', 'Infinity']) assert.equal(parseQty(bad), null, bad);
 });
 
 test('qtyText shows what is stored', () => {

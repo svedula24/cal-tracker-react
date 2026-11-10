@@ -47,7 +47,9 @@ export const times = (n: Nutrients, quantity: number): Nutrients =>
 /**
  * A typed quantity: digits with one "." or "," (a comma is a decimal point,
  * "1,5", unless it groups thousands, "1,000"), positive, kept to 2 decimals.
- * No upper bound. Null when invalid, so a typo can't become a day's total.
+ * No upper bound, except that the value must print back (qtyText) as plain
+ * digits the field accepts again; from 1e21 JS prints an exponent. Null when
+ * invalid, so a typo can't become a day's total.
  */
 export function parseQty(text: string): number | null {
   const t = text.trim();
@@ -55,7 +57,7 @@ export function parseQty(text: string): number | null {
   const normalized = /^\d{1,3}(,\d{3})+$/.test(t) ? t.replace(/,/g, '') : t.replace(',', '.');
   if (!/^\d*\.?\d+$/.test(normalized) && !/^\d+\.$/.test(normalized)) return null;
   const n = Math.round(Number(normalized) * 100) / 100; // round first: "0.004" is 0, not a quantity
-  return n > 0 && Number.isFinite(n) ? n : null;
+  return n > 0 && Number.isFinite(n) && !String(n).includes('e') ? n : null;
 }
 
 /** The quantity as shown in the field: "1", "1.5", "0.33". */
