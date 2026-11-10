@@ -25,7 +25,7 @@ export type Entry = {
   photo?: string;
 };
 export type DayLog = { id: string; steps: number; waterCups: number; rollover: number }; // id = date
-export type SavedFood = { id: string }; // id = food id
+export type SavedFood = { id: string; food?: Food }; // id = food id; online foods keep a snapshot
 
 // ── Seed (dated relative to first launch) ────────────────────────────────────
 const n = (calories: number, protein: number, carbs: number, fat: number, fiber: number, sugar: number, sodium: number): Nutrients => ({

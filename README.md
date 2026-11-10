@@ -15,6 +15,19 @@ npm run web        # or: npm run ios / npm run android
 npm run verify     # web export + headless check that every route renders and flows pass
 ```
 
+## Food search
+
+Food Database searches the bundled foods plus two online databases, called
+straight from the app (no Kalo backend):
+
+- **USDA FoodData Central**: generic foods, lab-measured, per 100 g. Get a free
+  key at https://api.data.gov/signup and put it in `.env` as
+  `EXPO_PUBLIC_USDA_API_KEY` (see `.env.example`). Without one the app uses
+  USDA's `DEMO_KEY`, which allows only a few searches per hour.
+- **Open Food Facts**: packaged and branded products (ODbL, crowdsourced). Its
+  search API does not allow browser requests, so it works in the iOS/Android
+  app but not in the web preview, where results come from USDA only.
+
 ## Build the UI from screenshots
 
 1. Put screenshots of the app's states in `docs/screenshots/` (naming tips in

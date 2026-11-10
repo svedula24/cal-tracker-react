@@ -1,6 +1,14 @@
 import type { Nutrients } from '@/lib/nutrition';
 
-export type Food = { id: string; name: string; serving: string; nutrients: Nutrients };
+export type Food = {
+  id: string;
+  name: string;
+  serving: string;
+  nutrients: Nutrients;
+  /** Where the food came from: bundled list (default), USDA FoodData Central, or Open Food Facts. */
+  source?: 'kalo' | 'usda' | 'off';
+  brand?: string;
+};
 
 // [id, name, serving, kcal, protein g, carbs g, fat g, fiber g, sugar g, sodium mg]
 type Row = [string, string, string, number, number, number, number, number, number, number];

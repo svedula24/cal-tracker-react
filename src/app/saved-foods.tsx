@@ -14,7 +14,7 @@ import { tokens } from '@/lib/tokens';
 export default function SavedFoods() {
   const saved = useSavedFoods();
   const [openId, setOpenId] = useState<string | null>(null);
-  const list = saved.items.map((s) => foodById.get(s.id)).filter((f): f is Food => !!f);
+  const list = saved.items.map((s) => foodById.get(s.id) ?? s.food).filter((f): f is Food => !!f);
 
   if (list.length === 0) {
     return (

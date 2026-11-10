@@ -36,8 +36,10 @@ export function FoodRow({
           <Text className="text-[16px] font-medium text-foreground" numberOfLines={1}>
             {food.name}
           </Text>
-          <Text className="mt-0.5 text-[13px] text-muted">
+          <Text className="mt-0.5 text-[13px] text-muted" numberOfLines={1}>
+            {food.brand ? `${food.brand} · ` : ''}
             {food.serving} · {food.nutrients.calories} cal
+            {food.source === 'usda' ? ' · USDA' : food.source === 'off' ? ' · Open Food Facts' : ''}
           </Text>
           <View className="mt-1.5">
             <MacroLine nutrients={food.nutrients} />
