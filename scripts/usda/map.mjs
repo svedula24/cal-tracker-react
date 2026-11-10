@@ -3,9 +3,11 @@
 
 // USDA nutrient ids → Kalo fields (values in the download are per 100 g).
 // Energy falls back to the Atwater factors some Foundation foods report instead
-// of 1008; sugar falls back to 1063 (Foundation uses it instead of 2000).
+// of 1008 (Specific first: USDA's more accurate figure), then kJ (1062, converted);
+// same order as the backend loader (backend/kalo/usda/nutrients.py). Sugar falls
+// back to 1063 (Foundation uses it instead of 2000).
 export const NUTRIENT_IDS = {
-  calories: [1008, 2047, 2048],
+  calories: [1008, 2048, 2047, 1062],
   protein: [1003],
   carbs: [1005],
   fat: [1004],
@@ -13,7 +15,11 @@ export const NUTRIENT_IDS = {
   sugar: [2000, 1063],
   sodium: [1093], // mg
 };
+// Units are trusted here (the releases are pinned by hash in backend/kalo/usda/datasets.py);
+// the backend mapper checks each record's unitName and is the one that would catch a change.
 export const FIELDS = Object.keys(NUTRIENT_IDS);
+const KJ = 1062;
+const KCAL_PER_KJ = 1 / 4.184;
 
 // Earlier datasets win when two foods share a name.
 export const DATASET_RANK = { Foundation: 0, 'SR Legacy': 1, 'Survey (FNDDS)': 2 };
@@ -33,7 +39,11 @@ export function per100g(food) {
   for (const n of food.foodNutrients ?? []) {
     if (typeof n.amount === 'number' && n.nutrient?.id != null) values.set(n.nutrient.id, n.amount);
   }
-  const pick = (ids) => ids.map((id) => values.get(id)).find((v) => typeof v === 'number');
+  const pick = (ids) => {
+    const id = ids.find((i) => typeof values.get(i) === 'number');
+    if (id === undefined) return undefined;
+    return id === KJ ? values.get(id) * KCAL_PER_KJ : values.get(id);
+  };
   if (pick(NUTRIENT_IDS.calories) === undefined) return null;
   const out = Object.fromEntries(FIELDS.map((k) => [k, Math.max(0, pick(NUTRIENT_IDS[k]) ?? 0)]));
   Object.defineProperty(out, 'reported', { value: FIELDS.filter((k) => pick(NUTRIENT_IDS[k]) !== undefined).length });
