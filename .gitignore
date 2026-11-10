@@ -1,0 +1,61 @@
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files
+.env
+.env.*
+!.env.example
+
+# typescript
+*.tsbuildinfo
+
+example
+
+# generated native folders
+/ios
+/android
+
+# clone-app working artifacts — keep the READMEs/.gitkeep, ignore captured images
+docs/screenshots/*
+!docs/screenshots/README.md
+docs/design-references/*
+!docs/design-references/.gitkeep
+
+# diff-loop render output (generated)
+docs/diff/
+
+# internal launch planning (not for public template)
+LAUNCH_PLAN.md
+TOMORROW.md
+
+# verification harness output (generated)
+e2e/shots/
