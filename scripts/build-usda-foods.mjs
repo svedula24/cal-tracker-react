@@ -38,6 +38,10 @@ try {
   }
 
   const rows = buildRows(foods);
+  // A schema change in a new USDA release shows up as a collapse in usable rows;
+  // refuse to overwrite the bundled data with that. (13,394 foods as of 2026-10.)
+  const MIN_ROWS = 12000;
+  if (rows.length < MIN_ROWS) throw new Error(`only ${rows.length} usable foods (expected ≥ ${MIN_ROWS}); not writing ${OUT}`);
   const out = {
     source: 'USDA FoodData Central (public domain)',
     releases: DATASETS.map((d) => d.file.replace('FoodData_Central_', '')),
