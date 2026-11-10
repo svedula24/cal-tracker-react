@@ -18,7 +18,6 @@ const Separator = () => <View className="h-2.5" />;
 
 export default function FoodDatabase() {
   const [query, setQuery] = useState('');
-  const [openId, setOpenId] = useState<string | null>(null);
   const saved = useSavedFoods();
   const savedIds = useMemo(() => new Set(saved.items.map((s) => s.id)), [saved.items]);
 
@@ -88,8 +87,6 @@ export default function FoodDatabase() {
         renderItem={({ item }) => (
           <FoodRow
             food={item}
-            expanded={openId === item.id}
-            onToggle={() => setOpenId(openId === item.id ? null : item.id)}
             trailing={<BookmarkToggle name={item.name} saved={savedIds.has(item.id)} onPress={() => toggleSaved(item)} />}
           />
         )}

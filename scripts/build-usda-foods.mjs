@@ -47,7 +47,7 @@ try {
   const out = {
     source: 'USDA FoodData Central (public domain)',
     releases: DATASETS.map((d) => d.file.replace('FoodData_Central_', '')),
-    columns: ['fdcId', 'name', 'serving', ...FIELDS],
+    columns: ['fdcId', 'name', `per100g[${FIELDS.join(',')}]`, 'portions[[label,grams]]'],
     rows,
   };
   const byId = new Map(rows.map((r) => [r[0], r]));

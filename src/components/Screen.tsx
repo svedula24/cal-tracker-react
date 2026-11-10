@@ -5,6 +5,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { tokens } from '@/lib/tokens';
 
+/** Back if there is history, else Home (a screen opened by URL has none). */
+export const goBack = () => (router.canGoBack() ? router.back() : router.replace('/'));
+
 /** Pushed-screen chrome: back chevron + large title, then content. */
 export function PushedScreen({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
@@ -13,7 +16,7 @@ export function PushedScreen({ title, right, children }: { title: string; right?
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Back"
-          onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+          onPress={goBack}
           className="h-10 w-10 items-center justify-center rounded-full bg-card"
         >
           <ChevronLeft size={24} color={tokens.colors.foreground} />

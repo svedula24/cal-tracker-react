@@ -44,18 +44,22 @@ const SKIP_UNITS = new Set(['RACC', 'undetermined']);
 // Portions that are real but make poor defaults; used only when nothing else exists.
 const AVOID = /guideline amount|\bfl oz\b|as ingredient|\bspray\b|miniature|\bnlea\b|\bpackage\b|\bcontainer \(.*lb/i;
 
+const MAX_PORTIONS = 8;
+
 /**
- * The food's default serving as { label, grams }: of its named portions, the one
- * closest to 100 g (honey → 1 tbsp, not 1 cup; banana → 1 banana), skipping
- * poor defaults like "1 fl oz" or "Guideline amount…" when a better portion
- * exists (milk → 1 cup), else 100 g.
+ * The food's named portions as { label, grams }, cleaned and de-duplicated, with
+ * the default first: of the named portions, the one closest to 100 g (honey →
+ * 1 tbsp, not 1 cup; banana → 1 banana), skipping poor defaults like "1 fl oz"
+ * or "Guideline amount…" when a better portion exists (milk → 1 cup). The rest
+ * keep USDA's order. Empty when the food has no usable portion.
  */
-export function defaultServing(food) {
-  const portions = [...(food.foodPortions ?? [])]
+export function portionsOf(food) {
+  const raw = [...(food.foodPortions ?? [])]
     .filter((p) => typeof p.gramWeight === 'number' && p.gramWeight > 0)
     .sort((a, b) => (a.sequenceNumber ?? 99) - (b.sequenceNumber ?? 99));
+  const seen = new Set();
   const candidates = [];
-  for (const p of portions) {
+  for (const p of raw) {
     let label = '';
     if (p.portionDescription) {
       // FNDDS: "1 banana split"; skip the catch-all "Quantity not specified".
@@ -70,12 +74,20 @@ export function defaultServing(food) {
       label = [qty, unit, modifier && unit ? `(${modifier})` : modifier].filter(Boolean).join(' ');
     }
     label = label.replace(/\s+/g, ' ').replace(/\s+,/g, ',').trim();
-    if (label && !/^\d+$/.test(label)) candidates.push({ label, grams: p.gramWeight });
+    // De-dup as the app's chips show them: "package" and "1 package" are one.
+    const key = label.replace(/^1 (?=\D)/, '').toLowerCase();
+    // 1 decimal, or 2 under a gram (a saccharin tablet is 0.04 g); a portion that
+    // still rounds to 0 g would compute to nothing, so it's left out.
+    const grams = round(p.gramWeight, p.gramWeight < 1 ? 2 : 1);
+    if (!label || /^\d+$/.test(label) || seen.has(key) || grams <= 0) continue;
+    seen.add(key);
+    candidates.push({ label, grams });
   }
-  if (!candidates.length) return { label: '100 g', grams: 100 };
+  if (!candidates.length) return [];
   const good = candidates.filter((c) => !AVOID.test(c.label));
   // Stable sort keeps USDA's own order between equally close portions.
-  return (good.length ? good : candidates).sort((a, b) => Math.abs(a.grams - 100) - Math.abs(b.grams - 100))[0];
+  const first = [...(good.length ? good : candidates)].sort((a, b) => Math.abs(a.grams - 100) - Math.abs(b.grams - 100))[0];
+  return [first, ...candidates.filter((c) => c !== first)].slice(0, MAX_PORTIONS);
 }
 
 /** USDA names minus internal program notes. */
@@ -86,34 +98,24 @@ export const cleanName = (s) =>
     .trim();
 
 /**
- * One compact row ([id, name, serving, calories, protein, carbs, fat, fiber, sugar,
- * sodium], nutrients scaled to the default serving) plus a completeness score
- * used to pick between same-named records. Null when the food can't be logged.
+ * One compact row: [fdcId, name, per-100 g nutrients [calories, protein, carbs,
+ * fat, fiber, sugar, sodium], portions [[label, grams], …] (default first)], plus
+ * a completeness score used to pick between same-named records. Null when the
+ * food can't be logged. Nutrients keep 2 decimals so any measurement (a portion,
+ * ounces, grams) scales accurately; the app rounds for display.
  */
 export function analyze(food) {
   const n = per100g(food);
   if (!n || !food.description) return null;
-  const { label, grams } = defaultServing(food);
-  const hasPortion = label !== '100 g';
-  const serving = hasPortion ? `${label} (${round(grams, grams < 10 ? 1 : 0)} g)` : label;
-  // score = how complete the record is: nutrients reported, then a real portion.
-  return { row: makeRow(food, n, serving, grams), score: n.reported * 2 + (hasPortion ? 1 : 0) };
-}
-
-function makeRow(food, n, serving, grams) {
-  const f = grams / 100;
-  return [
+  const portions = portionsOf(food);
+  const row = [
     food.fdcId,
     cleanName(food.description),
-    serving,
-    round(n.calories * f),
-    round(n.protein * f, 1),
-    round(n.carbs * f, 1),
-    round(n.fat * f, 1),
-    round(n.fiber * f, 1),
-    round(n.sugar * f, 1),
-    round(n.sodium * f),
+    FIELDS.map((k) => round(n[k], k === 'sodium' ? 0 : 2)),
+    portions.map((p) => [p.label, p.grams]),
   ];
+  // score = how complete the record is: nutrients reported, then a real portion.
+  return { row, score: n.reported * 2 + (portions.length ? 1 : 0) };
 }
 
 /**
