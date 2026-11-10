@@ -1,6 +1,7 @@
 import { Plus } from 'lucide-react-native';
 import { useRef, useState } from 'react';
 import { ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { KaloLogo } from '@/components/KaloMark';
@@ -118,7 +119,11 @@ export default function Home() {
                 </Text>
               </View>
             ) : (
-              d.entries.map((e) => <EntryCard key={e.id} entry={e} onDelete={() => remove(e.id)} />)
+              d.entries.map((e) => (
+                <Animated.View key={e.id} entering={FadeInDown.duration(260)} exiting={FadeOut.duration(160)} layout={LinearTransition.duration(220)}>
+                  <EntryCard entry={e} onDelete={() => remove(e.id)} />
+                </Animated.View>
+              ))
             )}
           </View>
         </ScrollView>

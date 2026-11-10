@@ -1,4 +1,4 @@
-import { Pressable } from 'react-native';
+import { Press } from '@/components/Press';
 
 /** Bottom space scroll content leaves free for the floating + button. */
 export const BOTTOM_SPACE = 110;
@@ -9,7 +9,8 @@ export const fabBottom = (inset: number) => (inset > 0 ? Math.max(12, inset - 4)
 /** Black round floating button (the + / X of the add menu). */
 export function Fab({ onPress, label, children }: { onPress: () => void; label: string; children: React.ReactNode }) {
   return (
-    <Pressable
+    <Press
+      scale={0.9}
       accessibilityRole="button"
       accessibilityLabel={label}
       onPress={onPress}
@@ -17,6 +18,6 @@ export function Fab({ onPress, label, children }: { onPress: () => void; label: 
       style={{ shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 10, shadowOffset: { width: 0, height: 4 } }}
     >
       {children}
-    </Pressable>
+    </Press>
   );
 }

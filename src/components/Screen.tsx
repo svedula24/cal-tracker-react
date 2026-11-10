@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { Press } from '@/components/Press';
 import { tokens } from '@/lib/tokens';
 
 /** Back if there is history, else Home (a screen opened by URL has none). */
@@ -13,14 +14,14 @@ export function PushedScreen({ title, right, children }: { title: string; right?
   return (
     <SafeAreaView edges={['top']} className="flex-1 bg-background">
       <View className="flex-row items-center px-4 pb-2 pt-1">
-        <Pressable
+        <Press
           accessibilityRole="button"
           accessibilityLabel="Back"
           onPress={goBack}
           className="h-10 w-10 items-center justify-center rounded-full bg-card"
         >
           <ChevronLeft size={24} color={tokens.colors.foreground} />
-        </Pressable>
+        </Press>
         <Text className="ml-3 flex-1 text-[22px] font-bold text-foreground">{title}</Text>
         {right}
       </View>

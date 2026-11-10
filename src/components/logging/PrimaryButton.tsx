@@ -1,4 +1,6 @@
-import { Pressable, Text } from 'react-native';
+import { Text } from 'react-native';
+
+import { Press } from '@/components/Press';
 
 /** Black pill button (~52px), white label. */
 export function PrimaryButton({
@@ -15,15 +17,15 @@ export function PrimaryButton({
   className?: string;
 }) {
   return (
-    <Pressable
+    <Press
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel ?? label}
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      className={`h-[52px] items-center justify-center rounded-full px-6 ${disabled ? 'bg-faint' : 'bg-foreground active:opacity-80'} ${className}`}
+      className={`h-[52px] items-center justify-center rounded-full px-6 ${disabled ? 'bg-faint' : 'bg-foreground'} ${className}`}
     >
       <Text className="text-[16px] font-semibold text-card">{label}</Text>
-    </Pressable>
+    </Press>
   );
 }

@@ -1,9 +1,10 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { Apple, ArrowLeft, Bookmark, Candy, ChevronDown, ChevronRight, Droplet, Drumstick, Ellipsis, Flame, Pencil, Soup, Wheat } from 'lucide-react-native';
 import { useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Press } from '@/components/Press';
 import { cardShadow, goBack } from '@/components/Screen';
 import type { Food, Portion } from '@/data/foods';
 import { type Entry, newEntry, useEntries, useSavedFoods } from '@/lib/data';
@@ -51,9 +52,9 @@ export default function Nutrition() {
     <SafeAreaView className="flex-1 items-center justify-center bg-background px-10">
       <Text className="text-[20px] font-bold text-foreground">{loading ? 'Loading…' : 'Entry not found'}</Text>
       {loading ? null : (
-        <Pressable accessibilityRole="button" accessibilityLabel="Go back" onPress={goBack} className="mt-5 rounded-full bg-fab px-6 py-3">
+        <Press accessibilityRole="button" accessibilityLabel="Go back" onPress={goBack} className="mt-5 rounded-full bg-fab px-6 py-3">
           <Text className="font-semibold text-white">Go back</Text>
-        </Pressable>
+        </Press>
       )}
     </SafeAreaView>
   );
@@ -124,7 +125,7 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
         </View>
         {menu && entry ? (
           <View className="absolute right-[18px] top-[60px] z-10 rounded-2xl border border-border bg-card px-2 py-1" style={cardShadow}>
-            <Pressable
+            <Press
               accessibilityRole="button"
               accessibilityLabel="Delete entry"
               onPress={() => {
@@ -134,7 +135,7 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
               className="px-4 py-3"
             >
               <Text className="text-[16px] font-medium text-bad">Delete entry</Text>
-            </Pressable>
+            </Press>
           </View>
         ) : null}
 
@@ -155,14 +156,14 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
               style={{ fontSize: name.length > 20 ? 24 : 30, lineHeight: name.length > 20 ? 30 : 36, outlineStyle: 'none' } as object}
             />
             {base ? (
-              <Pressable
+              <Press
                 accessibilityRole="button"
                 accessibilityLabel={isSaved ? `Unsave ${base.name}` : `Save ${base.name}`}
                 onPress={() => (isSaved ? saved.remove(base.id) : saved.add({ id: base.id, food: base }))}
                 hitSlop={8}
               >
                 <Bookmark size={28} color={c.foreground} fill={isSaved ? c.foreground : 'transparent'} strokeWidth={2.2} />
-              </Pressable>
+              </Press>
             ) : null}
           </View>
 
@@ -171,7 +172,7 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
             {measurements.map((m) => {
               const on = m.label === measure.label;
               return (
-                <Pressable
+                <Press
                   key={m.label}
                   accessibilityRole="button"
                   accessibilityLabel={`Measure in ${chipLabel(m)}`}
@@ -182,7 +183,7 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
                   <Text className={`text-[18px] ${on ? 'font-semibold text-card' : 'text-foreground'}`} numberOfLines={1}>
                     {chipLabel(m)}
                   </Text>
-                </Pressable>
+                </Press>
               );
             })}
           </ScrollView>
@@ -234,7 +235,7 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
           </ScrollView>
           <View className="mt-[12px] flex-row justify-center" style={{ gap: 7 }}>
             {[0, 1].map((i) => (
-              <Pressable
+              <Press
                 key={i}
                 accessibilityRole="button"
                 accessibilityLabel={`Page ${i + 1}`}
@@ -249,10 +250,10 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
             ))}
           </View>
 
-          <Pressable accessibilityRole="button" accessibilityLabel="Other nutrition facts" accessibilityState={{ expanded: more }} onPress={() => setMore((m) => !m)} className="mt-[30px] flex-row items-center justify-between">
+          <Press accessibilityRole="button" accessibilityLabel="Other nutrition facts" accessibilityState={{ expanded: more }} onPress={() => setMore((m) => !m)} className="mt-[30px] flex-row items-center justify-between">
             <Text className="text-[24px] font-semibold text-foreground">Other nutrition facts</Text>
             {more ? <ChevronDown size={24} color={c.foreground} /> : <ChevronRight size={24} color={c.foreground} />}
-          </Pressable>
+          </Press>
           {more ? (
             <View className="mt-[8px] rounded-[22px] border border-border bg-card px-5">
               {[...MACROS, ...MICROS].map(({ key, label, unit }, i) => (
@@ -276,17 +277,17 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
       </SafeAreaView>
 
       <View className="absolute inset-x-0 bottom-0 bg-background px-[22px] pt-3" style={{ paddingBottom: Math.max(insets.bottom, 16) }}>
-        <Pressable
+        <Press
           accessibilityRole="button"
           accessibilityLabel="Done"
           accessibilityState={{ disabled: !valid }}
           aria-disabled={!valid}
           disabled={!valid}
           onPress={done}
-          className={`h-[56px] items-center justify-center rounded-full ${valid ? 'bg-fab active:opacity-80' : 'bg-faint'}`}
+          className={`h-[56px] items-center justify-center rounded-full ${valid ? 'bg-fab' : 'bg-faint'}`}
         >
           <Text className="text-[20px] font-semibold text-white">Done</Text>
-        </Pressable>
+        </Press>
       </View>
     </View>
   );
@@ -294,9 +295,9 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
 
 function RoundButton({ label, onPress, children }: { label: string; onPress: () => void; children: React.ReactNode }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} className="h-[46px] w-[46px] items-center justify-center rounded-full bg-chip">
+    <Press accessibilityRole="button" accessibilityLabel={label} onPress={onPress} className="h-[46px] w-[46px] items-center justify-center rounded-full bg-chip">
       {children}
-    </Pressable>
+    </Press>
   );
 }
 

@@ -1,6 +1,7 @@
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
+import { Press } from '@/components/Press';
 import { cardShadow } from '@/components/Screen';
 import { Ring } from '@/components/Ring';
 import { dayBudget, useDayLogs, useEntries, useGoals } from '@/lib/data';
@@ -22,7 +23,7 @@ export function WeekStrip({ selected, onSelect, todayProgress }: { selected: str
         const eaten = sum(entries.filter((e) => e.date === d.key)).calories;
         const status = dayStatus(eaten, dayBudget(goals.calories, logs.find((l) => l.id === d.key)));
         return (
-          <Pressable
+          <Press
             key={d.key}
             disabled={d.isFuture}
             accessibilityRole="button"
@@ -55,7 +56,7 @@ export function WeekStrip({ selected, onSelect, todayProgress }: { selected: str
                 <Text className={`text-[15px] ${d.isFuture ? 'text-faint' : 'text-foreground'}`}>{d.day}</Text>
               </View>
             )}
-          </Pressable>
+          </Press>
         );
       })}
     </View>
