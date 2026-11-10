@@ -13,6 +13,7 @@ import {
   sum,
 } from '@/lib/nutrition';
 import { foodById, type Food } from '@/data/foods';
+import { PAST_DAY_FOODS, SAVED_FOOD_IDS } from '@/lib/seedFoods';
 
 export type Entry = {
   id: string;
@@ -57,14 +58,7 @@ const todaySeed: [string, number, number, Nutrients][] = [
 ];
 
 // Previous five days: logged, but under goal (red rings in the week strip).
-// Real USDA foods by FoodData Central id (src/data/usda-foods.json).
-const pastSeed: [string, number, number, string][] = [
-  ['Oatmeal', 8, 10, 'usda:2708383'],
-  ['Banana', 8, 15, 'usda:2709224'],
-  ['Chicken Burrito', 13, 0, 'usda:2708546'],
-  ['Brown Rice', 19, 5, 'usda:2708410'],
-  ['Greek Yogurt (plain)', 21, 0, 'usda:330137'],
-];
+// Real USDA foods (src/lib/seedFoods.ts; a test checks they exist).
 
 function seedEntries(): Entry[] {
   const out: Entry[] = todaySeed.map(([name, h, m, nutrients]) => ({
@@ -72,7 +66,7 @@ function seedEntries(): Entry[] {
   }));
   for (let back = 1; back <= 5; back++) {
     const d = addDays(now, -back);
-    for (const [name, h, m, foodId] of pastSeed) {
+    for (const [name, h, m, foodId] of PAST_DAY_FOODS) {
       const food = foodById.get(foodId);
       if (!food) continue; // a later USDA release may drop or renumber a food
       out.push({ id: makeId(), date: dayKey(d), time: at(d, h, m), name, servings: back % 2 ? 1.5 : 1.25, nutrients: food.nutrients, foodId });
@@ -102,7 +96,7 @@ export const STREAK_DAYS = 16;
 const entriesSeed = seedEntries();
 export const useEntries = () => useCollection<Entry>('entries', entriesSeed);
 export const useDayLogs = () => useCollection<DayLog>('dayLogs', dayLogSeed);
-const savedSeed: SavedFood[] = ['usda:2708118', 'usda:330137', 'usda:169640'] // Clif Bar, Greek yogurt, honey
+const savedSeed: SavedFood[] = SAVED_FOOD_IDS
   .map((id) => foodById.get(id))
   .filter((f): f is Food => !!f)
   .map((food) => ({ id: food.id, food }));

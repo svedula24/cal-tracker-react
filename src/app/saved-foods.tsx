@@ -1,6 +1,6 @@
 import { router } from 'expo-router';
 import { Bookmark, Trash2 } from 'lucide-react-native';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
@@ -14,14 +14,10 @@ import { tokens } from '@/lib/tokens';
 export default function SavedFoods() {
   const saved = useSavedFoods();
   const [openId, setOpenId] = useState<string | null>(null);
-  const list = saved.items.map((s) => foodById.get(s.id) ?? s.food).filter((f): f is Food => !!f);
-
-  // Saved foods from before the USDA data (old ids, no snapshot) can't be shown
-  // or un-bookmarked anywhere, so clear them out instead of leaving them stuck.
-  const unresolved = saved.items.filter((s) => !foodById.has(s.id) && !s.food).map((s) => s.id);
-  useEffect(() => {
-    unresolved.forEach((id) => saved.remove(id));
-  }, [unresolved.join()]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The snapshot wins: if a USDA refresh ever reuses an id for another food, the
+  // bookmark still shows what was saved. Entries from before the USDA data (old
+  // ids, no snapshot) resolve to nothing and are simply not listed.
+  const list = saved.items.map((s) => s.food ?? foodById.get(s.id)).filter((f): f is Food => !!f);
 
   if (list.length === 0) {
     return (

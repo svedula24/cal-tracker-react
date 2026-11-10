@@ -24,7 +24,6 @@ export const flows = [
       await page.getByText('1 banana (126 g) · 122 cal').waitFor({ timeout: 3000 });
       const first = page.getByRole('button', { name: /./ }).filter({ hasText: 'cal' }).first();
       if ((await first.innerText()).split('\n')[0] !== 'Banana, raw') throw new Error(`first result was ${(await first.innerText()).split('\n')[0]}`);
-      await page.getByText('1 banana (126 g) · 122 cal').waitFor({ timeout: 3000 });
       await page.getByLabel('Search foods').fill('greek yog');
       await page.getByText('Yogurt, Greek, plain, nonfat', { exact: true }).waitFor({ timeout: 3000 });
     },
