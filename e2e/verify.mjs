@@ -79,7 +79,8 @@ try {
 const page = await browser.newPage({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2 });
 page.on('pageerror', (e) => errors.push(`[${where}] pageerror: ${e.message}`));
 page.on('console', (m) => {
-  if (m.type() === 'error') errors.push(`[${where}] console.error: ${m.text().slice(0, 200)}`);
+  // Resource errors carry the failing URL in location(), not in the text.
+  if (m.type() === 'error') errors.push(`[${where}] console.error: ${m.text().slice(0, 200)} (${m.location().url})`);
 });
 
 // 1. Every route renders clean.
@@ -107,7 +108,11 @@ for (const f of flows) {
     ok = false;
     msg = e.message;
   }
-  flowResults.push({ name: f.name, ok, msg, errors: errors.length - before });
+  // A flow may declare console errors it causes on purpose (e.g. a blocked data load).
+  const own = errors.slice(before);
+  const unexpected = f.allowErrors ? own.filter((e) => !f.allowErrors.test(e)) : own;
+  errors.splice(before, own.length, ...unexpected);
+  flowResults.push({ name: f.name, ok, msg, errors: unexpected.length });
 }
 
 await browser.close();

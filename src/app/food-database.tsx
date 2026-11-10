@@ -1,12 +1,20 @@
 import { Search, X } from 'lucide-react-native';
-import { useMemo, useState } from 'react';
-import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native';
 
 import { BookmarkToggle, FoodRow } from '@/components/logging/FoodRow';
 import { PushedScreen } from '@/components/Screen';
-import { foods } from '@/data/foods';
+import { type Food, loadFoods } from '@/data/foods';
 import { useSavedFoods } from '@/lib/data';
+import { createFoodIndex } from '@/lib/foodIndex';
 import { tokens } from '@/lib/tokens';
+
+// Built on first open (not at app start): ~13k USDA foods, searched in memory, offline.
+type Index = { search: ReturnType<typeof createFoodIndex>; count: string; source: string };
+let built: Index | null = null; // kept across opens, so the screen never re-shows the spinner
+type Load = { index: Index } | 'loading' | 'failed';
+
+const Separator = () => <View className="h-2.5" />;
 
 export default function FoodDatabase() {
   const [query, setQuery] = useState('');
@@ -14,10 +22,37 @@ export default function FoodDatabase() {
   const saved = useSavedFoods();
   const savedIds = useMemo(() => new Set(saved.items.map((s) => s.id)), [saved.items]);
 
-  const q = query.trim().toLowerCase();
-  const results = useMemo(() => (q ? foods.filter((f) => f.name.toLowerCase().includes(q)) : foods), [q]);
+  // The database loads once the screen is up. The timeout returns to the event
+  // loop first, so the heavy work (on iOS/Android the bundled JSON is evaluated
+  // synchronously) can't run before this screen's first frame is committed. A
+  // failed load shows a Retry button, never an endless spinner.
+  const [load, setLoad] = useState<Load>(() => (built ? { index: built } : 'loading'));
+  useEffect(() => {
+    if (load !== 'loading') return;
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      loadFoods().then(
+        ({ foods, source }) => {
+          built ??= { search: createFoodIndex(foods), count: foods.length.toLocaleString('en-US'), source };
+          if (!cancelled) setLoad({ index: built });
+        },
+        () => !cancelled && setLoad('failed'),
+      );
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [load]);
+  const index = typeof load === 'object' ? load.index : null;
 
-  const toggleSaved = (id: string) => (savedIds.has(id) ? saved.remove(id) : saved.add({ id }));
+  // Typing stays responsive; the scan runs on the deferred value.
+  const q = useDeferredValue(query).trim();
+  const results = useMemo(() => (index ? index.search(q) : []), [q, index]);
+  const count = index?.count ?? '';
+
+  // Saved with a snapshot, so a later data refresh can't lose it.
+  const toggleSaved = (food: Food) => (savedIds.has(food.id) ? saved.remove(food.id) : saved.add({ id: food.id, food }));
 
   return (
     <PushedScreen title="Food Database">
@@ -26,7 +61,7 @@ export default function FoodDatabase() {
           <Search size={18} color={tokens.colors.muted} />
           <TextInput
             accessibilityLabel="Search foods"
-            placeholder="Search foods"
+            placeholder={count ? `Search ${count} foods` : 'Search foods'}
             placeholderTextColor={tokens.colors.muted}
             value={query}
             onChangeText={setQuery}
@@ -48,18 +83,37 @@ export default function FoodDatabase() {
         data={results}
         keyExtractor={(f) => f.id}
         keyboardShouldPersistTaps="handled"
-        contentContainerClassName="gap-2.5 px-[22px] pb-10"
-        ListEmptyComponent={
-          <Text className="mt-10 text-center text-[15px] text-muted">No foods match "{query.trim()}"</Text>
-        }
+        contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: 40 }}
+        ItemSeparatorComponent={Separator}
         renderItem={({ item }) => (
           <FoodRow
             food={item}
             expanded={openId === item.id}
             onToggle={() => setOpenId(openId === item.id ? null : item.id)}
-            trailing={<BookmarkToggle name={item.name} saved={savedIds.has(item.id)} onPress={() => toggleSaved(item.id)} />}
+            trailing={<BookmarkToggle name={item.name} saved={savedIds.has(item.id)} onPress={() => toggleSaved(item)} />}
           />
         )}
+        ListEmptyComponent={
+          index ? (
+            <Text className="mt-10 px-6 text-center text-[15px] text-muted">
+              {q ? `No foods match "${q}"` : `Search ${count} foods from USDA FoodData Central. Works offline.`}
+            </Text>
+          ) : load === 'failed' ? (
+            <View className="mt-10 items-center px-6">
+              <Text className="text-center text-[15px] text-muted">Couldn&apos;t load the food database.</Text>
+              <Pressable accessibilityRole="button" accessibilityLabel="Retry" onPress={() => setLoad('loading')} className="mt-3 rounded-full bg-fab px-5 py-2.5">
+                <Text className="text-[15px] font-semibold text-white">Retry</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View className="mt-10 items-center" accessibilityLabel="Loading foods">
+              <ActivityIndicator color={tokens.colors.muted} />
+            </View>
+          )
+        }
+        ListFooterComponent={
+          results.length ? <Text className="mt-4 text-center text-[11px] text-faint">Data: {index?.source}</Text> : null
+        }
       />
     </PushedScreen>
   );

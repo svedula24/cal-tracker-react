@@ -43,10 +43,12 @@ export class Collection<T extends WithId> {
   // early add neither vanishes nor overwrites what was saved.
   private pending: ((items: T[]) => T[])[] = [];
 
-  constructor(
-    private readonly key: string,
-    seed: T[],
-  ) {
+  // A plain field (not a constructor parameter property) so Node can strip the
+  // types and unit-test this file: tests/store.test.mjs.
+  private readonly key: string;
+
+  constructor(key: string, seed: T[], migrate?: (items: T[]) => T[]) {
+    this.key = key;
     this.items = seed;
     // Hydrate once from storage without blocking render. On web, AsyncStorage is
     // localStorage; guard SSR/prerender where `window` is absent.
@@ -67,11 +69,23 @@ export class Collection<T extends WithId> {
           const queued = this.pending;
           this.pending = [];
           this.ready = true;
+          let next = queued.reduce((acc, op) => op(acc), base);
+          // Upgrade older stored data once, at load, after replaying early writes
+          // (so the migration also sees them). A changed result is saved; a
+          // migration that throws leaves the data as it was, never stuck.
+          let changed = false;
+          if (migrate) {
+            try {
+              const migrated = migrate(next);
+              changed = migrated !== next;
+              next = migrated;
+            } catch {}
+          }
           // Nothing stored yet: save the seed now, so date-relative seed data is
           // fixed at first launch instead of being rebuilt on every cold start.
-          if (queued.length || raw == null) this.commit(queued.reduce((acc, op) => op(acc), base));
+          if (queued.length || raw == null || changed) this.commit(next);
           else {
-            this.items = base;
+            this.items = next;
             this.emit();
           }
         });
@@ -121,10 +135,10 @@ const collections = new Map<string, Collection<WithId>>();
  * one instance, so a write anywhere re-renders all of them. Reading/writing
  * storage directly would persist but not re-render.
  */
-export function getCollection<T extends WithId>(key: string, seed: T[]): Collection<T> {
+export function getCollection<T extends WithId>(key: string, seed: T[], migrate?: (items: T[]) => T[]): Collection<T> {
   let c = collections.get(key);
   if (!c) {
-    c = new Collection<T>(key, seed) as unknown as Collection<WithId>;
+    c = new Collection<T>(key, seed, migrate) as unknown as Collection<WithId>;
     collections.set(key, c);
   }
   return c as unknown as Collection<T>;
@@ -133,13 +147,14 @@ export function getCollection<T extends WithId>(key: string, seed: T[]): Collect
 /**
  * A persisted array with CRUD, shared across every screen that uses the same
  * `key`. Items must carry a string `id`. `seed` is used only the first time a
- * given key is initialized (nothing stored yet).
+ * given key is initialized (nothing stored yet). `migrate` upgrades older stored
+ * data once at load; return the same array when there's nothing to change.
  *
  *   const { items, add, update, remove } = useCollection<Task>('tasks');
  *   add({ id: makeId(), title: 'Buy milk', done: false }); // saves + syncs everywhere
  */
-export function useCollection<T extends { id: string }>(key: string, seed: T[] = []) {
-  const store = getCollection<T>(key, seed);
+export function useCollection<T extends { id: string }>(key: string, seed: T[] = [], migrate?: (items: T[]) => T[]) {
+  const store = getCollection<T>(key, seed, migrate);
   const items = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
   return { items, ready: store.ready, add: store.add, update: store.update, remove: store.remove };
 }

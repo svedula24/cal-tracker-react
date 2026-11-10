@@ -12,7 +12,9 @@ import {
   stepsToCalories,
   sum,
 } from '@/lib/nutrition';
-import { foodById, type Food } from '@/data/foods';
+import type { Food } from '@/data/foods';
+import { migrateSavedFoods, type SavedFood } from '@/lib/savedFoods';
+import { PAST_DAY_FOODS, SAVED_FOODS } from '@/lib/seedFoods';
 
 export type Entry = {
   id: string;
@@ -25,7 +27,6 @@ export type Entry = {
   photo?: string;
 };
 export type DayLog = { id: string; steps: number; waterCups: number; rollover: number }; // id = date
-export type SavedFood = { id: string }; // id = food id
 
 // ── Seed (dated relative to first launch) ────────────────────────────────────
 const n = (calories: number, protein: number, carbs: number, fat: number, fiber: number, sugar: number, sodium: number): Nutrients => ({
@@ -55,14 +56,7 @@ const todaySeed: [string, number, number, Nutrients][] = [
 ];
 
 // Previous five days: logged, but under goal (red rings in the week strip).
-const pastSeed: [string, number, number, string][] = [
-  ['Oatmeal', 8, 10, 'oats'],
-  ['Banana', 8, 15, 'banana'],
-  ['Chicken Burrito', 13, 0, 'burrito'],
-  ['Salmon Fillet', 19, 0, 'salmon'],
-  ['Brown Rice', 19, 5, 'brown-rice'],
-  ['Greek Yogurt (plain)', 21, 0, 'greek-yogurt'],
-];
+// Real USDA foods (src/lib/seedFoods.ts; a test checks they exist).
 
 function seedEntries(): Entry[] {
   const out: Entry[] = todaySeed.map(([name, h, m, nutrients]) => ({
@@ -70,9 +64,8 @@ function seedEntries(): Entry[] {
   }));
   for (let back = 1; back <= 5; back++) {
     const d = addDays(now, -back);
-    for (const [name, h, m, foodId] of pastSeed) {
-      const food = foodById.get(foodId)!;
-      out.push({ id: makeId(), date: dayKey(d), time: at(d, h, m), name, servings: back % 2 ? 1.5 : 1.25, nutrients: food.nutrients, foodId });
+    for (const [name, h, m, food] of PAST_DAY_FOODS) {
+      out.push({ id: makeId(), date: dayKey(d), time: at(d, h, m), name, servings: back % 2 ? 1.5 : 1.25, nutrients: food.nutrients, foodId: food.id });
     }
   }
   return out;
@@ -99,7 +92,11 @@ export const STREAK_DAYS = 16;
 const entriesSeed = seedEntries();
 export const useEntries = () => useCollection<Entry>('entries', entriesSeed);
 export const useDayLogs = () => useCollection<DayLog>('dayLogs', dayLogSeed);
-export const useSavedFoods = () => useCollection<SavedFood>('savedFoods', [{ id: 'protein-bar' }, { id: 'greek-yogurt' }, { id: 'honey' }]);
+const savedSeed: SavedFood[] = SAVED_FOODS.map((food) => ({ id: food.id, food }));
+
+// Stored entries are cleaned once when the list loads (and saved), so every
+// item has a usable snapshot; see migrateSavedFoods.
+export const useSavedFoods = () => useCollection<SavedFood>('savedFoods', savedSeed, migrateSavedFoods);
 
 export function useGoals() {
   const { items } = useCollection<Goals>('goals', goalsSeed);

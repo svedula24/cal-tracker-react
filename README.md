@@ -7,13 +7,28 @@ there is no backend. Data the app keeps is stored on the device.
 
 ## Run
 
-Needs Node 20.19.4+ (22 recommended).
+Needs Node 20.19.4+ for the app; `npm test` needs Node 22.18+ (it imports TypeScript directly).
 
 ```bash
 npm install
 npm run web        # or: npm run ios / npm run android
 npm run verify     # web export + headless check that every route renders and flows pass
+npm test           # unit tests: USDA data mapping and food search (Node's built-in runner)
 ```
+
+## Food database
+
+Food Database searches every generic food in USDA FoodData Central (Foundation
+Foods, SR Legacy and FNDDS, about 13,400 foods), bundled in the app as
+`src/data/usda-foods.json` (1.4 MB). It is loaded the first time Food Database
+opens, not at app start (on web it is a separate chunk; if that fetch fails the
+screen offers Retry). Search runs offline; there are no API calls or keys. USDA
+data is public domain.
+
+`npm run build:foods` downloads the USDA releases, trims them to the fields Kalo
+uses (name, a default serving, calories, macros, fiber, sugar, sodium) and
+rewrites the file. Update the release names in `scripts/build-usda-foods.mjs`
+when USDA publishes new data. Branded/packaged products are not included yet.
 
 ## Build the UI from screenshots
 

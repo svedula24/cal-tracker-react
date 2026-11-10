@@ -25,6 +25,8 @@ jobs:
       - run: npm ci
       - name: Typecheck
         run: npx tsc --noEmit
+      - name: Unit tests
+        run: npm test
       - name: Install Chromium for verify
         run: npx playwright install --with-deps chromium
       - name: Verify (web export, every route renders clean, feature flows pass)
