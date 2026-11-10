@@ -1,89 +1,17 @@
 import type { Nutrients } from '@/lib/nutrition';
 
-export type Food = {
-  id: string;
-  name: string;
-  serving: string;
-  nutrients: Nutrients;
-  /** Where the food came from: bundled list (default), USDA FoodData Central, or Open Food Facts. */
-  source?: 'kalo' | 'usda' | 'off';
-  brand?: string;
-};
+import { rowToFood, type FoodRow } from '@/lib/foodRow';
 
-// [id, name, serving, kcal, protein g, carbs g, fat g, fiber g, sugar g, sodium mg]
-type Row = [string, string, string, number, number, number, number, number, number, number];
+import usda from './usda-foods.json';
 
-// Approximate per-serving values for a small offline food database.
-const rows: Row[] = [
-  ['apple', 'Apple', '1 medium', 95, 0, 25, 0, 4, 19, 2],
-  ['banana', 'Banana', '1 medium', 105, 1, 27, 0, 3, 14, 1],
-  ['orange', 'Orange', '1 medium', 62, 1, 15, 0, 3, 12, 0],
-  ['blueberries', 'Blueberries', '1 cup', 84, 1, 21, 0, 4, 15, 1],
-  ['strawberries', 'Strawberries', '1 cup', 49, 1, 12, 0, 3, 7, 2],
-  ['avocado', 'Avocado', '1/2 fruit', 160, 2, 9, 15, 7, 1, 7],
-  ['broccoli', 'Broccoli', '1 cup', 31, 3, 6, 0, 2, 2, 30],
-  ['spinach', 'Spinach', '2 cups', 14, 2, 2, 0, 1, 0, 48],
-  ['carrot', 'Carrots', '1 cup', 52, 1, 12, 0, 4, 6, 88],
-  ['sweet-potato', 'Sweet Potato', '1 medium', 112, 2, 26, 0, 4, 5, 72],
-  ['potato', 'Baked Potato', '1 medium', 161, 4, 37, 0, 4, 2, 17],
-  ['white-rice', 'White Rice', '1 cup cooked', 205, 4, 45, 0, 1, 0, 2],
-  ['brown-rice', 'Brown Rice', '1 cup cooked', 216, 5, 45, 2, 4, 1, 10],
-  ['quinoa', 'Quinoa', '1 cup cooked', 222, 8, 39, 4, 5, 2, 13],
-  ['oats', 'Oatmeal', '1 cup cooked', 154, 5, 27, 3, 4, 1, 9],
-  ['pasta', 'Spaghetti', '1 cup cooked', 221, 8, 43, 1, 3, 1, 1],
-  ['bagel', 'Plain Bagel', '1 bagel', 277, 11, 55, 1, 2, 5, 430],
-  ['sourdough', 'Sourdough Bread', '1 slice', 120, 4, 23, 1, 1, 1, 200],
-  ['whole-wheat-bread', 'Whole Wheat Bread', '1 slice', 81, 4, 14, 1, 2, 2, 146],
-  ['tortilla', 'Flour Tortilla', '1 large', 218, 6, 36, 5, 2, 2, 470],
-  ['chicken-breast', 'Grilled Chicken Breast', '4 oz', 187, 35, 0, 4, 0, 0, 84],
-  ['salmon', 'Salmon Fillet', '4 oz', 233, 25, 0, 14, 0, 0, 69],
-  ['tuna', 'Canned Tuna', '1 can', 120, 26, 0, 1, 0, 0, 360],
-  ['ground-beef', 'Ground Beef 90/10', '4 oz', 199, 23, 0, 11, 0, 0, 75],
-  ['steak', 'Sirloin Steak', '6 oz', 342, 52, 0, 14, 0, 0, 110],
-  ['turkey', 'Sliced Turkey', '2 oz', 60, 12, 2, 1, 0, 1, 520],
-  ['bacon', 'Bacon', '3 slices', 129, 9, 0, 10, 0, 0, 579],
-  ['egg', 'Egg', '1 large', 72, 6, 0, 5, 0, 0, 71],
-  ['egg-whites', 'Egg Whites', '1/2 cup', 63, 13, 1, 0, 0, 1, 202],
-  ['tofu', 'Firm Tofu', '1/2 cup', 181, 22, 4, 11, 3, 1, 18],
-  ['black-beans', 'Black Beans', '1/2 cup', 114, 8, 20, 0, 8, 0, 1],
-  ['chickpeas', 'Chickpeas', '1/2 cup', 134, 7, 22, 2, 6, 4, 6],
-  ['lentils', 'Lentils', '1/2 cup', 115, 9, 20, 0, 8, 2, 2],
-  ['greek-yogurt', 'Greek Yogurt (plain)', '1 cup', 146, 20, 8, 4, 0, 7, 68],
-  ['milk', 'Whole Milk', '1 cup', 149, 8, 12, 8, 0, 12, 105],
-  ['almond-milk', 'Almond Milk', '1 cup', 39, 1, 3, 3, 1, 0, 189],
-  ['cheddar', 'Cheddar Cheese', '1 oz', 114, 7, 0, 9, 0, 0, 176],
-  ['mozzarella', 'Part-Skim Mozzarella', '1 slice', 80, 7, 1, 5, 0, 0, 175],
-  ['cottage-cheese', 'Cottage Cheese', '1/2 cup', 110, 12, 5, 5, 0, 4, 400],
-  ['peanut-butter', 'Peanut Butter', '2 tbsp', 188, 8, 6, 16, 2, 3, 147],
-  ['almonds', 'Almonds', '1 oz', 164, 6, 6, 14, 4, 1, 0],
-  ['walnuts', 'Walnuts', '1 oz', 185, 4, 4, 18, 2, 1, 1],
-  ['olive-oil', 'Olive Oil', '1 tbsp', 119, 0, 0, 14, 0, 0, 0],
-  ['butter', 'Butter', '1 tbsp', 102, 0, 0, 12, 0, 0, 91],
-  ['honey', 'Honey', '1 tbsp', 64, 0, 17, 0, 0, 17, 1],
-  ['protein-bar', 'Protein Bar', '1 bar', 200, 20, 22, 7, 3, 2, 190],
-  ['whey', 'Whey Protein Shake', '1 scoop', 120, 24, 3, 1, 0, 2, 50],
-  ['granola', 'Granola', '1/2 cup', 299, 7, 33, 15, 4, 12, 15],
-  ['cereal', 'Corn Flakes', '1 cup', 100, 2, 24, 0, 1, 3, 200],
-  ['pizza', 'Cheese Pizza', '1 slice', 285, 12, 36, 10, 2, 4, 640],
-  ['burger', 'Cheeseburger', '1 burger', 535, 30, 40, 28, 2, 8, 1050],
-  ['fries', 'French Fries', 'medium', 365, 4, 48, 17, 4, 0, 246],
-  ['burrito', 'Chicken Burrito', '1 burrito', 690, 40, 75, 24, 8, 4, 1580],
-  ['caesar-salad', 'Caesar Salad', '1 bowl', 360, 10, 14, 30, 3, 3, 760],
-  ['sushi', 'California Roll', '6 pieces', 255, 9, 38, 7, 3, 7, 430],
-  ['ramen', 'Ramen', '1 bowl', 436, 15, 60, 16, 3, 4, 1820],
-  ['latte', 'Whole Milk Latte', '16 oz', 190, 10, 15, 10, 0, 15, 165],
-  ['coffee', 'Black Coffee', '12 oz', 2, 0, 0, 0, 0, 0, 5],
-  ['orange-juice', 'Orange Juice', '1 cup', 112, 2, 26, 0, 1, 21, 2],
-  ['soda', 'Cola', '12 oz can', 140, 0, 39, 0, 0, 39, 45],
-  ['dark-chocolate', 'Dark Chocolate', '1 oz', 170, 2, 13, 12, 3, 7, 6],
-  ['ice-cream', 'Vanilla Ice Cream', '1/2 cup', 137, 2, 16, 7, 1, 14, 53],
-];
+// Kalo's food database: every generic food in USDA FoodData Central
+// (Foundation Foods, SR Legacy, FNDDS), bundled so search works offline.
+// Built by scripts/build-usda-foods.mjs; nutrients are per default serving.
+export type Food = { id: string; name: string; serving: string; nutrients: Nutrients };
 
-export const foods: Food[] = rows.map(([id, name, serving, calories, protein, carbs, fat, fiber, sugar, sodium]) => ({
-  id,
-  name,
-  serving,
-  nutrients: { calories, protein, carbs, fat, fiber, sugar, sodium },
-}));
+export const foods: Food[] = (usda.rows as FoodRow[]).map(rowToFood);
 
 export const foodById = new Map(foods.map((f) => [f.id, f]));
+
+/** Attribution line for the bundled data. */
+export const FOOD_DATA_SOURCE = usda.source;

@@ -25,7 +25,9 @@ export type Entry = {
   photo?: string;
 };
 export type DayLog = { id: string; steps: number; waterCups: number; rollover: number }; // id = date
-export type SavedFood = { id: string; food?: Food }; // id = food id; online foods keep a snapshot
+// id = food id. `food` is a snapshot, so a saved food survives a USDA data
+// refresh that renumbers it (FNDDS ids change between releases).
+export type SavedFood = { id: string; food?: Food };
 
 // ── Seed (dated relative to first launch) ────────────────────────────────────
 const n = (calories: number, protein: number, carbs: number, fat: number, fiber: number, sugar: number, sodium: number): Nutrients => ({
@@ -55,13 +57,13 @@ const todaySeed: [string, number, number, Nutrients][] = [
 ];
 
 // Previous five days: logged, but under goal (red rings in the week strip).
+// Real USDA foods by FoodData Central id (src/data/usda-foods.json).
 const pastSeed: [string, number, number, string][] = [
-  ['Oatmeal', 8, 10, 'oats'],
-  ['Banana', 8, 15, 'banana'],
-  ['Chicken Burrito', 13, 0, 'burrito'],
-  ['Salmon Fillet', 19, 0, 'salmon'],
-  ['Brown Rice', 19, 5, 'brown-rice'],
-  ['Greek Yogurt (plain)', 21, 0, 'greek-yogurt'],
+  ['Oatmeal', 8, 10, 'usda:2708383'],
+  ['Banana', 8, 15, 'usda:2709224'],
+  ['Chicken Burrito', 13, 0, 'usda:2708546'],
+  ['Brown Rice', 19, 5, 'usda:2708410'],
+  ['Greek Yogurt (plain)', 21, 0, 'usda:330137'],
 ];
 
 function seedEntries(): Entry[] {
@@ -71,7 +73,8 @@ function seedEntries(): Entry[] {
   for (let back = 1; back <= 5; back++) {
     const d = addDays(now, -back);
     for (const [name, h, m, foodId] of pastSeed) {
-      const food = foodById.get(foodId)!;
+      const food = foodById.get(foodId);
+      if (!food) continue; // a later USDA release may drop or renumber a food
       out.push({ id: makeId(), date: dayKey(d), time: at(d, h, m), name, servings: back % 2 ? 1.5 : 1.25, nutrients: food.nutrients, foodId });
     }
   }
@@ -99,7 +102,11 @@ export const STREAK_DAYS = 16;
 const entriesSeed = seedEntries();
 export const useEntries = () => useCollection<Entry>('entries', entriesSeed);
 export const useDayLogs = () => useCollection<DayLog>('dayLogs', dayLogSeed);
-export const useSavedFoods = () => useCollection<SavedFood>('savedFoods', [{ id: 'protein-bar' }, { id: 'greek-yogurt' }, { id: 'honey' }]);
+const savedSeed: SavedFood[] = ['usda:2708118', 'usda:330137', 'usda:169640'] // Clif Bar, Greek yogurt, honey
+  .map((id) => foodById.get(id))
+  .filter((f): f is Food => !!f)
+  .map((food) => ({ id: food.id, food }));
+export const useSavedFoods = () => useCollection<SavedFood>('savedFoods', savedSeed);
 
 export function useGoals() {
   const { items } = useCollection<Goals>('goals', goalsSeed);

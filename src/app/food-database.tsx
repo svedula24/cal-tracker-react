@@ -1,13 +1,17 @@
 import { Search, X } from 'lucide-react-native';
-import { useMemo, useState } from 'react';
-import { ActivityIndicator, Pressable, SectionList, Text, TextInput, View } from 'react-native';
+import { useDeferredValue, useMemo, useState } from 'react';
+import { FlatList, Pressable, Text, TextInput, View } from 'react-native';
 
 import { BookmarkToggle, FoodRow } from '@/components/logging/FoodRow';
 import { PushedScreen } from '@/components/Screen';
-import { foods, type Food } from '@/data/foods';
+import { FOOD_DATA_SOURCE, foods, type Food } from '@/data/foods';
 import { useSavedFoods } from '@/lib/data';
-import { OFF_ENABLED, useRemoteFoodSearch } from '@/lib/foodSearch';
+import { createFoodIndex } from '@/lib/foodIndex';
 import { tokens } from '@/lib/tokens';
+
+// Built once: ~13k USDA foods, searched in memory (offline, no API).
+const search = createFoodIndex(foods);
+const COUNT = foods.length.toLocaleString('en-US');
 
 const Separator = () => <View className="h-2.5" />;
 
@@ -17,20 +21,12 @@ export default function FoodDatabase() {
   const saved = useSavedFoods();
   const savedIds = useMemo(() => new Set(saved.items.map((s) => s.id)), [saved.items]);
 
-  const q = query.trim().toLowerCase();
-  const local = useMemo(() => (q ? foods.filter((f) => f.name.toLowerCase().includes(q)) : foods), [q]);
-  const remote = useRemoteFoodSearch(query);
+  // Typing stays responsive; the 13k-food scan runs on the deferred value.
+  const q = useDeferredValue(query).trim();
+  const results = useMemo(() => search(q), [q]);
 
-  // Online foods are saved with a snapshot so Saved foods works offline too.
-  const toggleSaved = (food: Food) =>
-    savedIds.has(food.id) ? saved.remove(food.id) : saved.add(food.source && food.source !== 'kalo' ? { id: food.id, food } : { id: food.id });
-
-  const sections = [
-    ...(local.length ? [{ key: 'kalo', title: q ? 'Kalo foods' : '', data: local }] : []),
-    ...(remote.foods.length ? [{ key: 'online', title: OFF_ENABLED ? 'USDA & Open Food Facts' : 'USDA', data: remote.foods }] : []),
-  ];
-  // Only a finished search can say nothing matched; during an outage the error line explains it.
-  const nothing = !local.length && !remote.foods.length && !remote.loading && remote.errors.length === 0;
+  // Saved with a snapshot, so a later data refresh can't lose it.
+  const toggleSaved = (food: Food) => (savedIds.has(food.id) ? saved.remove(food.id) : saved.add({ id: food.id, food }));
 
   return (
     <PushedScreen title="Food Database">
@@ -39,7 +35,7 @@ export default function FoodDatabase() {
           <Search size={18} color={tokens.colors.muted} />
           <TextInput
             accessibilityLabel="Search foods"
-            placeholder="Search foods"
+            placeholder={`Search ${COUNT} foods`}
             placeholderTextColor={tokens.colors.muted}
             value={query}
             onChangeText={setQuery}
@@ -57,46 +53,27 @@ export default function FoodDatabase() {
           ) : null}
         </View>
       </View>
-      <SectionList
-        sections={sections}
+      <FlatList
+        data={results}
         keyExtractor={(f) => f.id}
         keyboardShouldPersistTaps="handled"
-        stickySectionHeadersEnabled={false}
-        // contentContainerClassName is not mapped for SectionList; use a plain style.
         contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: 40 }}
         ItemSeparatorComponent={Separator}
-        renderSectionHeader={({ section }) =>
-          section.title ? <Text className="mb-2 mt-3 text-[13px] font-semibold uppercase tracking-wide text-muted">{section.title}</Text> : null
-        }
-        renderItem={({ item, section }) => (
+        renderItem={({ item }) => (
           <FoodRow
             food={item}
-            disabled={section.key === 'online' && remote.stale}
             expanded={openId === item.id}
             onToggle={() => setOpenId(openId === item.id ? null : item.id)}
             trailing={<BookmarkToggle name={item.name} saved={savedIds.has(item.id)} onPress={() => toggleSaved(item)} />}
           />
         )}
+        ListEmptyComponent={
+          <Text className="mt-10 px-6 text-center text-[15px] text-muted">
+            {q ? `No foods match "${q}"` : `Search ${COUNT} foods from USDA FoodData Central. Works offline.`}
+          </Text>
+        }
         ListFooterComponent={
-          <View className="mt-4 items-center">
-            {remote.loading ? (
-              <View className="flex-row items-center" accessibilityLabel="Searching online">
-                <ActivityIndicator color={tokens.colors.muted} />
-                <Text className="ml-2 text-[14px] text-muted">Searching online…</Text>
-              </View>
-            ) : null}
-            {nothing && q ? <Text className="mt-6 text-center text-[15px] text-muted">No foods match "{query.trim()}"</Text> : null}
-            {remote.errors.length > 0 && !remote.loading ? (
-              <Text className="mt-2 text-center text-[13px] text-muted">
-                Couldn&apos;t reach {remote.errors.join(' · ')}. Showing what&apos;s available.
-              </Text>
-            ) : null}
-            {q.length >= 2 ? (
-              <Text className="mt-4 text-center text-[11px] text-faint">
-                Data: USDA FoodData Central · Open Food Facts (ODbL). Values per 100 g.
-              </Text>
-            ) : null}
-          </View>
+          results.length ? <Text className="mt-4 text-center text-[11px] text-faint">Data: {FOOD_DATA_SOURCE}</Text> : null
         }
       />
     </PushedScreen>

@@ -17,45 +17,36 @@ export function FoodRow({
   expanded,
   onToggle,
   trailing,
-  disabled = false,
 }: {
   food: Food;
   expanded: boolean;
   onToggle: () => void;
   trailing?: React.ReactNode;
-  /** Out-of-date result: shown dimmed, nothing in it can be tapped. */
-  disabled?: boolean;
 }) {
   return (
-    <View pointerEvents={disabled ? 'none' : 'auto'} style={{ opacity: disabled ? 0.45 : 1 }}>
-      <Card className="px-4 py-3.5">
-        <View className="flex-row items-center">
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={food.name}
-            accessibilityState={{ expanded, disabled }}
-            aria-disabled={disabled}
-            disabled={disabled}
-            onPress={onToggle}
-            className="flex-1 pr-2"
-          >
-            <Text className="text-[16px] font-medium text-foreground" numberOfLines={1}>
-              {food.name}
-            </Text>
-            <Text className="mt-0.5 text-[13px] text-muted" numberOfLines={1}>
-              {food.brand ? `${food.brand} · ` : ''}
-              {food.serving} · {food.nutrients.calories} cal
-              {food.source === 'usda' ? ' · USDA' : food.source === 'off' ? ' · Open Food Facts' : ''}
-            </Text>
-            <View className="mt-1.5">
-              <MacroLine nutrients={food.nutrients} />
-            </View>
-          </Pressable>
-          {trailing}
-        </View>
-        {expanded && !disabled ? <AddPanel food={food} /> : null}
-      </Card>
-    </View>
+    <Card className="px-4 py-3.5">
+      <View className="flex-row items-center">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={food.name}
+          accessibilityState={{ expanded }}
+          onPress={onToggle}
+          className="flex-1 pr-2"
+        >
+          <Text className="text-[16px] font-medium text-foreground" numberOfLines={1}>
+            {food.name}
+          </Text>
+          <Text className="mt-0.5 text-[13px] text-muted" numberOfLines={1}>
+            {food.serving} · {food.nutrients.calories} cal
+          </Text>
+          <View className="mt-1.5">
+            <MacroLine nutrients={food.nutrients} />
+          </View>
+        </Pressable>
+        {trailing}
+      </View>
+      {expanded ? <AddPanel food={food} /> : null}
+    </Card>
   );
 }
 

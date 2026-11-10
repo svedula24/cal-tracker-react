@@ -1,0 +1,51 @@
+#!/usr/bin/env node
+// Builds src/data/usda-foods.json: every generic food in USDA FoodData Central
+// (Foundation Foods, SR Legacy, FNDDS), trimmed to what Kalo uses.
+// USDA data is public domain. Rerun when USDA publishes a new release:
+//   node scripts/build-usda-foods.mjs
+// Needs `curl` and `unzip`. Downloads go to a temp folder that is removed after.
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { buildRows, FIELDS } from './usda/map.mjs';
+
+const BASE = 'https://fdc.nal.usda.gov/fdc-datasets/';
+// Latest release of each generic dataset (see https://fdc.nal.usda.gov/download-datasets/).
+const DATASETS = [
+  { file: 'FoodData_Central_foundation_food_json_2026-10-29', key: 'FoundationFoods' },
+  { file: 'FoodData_Central_sr_legacy_food_json_2018-04', key: 'SRLegacyFoods' }, // final release
+  { file: 'FoodData_Central_survey_food_json_2024-10-31', key: 'SurveyFoods' },
+];
+const OUT = 'src/data/usda-foods.json';
+
+const work = mkdtempSync(join(tmpdir(), 'kalo-usda-'));
+try {
+  const foods = [];
+  for (const { file, key } of DATASETS) {
+    const zip = join(work, `${file}.zip`);
+    const dir = join(work, file);
+    console.log(`↓ ${file}`);
+    execFileSync('curl', ['-sfL', '-o', zip, BASE + file + '.zip'], { stdio: 'inherit' });
+    execFileSync('unzip', ['-oq', zip, '-d', dir]);
+    const json = readdirSync(dir).find((f) => f.endsWith('.json'));
+    const records = JSON.parse(readFileSync(join(dir, json), 'utf8'))[key];
+    if (!Array.isArray(records)) throw new Error(`${file}: no "${key}" array`);
+    console.log(`  ${records.length} foods`);
+    foods.push(...records);
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  const rows = buildRows(foods);
+  const out = {
+    source: 'USDA FoodData Central (public domain)',
+    releases: DATASETS.map((d) => d.file.replace('FoodData_Central_', '')),
+    columns: ['fdcId', 'name', 'serving', ...FIELDS],
+    rows,
+  };
+  writeFileSync(OUT, JSON.stringify(out));
+  console.log(`✓ ${OUT}: ${rows.length} foods, ${(JSON.stringify(out).length / 1e6).toFixed(1)} MB`);
+} finally {
+  rmSync(work, { recursive: true, force: true });
+}

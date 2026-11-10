@@ -107,11 +107,7 @@ for (const f of flows) {
     ok = false;
     msg = e.message;
   }
-  // A flow may declare console errors it causes on purpose (e.g. a simulated outage).
-  const own = errors.slice(before);
-  const unexpected = f.allowErrors ? own.filter((e) => !f.allowErrors.test(e)) : own;
-  errors.splice(before, own.length, ...unexpected);
-  flowResults.push({ name: f.name, ok, msg, errors: unexpected.length });
+  flowResults.push({ name: f.name, ok, msg, errors: errors.length - before });
 }
 
 await browser.close();
