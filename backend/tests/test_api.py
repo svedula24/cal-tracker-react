@@ -7,6 +7,7 @@ import os
 
 import pytest
 from fastapi.testclient import TestClient
+from psycopg_pool import PoolTimeout
 
 from kalo.api.app import create_app
 from kalo.usda.load import load
@@ -151,6 +152,22 @@ def test_limit_caps_the_results(client):
 
 def test_nonsense_finds_nothing(client):
     assert search(client, "zzzzqqq") == []
+
+
+@pytest.mark.parametrize("q", ["a", "the", "and the of"])
+def test_one_letter_and_stopword_only_queries_still_work(client, q):
+    # "a" takes the prefix-only path; stopwords give an empty full-text query. Neither may error.
+    assert isinstance(search(client, q), list)
+
+
+def test_no_free_connection_is_503(client, monkeypatch):
+    def timed_out():
+        raise PoolTimeout("couldn't get a connection after 5.00 sec")
+
+    monkeypatch.setattr(client.app.state.pool, "connection", timed_out)
+    r = client.get("/api/v1/foods/search", params={"q": "banana"})
+    assert r.status_code == 503
+    assert r.headers["retry-after"] == "1"
 
 
 @pytest.mark.parametrize(
