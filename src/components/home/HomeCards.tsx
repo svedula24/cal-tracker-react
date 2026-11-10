@@ -5,7 +5,6 @@ import {
   Drumstick,
   Flame,
   Footprints,
-  GlassWater,
   Apple,
   History,
   Candy,
@@ -199,27 +198,6 @@ function BurnRow({ icon, label, value }: { icon: React.ReactNode; label: string;
   );
 }
 
-export function WaterCard({ cups, onLog }: { cups: number; onLog: () => void }) {
-  return (
-    <Card className="mt-[10px] h-[75px] flex-row items-center px-[18px]">
-      <GlassWater size={30} color={c.water} strokeWidth={1.6} />
-      <View className="ml-[16px] flex-1">
-        <Text className="text-[14px] text-muted">Water</Text>
-        <Text className="text-[17px] font-semibold text-foreground">
-          {cups * 8} fl oz ({cups} {cups === 1 ? 'cup' : 'cups'})
-        </Text>
-      </View>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel="Log Water"
-        onPress={onLog}
-        className="h-[32px] items-center justify-center rounded-full border border-border bg-card px-[17px]"
-      >
-        <Text className="text-[15px] font-medium text-foreground">Log Water</Text>
-      </Pressable>
-    </Card>
-  );
-}
 
 // ── Pager dots ───────────────────────────────────────────────────────────────
 export function Dots({ count, index, onSelect }: { count: number; index: number; onSelect: (i: number) => void }) {

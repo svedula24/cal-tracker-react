@@ -16,7 +16,6 @@ import {
   ScorePill,
   StepsCard,
   StreakPill,
-  WaterCard,
 } from '@/components/home/HomeCards';
 import { WeekStrip } from '@/components/home/WeekStrip';
 import { useDay, useEntries } from '@/lib/data';
@@ -96,7 +95,6 @@ export default function Home() {
                 <StepsCard steps={d.log.steps} goal={d.goals.steps} />
                 <BurnedCard total={d.burned} />
               </View>
-              <WaterCard cups={d.log.waterCups} onLog={() => d.setWater(d.log.waterCups + 1)} />
             </View>
           </ScrollView>
 
