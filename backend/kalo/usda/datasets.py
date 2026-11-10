@@ -78,7 +78,7 @@ def fetch(dataset: Dataset, data_dir: Path = DATA_DIR) -> Path:
         return path
     tmp = path.with_suffix(".zip.part")
     try:
-        with urllib.request.urlopen(BASE_URL + path.name, timeout=60) as resp, tmp.open("wb") as out:  # noqa: S310
+        with urllib.request.urlopen(BASE_URL + path.name, timeout=60) as resp, tmp.open("wb") as out:
             shutil.copyfileobj(resp, out)
         verify(dataset, tmp)
         tmp.replace(path)

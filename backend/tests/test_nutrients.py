@@ -52,8 +52,11 @@ def test_missing_nutrients_are_none_not_zero():
     assert to_row(rec).fat_per_100g is None
 
 
-def test_carbs_by_difference_kept_as_reported():
-    assert to_row(record(nutrients=[(1005, -0.2, "G")])).carbs_per_100g == -0.2
+def test_negative_carbs_by_difference_is_zero_like_the_app_mapper():
+    row = to_row(record(nutrients=[(1005, -0.2, "G"), (1004, 0.0, "G")]))
+    assert row.carbs_per_100g == 0.0
+    assert row.fat_per_100g == 0.0  # a reported 0 stays 0
+    assert row.protein_per_100g is None  # not reported stays NULL
 
 
 def test_unit_case_differs_between_datasets():

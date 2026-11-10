@@ -14,10 +14,11 @@ One table, `foods` (`db/schema.sql`): one row per USDA food, nutrients per 100 g
 | `brand_name` | NULL for every generic food (the Branded dataset is not loaded) |
 | `calories_per_100g` | nutrient 1008 (kcal); else Atwater Specific 2048, else Atwater General 2047, else kJ 1062 ÷ 4.184 |
 | `protein_per_100g` | 1003 |
-| `carbs_per_100g` | 1005, carbohydrate by difference, as reported |
+| `carbs_per_100g` | 1005, carbohydrate by difference (a negative value is stored as 0, as in the app's mapper) |
 | `fat_per_100g` | 1004 |
 
-A nutrient the source does not report is **NULL**, never 0. The loader checks
+A nutrient the source does not report is **NULL**, never 0; the schema also
+rejects negative values. The loader checks
 each nutrient's unit (and each record's dataType and description): a load with
 any unmappable record loads nothing and lists every bad record, by dataset and
 fdc_id, before exiting. Details: `kalo/usda/nutrients.py`.
@@ -41,7 +42,10 @@ uv run python -m kalo.usda.load
 
 The loader downloads the three USDA zips to `data/usda/` (cached, gitignored),
 creates the table if missing and replaces its rows: a few seconds, plus the
-download the first time.
+download the first time. It parses each JSON file in memory (peak about 1.5 GB
+for the FNDDS file); it is a one-off tool, not a service.
+
+There are no migrations yet: after a schema change, `DROP TABLE foods` and reload.
 
 Check:
 

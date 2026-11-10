@@ -3,6 +3,7 @@
 All three generic datasets (Foundation, SR Legacy, FNDDS) report nutrients per
 100 g, so the normalization is choosing the right nutrient record for each
 column and keeping what the source does not report as None (NULL), never 0.
+A reported negative value is 0 (same as scripts/usda/map.mjs, the app's mapper).
 """
 
 from __future__ import annotations
@@ -19,7 +20,7 @@ KCAL_PER_KJ = 1 / 4.184
 # converted.
 ENERGY = ((1008, "KCAL"), (2048, "KCAL"), (2047, "KCAL"), (1062, "kJ"))
 PROTEIN = ((1003, "G"),)
-CARBS = ((1005, "G"),)  # carbohydrate, by difference: stored as reported
+CARBS = ((1005, "G"),)  # carbohydrate, by difference
 FAT = ((1004, "G"),)
 
 DATA_TYPES = ("Foundation", "SR Legacy", "Survey (FNDDS)")
@@ -79,7 +80,9 @@ def pick(amounts: dict[int, tuple[float, str]], candidates: tuple[tuple[int, str
         amount, got = amounts[nutrient_id]
         if got.casefold() != unit.casefold():  # datasets differ in case: "KCAL" (SR Legacy), "kcal" (Foundation)
             raise UnitMismatch(fdc_id, f"nutrient {nutrient_id} is in {got!r}, expected {unit!r}")
-        return amount * KCAL_PER_KJ if unit == "kJ" else amount
+        value = amount * KCAL_PER_KJ if unit == "kJ" else amount
+        # USDA's "carbohydrate by difference" can come out slightly negative; it is 0, as in the app's mapper.
+        return max(0.0, value)
     return None
 
 
