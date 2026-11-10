@@ -18,7 +18,9 @@ One table, `foods` (`db/schema.sql`): one row per USDA food, nutrients per 100 g
 | `fat_per_100g` | 1004 |
 
 A nutrient the source does not report is **NULL**, never 0; the schema also
-rejects negative values. The loader checks
+rejects negative values. Every USDA food is loaded, including the few with no
+energy value (NULL calories); the app's bundled JSON (`npm run build:foods`)
+drops those, so the two lists differ by exactly that set. The loader checks
 each nutrient's unit (and each record's dataType and description): a load with
 any unmappable record loads nothing and lists every bad record, by dataset and
 fdc_id, before exiting. Details: `kalo/usda/nutrients.py`.
