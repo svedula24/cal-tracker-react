@@ -33,7 +33,7 @@ export type Entry = {
   foodName?: string; // the database name, even after the entry is renamed
   photo?: string;
 };
-export type DayLog = { id: string; steps: number; waterCups: number; rollover: number }; // id = date
+export type DayLog = { id: string; steps: number; rollover: number }; // id = date
 
 // ── Seed (dated relative to first launch) ────────────────────────────────────
 const n = (calories: number, protein: number, carbs: number, fat: number, fiber: number, sugar: number, sodium: number): Nutrients => ({
@@ -83,13 +83,13 @@ const goalsSeed: Goals[] = [
     id: 'goals',
     // 3027 + 200 rollover + 202 burned = the reference budget of 3429.
     calories: 3027, protein: 182, carbs: 433, fat: 94, fiber: 38, sugar: 113, sodium: 2300,
-    waterCups: 8, steps: 10000, goal: 'gain',
+    steps: 10000, goal: 'gain',
   },
 ];
 
 const dayLogSeed: DayLog[] = [
-  { id: today, steps: 5782, waterCups: 0, rollover: 200 },
-  ...[1, 2, 3, 4, 5].map((b) => ({ id: dayKey(addDays(now, -b)), steps: 4000 + b * 950, waterCups: 4 + (b % 3), rollover: 0 })),
+  { id: today, steps: 5782, rollover: 200 },
+  ...[1, 2, 3, 4, 5].map((b) => ({ id: dayKey(addDays(now, -b)), steps: 4000 + b * 950, rollover: 0 })),
 ];
 
 // Streak is display-only (reference shows 16 days).
@@ -114,21 +114,14 @@ export function useGoals() {
 export function useDay(date: string) {
   const { goals } = useGoals();
   const entries = useEntries().items.filter((e) => e.date === date).sort((a, b) => b.time.localeCompare(a.time));
-  const dayLogs = useDayLogs();
-  const log = dayLogs.items.find((d) => d.id === date) ?? { id: date, steps: 0, waterCups: 0, rollover: 0 };
+  const log = useDayLogs().items.find((d) => d.id === date) ?? { id: date, steps: 0, rollover: 0 };
 
   const totals = sum(entries);
   const burned = stepsToCalories(log.steps);
   const budget = dayBudget(goals.calories, log);
 
-  const setWater = (cups: number) => {
-    const waterCups = Math.max(0, cups);
-    if (dayLogs.items.some((d) => d.id === date)) dayLogs.update(date, { waterCups });
-    else dayLogs.add({ ...log, waterCups });
-  };
-
   return {
-    goals, entries, log, totals, burned, budget, setWater,
+    goals, entries, log, totals, burned, budget,
     score: dailyScore(totals, budget, goals),
     health: healthScore(totals, budget, goals),
   };

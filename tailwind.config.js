@@ -24,7 +24,6 @@ module.exports = {
         sodium: '#EAB771',
         good: '#28A96C',
         bad: '#E14945',
-        water: '#5AA9E6',
         'entry': '#F8F7FC',
         'chip': '#F6F5FA',
         health: '#82DE7A',
