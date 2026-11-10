@@ -97,36 +97,43 @@ export const flows = [
     },
   },
   {
-    name: 'nutrition: measurements compute from per-100 g data (portion, grams, ounces, quantity)',
+    name: 'nutrition: the amount is typed in grams; the default is the food\'s serving',
     run: async (page, base, { wait }) => {
       await go(page, base + '/food-database', wait);
       await page.getByLabel('Search foods').fill('banana');
       await btn(page, 'Banana, raw').click();
       await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
-      // USDA Banana, raw: 97 kcal per 100 g; default portion 1 banana = 126 g.
+      // USDA Banana, raw: 97 kcal per 100 g; the field starts at its serving, 1 banana = 126 g.
+      const grams = page.getByLabel('Grams');
+      if ((await grams.inputValue()) !== '126') throw new Error(`grams field starts at ${await grams.inputValue()}, not 126`);
+      await page.getByText('1 banana = 126 g').waitFor({ timeout: 2000 });
       await expectCalories(page, '122');
-      await btn(page, 'Measure in G').click();
-      await page.getByLabel('Number of servings').fill('100');
+      await grams.fill('100');
       await expectCalories(page, '97');
-      await page.getByLabel('Number of servings').fill('50');
+      await grams.fill('50');
       await expectCalories(page, '49'); // 48.5, shown whole (values ≥ 10 round)
-      await btn(page, 'Measure in Oz').click(); // 50 oz = 1417.5 g
+      await grams.fill('1417.5'); // 50 oz
       await expectCalories(page, '1375');
-      await page.getByLabel('Number of servings').fill('1');
-      await expectCalories(page, '27'); // 28.3495 g
-      await btn(page, 'Measure in Banana').click();
-      // An invalid quantity disables Done and keeps the last valid amount on the cards.
-      await page.getByLabel('Number of servings').fill('abc');
-      if ((await btn(page, 'Done').getAttribute('aria-disabled')) !== 'true') throw new Error('Done enabled with an invalid quantity');
-      await page.getByLabel('Number of servings').fill('2');
+      // An invalid amount disables Done and keeps the last valid amount on the cards.
+      await grams.fill('abc');
+      if ((await btn(page, 'Done').getAttribute('aria-disabled')) !== 'true') throw new Error('Done enabled with an invalid amount');
+      await grams.fill('252');
       await expectCalories(page, '244');
-      if ((await btn(page, 'Done').getAttribute('aria-disabled')) === 'true') throw new Error('Done still disabled with a valid quantity');
+      if ((await btn(page, 'Done').getAttribute('aria-disabled')) === 'true') throw new Error('Done still disabled with a valid amount');
       await btn(page, 'Done').click();
       await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
       await page.getByText(/244 Calories/).waitFor({ timeout: 3000 });
       await page.reload({ waitUntil: 'networkidle' });
       await wait(800);
-      if ((await page.getByText(/244 Calories/).count()) === 0) throw new Error('2 bananas did not persist on Home');
+      if ((await page.getByText(/244 Calories/).count()) === 0) throw new Error('252 g of banana did not persist on Home');
+      // Editing it reopens with the grams it was logged at.
+      await page.getByText('Banana, raw', { exact: true }).first().click();
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      if ((await page.getByLabel('Grams').inputValue()) !== '252') throw new Error('edit did not reopen at 252 g');
+      await page.getByLabel('Grams').fill('126');
+      await expectCalories(page, '122');
+      await btn(page, 'Done').click();
+      await page.getByText(/122 Calories/).waitFor({ timeout: 5000 });
     },
   },
   {
@@ -153,8 +160,8 @@ export const flows = [
       await btn(page, 'Honey').click();
       await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
       await btn(page, 'Other nutrition facts').click();
-      await page.getByText('Weight', { exact: true }).waitFor({ timeout: 3000 });
-      if ((await page.getByText('21g', { exact: true }).count()) === 0) throw new Error('weight of 1 tbsp honey (21 g) not shown');
+      await page.getByText('Sodium', { exact: true }).nth(1).waitFor({ timeout: 3000 }); // the expanded list, below the card
+      if ((await page.getByLabel('Grams').inputValue()) !== '21') throw new Error('honey should start at its serving, 1 tbsp = 21 g');
       if ((await btn(page, 'Unsave Honey').count()) === 0) {
         await btn(page, 'Save Honey').click();
         await btn(page, 'Unsave Honey').waitFor({ timeout: 3000 });

@@ -1,37 +1,19 @@
 // Measurements and the nutrition math behind them. Pure (no React / React
 // Native), unit-tested in tests/measure.test.mjs. Nutrients are stored per
-// 100 g, so any amount is exact: per100g × grams × quantity / 100.
+// 100 g, so any amount is exact: per100g × grams / 100.
 import type { Food, Portion } from '@/data/foods';
 import type { Entry } from '@/lib/data';
 
 // Relative with the .ts extension so Node's test runner can import it as well.
 import { NUTRIENT_KEYS, type Nutrients } from './nutrition.ts';
 
-export const OZ_GRAMS = 28.3495;
-export const OZ: Portion = { label: 'Oz', grams: OZ_GRAMS };
-export const G: Portion = { label: 'G', grams: 1 };
+/** The measure every logged food uses: its quantity is a number of grams. */
+export const G: Portion = { label: 'g', grams: 1 };
 /** The serving of a food that has no USDA portions. */
 export const HUNDRED_G: Portion = { label: '100 g', grams: 100 };
 
 /** The food's default serving: its first portion, else 100 g. */
 export const defaultServing = (food: Food): Portion => food.portions[0] ?? HUNDRED_G;
-
-/** Chip text for a measurement: "1 bagel" → "Bagel", "1 large (4-1/2\" dia)" → "Large (4-1/2\" dia)", "0.5 cup" stays. */
-export function chipLabel(p: Portion): string {
-  const text = p.label.replace(/^1 (?=\D)/, '');
-  return text.charAt(0).toUpperCase() + text.slice(1);
-}
-
-/**
- * The measurements to offer: the food's named portions (or 100 g when it has
- * none), then ounces and grams, unless a USDA portion already is 1 oz / 1 g
- * (that one keeps USDA's weight; no duplicate chip).
- */
-export function measurementsFor(portions: Portion[]): Portion[] {
-  const named = portions.length ? portions : [HUNDRED_G];
-  const have = new Set(named.map((p) => chipLabel(p).toLowerCase()));
-  return [...named, ...[OZ, G].filter((u) => !have.has(u.label.toLowerCase()))];
-}
 
 /** Nutrients in `grams` of a food. Exact; round only for display. */
 export const scale = (per100g: Nutrients, grams: number): Nutrients =>

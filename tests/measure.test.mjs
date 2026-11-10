@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { chipLabel, defaultServing, fmt, foodOfEntry, G, HUNDRED_G, measurementsFor, OZ, OZ_GRAMS, parseQty, qtyText, scale, servingSummary, times } from '../src/lib/measure.ts';
+import { defaultServing, fmt, foodOfEntry, G, HUNDRED_G, parseQty, qtyText, scale, servingSummary, times } from '../src/lib/measure.ts';
 
 // USDA "Banana, raw" per 100 g; its portions, default first.
 const banana = {
@@ -20,39 +20,18 @@ test('scale: per100g × grams / 100, exactly; times for the quantity', () => {
   close(scale(banana.per100g, 100).calories, 89, '100 g');
   close(scale(banana.per100g, 126).calories, 112.14, '1 banana');
   close(times(scale(banana.per100g, 126), 2).calories, 224.28, '2 bananas');
-  close(scale(banana.per100g, OZ_GRAMS).calories, 25.231055, '1 oz');
   close(times(scale(banana.per100g, 1), 50).carbs, 11.42, '50 g carbs');
   assert.deepEqual(Object.keys(scale(banana.per100g, 10)), ['calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium']);
 });
 
-test('measurements: the named portions first, then Oz and G', () => {
-  assert.deepEqual(measurementsFor(banana.portions), [...banana.portions, OZ, G]);
-  assert.equal(OZ.grams, 28.3495);
+test('G is one gram; times multiplies a per-unit set by a quantity', () => {
   assert.equal(G.grams, 1);
-});
-
-test('measurements: a food with no portions offers 100 g; a USDA 1 oz / 1 g portion is not duplicated', () => {
-  assert.deepEqual(measurementsFor([]), [HUNDRED_G, OZ, G]);
-  const ounce = { label: '1 oz', grams: 28.4 };
-  assert.deepEqual(measurementsFor([{ label: '1 bagel', grams: 99 }, ounce]), [{ label: '1 bagel', grams: 99 }, ounce, G]);
-  assert.deepEqual(measurementsFor([{ label: '1 g', grams: 1 }]), [{ label: '1 g', grams: 1 }, OZ]);
-});
-
-test('times multiplies a per-measure set by a quantity', () => {
   assert.deepEqual(times({ calories: 10, protein: 1, carbs: 2, fat: 0.5, fiber: 0, sugar: 1, sodium: 3 }, 2.5), { calories: 25, protein: 2.5, carbs: 5, fat: 1.25, fiber: 0, sugar: 2.5, sodium: 7.5 });
 });
 
 test('default serving: first portion, else 100 g', () => {
   assert.deepEqual(defaultServing(banana), { label: '1 banana', grams: 126 });
   assert.equal(defaultServing({ ...banana, portions: [] }), HUNDRED_G);
-});
-
-test('chip labels drop a leading "1 " and capitalise', () => {
-  assert.equal(chipLabel({ label: '1 bagel', grams: 105 }), 'Bagel');
-  assert.equal(chipLabel({ label: '1 large (4-1/2" dia)', grams: 131 }), 'Large (4-1/2" dia)');
-  assert.equal(chipLabel({ label: '0.5 cup', grams: 120 }), '0.5 cup');
-  assert.equal(chipLabel({ label: '10 chips', grams: 20 }), '10 chips'); // "1" only as a whole number
-  assert.equal(chipLabel(OZ), 'Oz');
 });
 
 test('fmt: one decimal under 10, whole numbers above', () => {
