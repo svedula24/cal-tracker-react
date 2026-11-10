@@ -13,3 +13,15 @@ CREATE TABLE IF NOT EXISTS foods (
     carbs_per_100g    REAL NOT NULL CHECK (carbs_per_100g >= 0),
     fat_per_100g      REAL NOT NULL CHECK (fat_per_100g >= 0)
 );
+
+-- Search (kalo/api/search.py). Both indexes are on lower(description) or its tsvector, so the
+-- search query must use these exact expressions for Postgres to use them.
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- Full-text: every query word matches a description word (stemmed; the last word as a prefix).
+CREATE INDEX IF NOT EXISTS foods_description_fts ON foods USING GIN (to_tsvector('english', description));
+-- Trigrams: prefix match (LIKE 'q%') and misspellings (word similarity, the <% operator).
+CREATE INDEX IF NOT EXISTS foods_description_trgm ON foods USING GIN (lower(description) gin_trgm_ops);
+-- No pending list: the loader's bulk insert would otherwise leave ~13k unsorted entries that
+-- every search scans (about 100 ms a query) until autovacuum merges them.
+ALTER INDEX foods_description_fts SET (fastupdate = off);
+ALTER INDEX foods_description_trgm SET (fastupdate = off);

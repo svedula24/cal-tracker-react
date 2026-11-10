@@ -9,7 +9,6 @@ in one transaction, so a rerun is a clean reload.
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 from collections import Counter
@@ -17,10 +16,10 @@ from pathlib import Path
 
 import psycopg
 
+from ..db import database_url
 from .datasets import DATASETS, records
 from .nutrients import FoodRow, RecordError, to_row
 
-DEFAULT_URL = "postgresql://kalo:kalo@localhost:5432/kalo"
 SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
 
 
@@ -111,7 +110,7 @@ def load(rows: list[FoodRow], url: str) -> Counter[str]:
 
 
 def main() -> int:
-    url = os.environ.get("DATABASE_URL", DEFAULT_URL)
+    url = database_url()
     rows = read_rows()
     counts = load(rows, url)
     for data_type, n in counts.items():
