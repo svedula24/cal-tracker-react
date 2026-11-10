@@ -4,8 +4,8 @@ import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Press } from '@/components/Press';
 import { Fab, fabBottom } from '@/components/Fab';
+import { Press } from '@/components/Press';
 import { tokens } from '@/lib/tokens';
 
 const ITEMS = [

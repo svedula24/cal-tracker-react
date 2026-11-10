@@ -20,6 +20,8 @@ const SPRING = { damping: 18, stiffness: 320, mass: 0.6, reduceMotion: ReduceMot
 /**
  * A Pressable with touch feedback: it springs down to `scale` and dims to
  * `dim` while pressed, on the UI thread. Drop-in for Pressable on controls.
+ * Press owns `opacity` and `transform`: an `opacity-*` or `scale-*` class on
+ * it has no effect, even at rest.
  */
 export function Press({ scale = 0.96, dim = 0.85, onPressIn, onPressOut, ...props }: PressableProps & { scale?: number; dim?: number }) {
   const pressed = useSharedValue(0);

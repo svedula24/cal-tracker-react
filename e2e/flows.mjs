@@ -29,6 +29,27 @@ const home = [
     },
   },
   {
+    // Press animates on the UI thread and routes className through NativeWind
+    // itself; this fails if either stops reaching the button.
+    name: 'home: the + button keeps its classes and springs down while pressed',
+    run: async (page, base, { wait }) => {
+      await go(page, base + '/', wait);
+      const fab = btn(page, 'Add');
+      const css = () => fab.evaluate((el) => ({ w: getComputedStyle(el).width, t: getComputedStyle(el).transform }));
+      const idle = await css();
+      if (idle.w !== '53px') throw new Error(`+ button is ${idle.w} wide, not 53px: className lost`);
+      const box = await fab.boundingBox();
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await wait(150);
+      const held = await css();
+      await page.mouse.up();
+      const scale = Number(held.t.match(/matrix\(([^,]+)/)?.[1] ?? 1);
+      if (!(scale < 0.95)) throw new Error(`+ button did not shrink while pressed (transform ${held.t})`);
+      await wait(400); // let the spring settle before the next flow
+    },
+  },
+  {
     name: 'home: calories eaten <-> left toggle',
     run: async (page, base, { wait }) => {
       await go(page, base + '/', wait);
