@@ -1,13 +1,5 @@
 /** @type {import('tailwindcss').Config} */
-// ────────────────────────────────────────────────────────────────────────────
-// DESIGN TOKENS — the `/clone-app` foundation phase OVERWRITES the values below
-// with the cloned app's real palette/typography/spacing. This file is the home
-// for the cloned app's design system (the analog of a web project's globals.css
-// `:root` block). Keep the shape; replace the values.
-//
-// Note: these are flat token colors (e.g. `bg-background`, `text-primary`), not
-// Tailwind's numbered scales — `bg-blue-500` etc. are intentionally not defined.
-// ────────────────────────────────────────────────────────────────────────────
+// Kalo design tokens. Keep in sync with src/lib/tokens.ts (runtime values).
 module.exports = {
   content: ['./src/**/*.{js,jsx,ts,tsx}'],
   presets: [require('nativewind/preset')],
@@ -17,21 +9,34 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        background: '#ffffff',
-        foreground: '#0a0a0a',
-        primary: '#208aef',
-        'primary-foreground': '#ffffff',
-        muted: '#f4f4f5',
-        'muted-foreground': '#71717a',
-        border: '#e4e4e7',
-        accent: '#f4f4f5',
+        background: '#FFFFFF',
+        card: '#FFFFFF',
+        foreground: '#111111',
+        muted: '#8E8E93',
+        faint: '#C7C7CC',
+        track: '#EFEFF5',
+        border: '#EEEEF3',
+        protein: '#DF6767',
+        carbs: '#DC9A69',
+        fat: '#6A98DC',
+        fiber: '#A089CD',
+        sugar: '#E890AE',
+        sodium: '#EAB771',
+        good: '#28A96C',
+        bad: '#E14945',
+        water: '#5AA9E6',
+        'entry': '#F8F7FC',
+        'chip': '#F6F5FA',
+        health: '#82DE7A',
+        'tab-active': '#E8E8EA',
+        fab: '#1E1A24',
       },
       borderRadius: {
-        card: '16px',
+        card: '18px',
+        tile: '16px',
       },
       fontFamily: {
         sans: ['System'],
-        mono: ['Menlo'],
       },
     },
   },

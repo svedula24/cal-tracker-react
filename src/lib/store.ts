@@ -67,7 +67,9 @@ export class Collection<T extends WithId> {
           const queued = this.pending;
           this.pending = [];
           this.ready = true;
-          if (queued.length) this.commit(queued.reduce((acc, op) => op(acc), base));
+          // Nothing stored yet: save the seed now, so date-relative seed data is
+          // fixed at first launch instead of being rebuilt on every cold start.
+          if (queued.length || raw == null) this.commit(queued.reduce((acc, op) => op(acc), base));
           else {
             this.items = base;
             this.emit();

@@ -1,36 +1,29 @@
-# Screen Graph
+# Screen graph: Kalo
 
-Human-readable map of the cloned app's navigation. `/clone-app` writes this in
-Phase 3 alongside `app-spec.json`; it's the blueprint for Phase 7 assembly.
+## Screens & states
+| Screen | Route | States (screenshot) |
+| --- | --- | --- |
+| Home | `/` (tab) | macros page (home-macros), micros page (home-micros), activity page (home-activity), add-menu open (home-add-menu) |
+| Daily Score | `/daily-score` (transparent modal) | default (home-daily-score) |
+| How Daily Score Works | `/score-info` | designed |
+| Progress | `/progress` (tab) | designed |
+| Groups | `/groups` (tab) | coming soon |
+| Profile | `/profile` (tab) | designed (goals editor) |
+| Food Database | `/food-database` | designed (search + add) |
+| Saved foods | `/saved-foods` | designed |
+| Log exercise | `/log-exercise` | designed |
+| Scan food | `/scan-food` | coming soon (camera/AI = backend) |
+| Entry detail | `/entry/[id]` | designed (edit name/servings, delete) |
 
-> The content below is an **example** (matching `app-spec.example.json`). The
-> clone-app run overwrites it with the real app's graph.
-
-## Navigation model
-
-**Type:** tabs · **Tab bar:** Home · Search · Profile
-
-## Graph
+## Navigation
+- **Tabs** (persistent floating pill bar): Home · Progress · Groups · Profile.
+- Black round **+ FAB** beside the bar opens the AddMenu overlay (tiles: Log exercise, Saved foods, Food Database, Scan food); FAB turns into X.
+- Everything else is a push on the root Stack; Daily Score is a transparent modal.
 
 ```
-[Tabs]
- ├── Home  (default, empty, loading, dark)
- │     └──▶ NoteDetail   (tap a note row)
- ├── Search  (default, results)
- │     └──▶ NoteDetail   (tap a result)
- └── Profile  (default, dark)
-       └──▶ Settings     (tap "Settings" row)
-
-NoteDetail  — stack push, has back
-Settings    — stack push, has back
+Home ──score pill──▶ Daily Score ──"How Daily Score Works"──▶ Score info
+Home ──entry card──▶ Entry detail
+Any tab ──+ FAB──▶ AddMenu ──▶ Log exercise | Saved foods | Food Database | Scan food
+Scan food ──"Search instead"──▶ Food Database
+Food Database / Saved foods ──add──▶ back to Home (selected day)
 ```
-
-## Screens
-
-| Screen | Route | States | Reached via | Goes to |
-| --- | --- | --- | --- | --- |
-| Home | `/` | default, empty, loading, dark | tab | NoteDetail |
-| Search | `/search` | default, results | tab | NoteDetail |
-| Profile | `/profile` | default, dark | tab | Settings |
-| NoteDetail | `/note/[id]` | default | push from Home/Search | — |
-| Settings | `/settings` | default | push from Profile | — |
