@@ -1,9 +1,11 @@
 import { router } from 'expo-router';
 import { Bookmark, ScanLine, Search, X } from 'lucide-react-native';
-import { Pressable, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeIn, FadeInDown, FadeOut, FadeOutDown } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Fab, fabBottom } from '@/components/Fab';
+import { Press } from '@/components/Press';
 import { tokens } from '@/lib/tokens';
 
 const ITEMS = [
@@ -18,11 +20,19 @@ export function AddMenu({ onClose }: { onClose: () => void }) {
   const bottom = fabBottom(insets.bottom);
   return (
     <View className="absolute inset-0">
-      <Pressable accessibilityLabel="Close menu" onPress={onClose} className="absolute inset-0 bg-black/30" />
+      <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(150)} style={StyleSheet.absoluteFill}>
+        <Press scale={1} dim={1} accessibilityLabel="Close menu" onPress={onClose} className="absolute inset-0 bg-black/30" />
+      </Animated.View>
       <View pointerEvents="box-none" className="absolute left-0 right-0 flex-row flex-wrap px-[30px]" style={{ bottom: bottom + 72, gap: 16 }}>
-        {ITEMS.map(({ label, Icon, href }) => (
-          <Pressable
+        {ITEMS.map(({ label, Icon, href }, i) => (
+          <Animated.View
             key={label}
+            entering={FadeInDown.delay(i * 40).springify().damping(16).stiffness(200)}
+            exiting={FadeOutDown.duration(120)}
+            // Three tiles: two side by side, Scan food full width below.
+            style={{ width: label === 'Scan food' ? '100%' : '47.5%' }}
+          >
+          <Press
             accessibilityRole="button"
             accessibilityLabel={label}
             onPress={() => {
@@ -30,12 +40,11 @@ export function AddMenu({ onClose }: { onClose: () => void }) {
               router.push(href);
             }}
             className="h-[94px] items-center justify-center rounded-tile bg-card"
-            // Three tiles: two side by side, Scan food full width below.
-            style={{ width: label === 'Scan food' ? '100%' : '47.5%' }}
           >
             <Icon size={26} color={tokens.colors.foreground} fill={label === 'Saved foods' ? tokens.colors.foreground : 'none'} />
             <Text className="mt-2 text-[16px] font-medium text-foreground">{label}</Text>
-          </Pressable>
+          </Press>
+          </Animated.View>
         ))}
       </View>
       <View pointerEvents="box-none" className="absolute right-[18px]" style={{ bottom }}>

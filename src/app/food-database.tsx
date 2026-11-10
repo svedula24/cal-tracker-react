@@ -1,7 +1,8 @@
 import { Search, X } from 'lucide-react-native';
 import { useDeferredValue, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Text, TextInput, View } from 'react-native';
 
+import { Press } from '@/components/Press';
 import { BookmarkToggle, FoodRow } from '@/components/logging/FoodRow';
 import { PushedScreen } from '@/components/Screen';
 import { type Food, loadFoods } from '@/data/foods';
@@ -72,9 +73,9 @@ export default function FoodDatabase() {
             style={{ outlineStyle: 'none' } as object}
           />
           {query ? (
-            <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} hitSlop={8}>
+            <Press accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} hitSlop={8}>
               <X size={18} color={tokens.colors.muted} />
-            </Pressable>
+            </Press>
           ) : null}
         </View>
       </View>
@@ -98,9 +99,9 @@ export default function FoodDatabase() {
           ) : load === 'failed' ? (
             <View className="mt-10 items-center px-6">
               <Text className="text-center text-[15px] text-muted">Couldn&apos;t load the food database.</Text>
-              <Pressable accessibilityRole="button" accessibilityLabel="Retry" onPress={() => setLoad('loading')} className="mt-3 rounded-full bg-fab px-5 py-2.5">
+              <Press accessibilityRole="button" accessibilityLabel="Retry" onPress={() => setLoad('loading')} className="mt-3 rounded-full bg-fab px-5 py-2.5">
                 <Text className="text-[15px] font-semibold text-white">Retry</Text>
-              </Pressable>
+              </Press>
             </View>
           ) : (
             <View className="mt-10 items-center" accessibilityLabel="Loading foods">

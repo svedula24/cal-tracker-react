@@ -1,8 +1,9 @@
 import { router } from 'expo-router';
 import { Bookmark, Trash2 } from 'lucide-react-native';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
+import { Press } from '@/components/Press';
 import { FoodRow } from '@/components/logging/FoodRow';
 import { PrimaryButton } from '@/components/logging/PrimaryButton';
 import { ComingSoon, PushedScreen } from '@/components/Screen';
@@ -39,20 +40,20 @@ export default function SavedFoods() {
             rightThreshold={40}
             overshootRight={false}
             renderRightActions={() => (
-              <Pressable
+              <Press
                 accessibilityRole="button"
                 accessibilityLabel="Remove"
                 onPress={() => saved.remove(food.id)}
                 className="ml-2.5 w-[88px] items-center justify-center rounded-card bg-bad"
               >
                 <Text className="text-[15px] font-semibold text-card">Remove</Text>
-              </Pressable>
+              </Press>
             )}
           >
             <FoodRow
               food={food}
               trailing={
-                <Pressable
+                <Press
                   accessibilityRole="button"
                   accessibilityLabel={`Remove ${food.name}`}
                   onPress={() => saved.remove(food.id)}
@@ -60,7 +61,7 @@ export default function SavedFoods() {
                   className="h-10 w-10 items-center justify-center rounded-full"
                 >
                   <Trash2 size={19} color={tokens.colors.muted} />
-                </Pressable>
+                </Press>
               }
             />
           </ReanimatedSwipeable>

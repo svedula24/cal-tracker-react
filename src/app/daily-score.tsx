@@ -1,9 +1,11 @@
 import { router } from 'expo-router';
 import { ChevronRight, Info } from 'lucide-react-native';
-import { Pressable, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import Animated, { Easing, FadeIn, SlideInUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 
+import { Press } from '@/components/Press';
 import { useDay } from '@/lib/data';
 import { parseDay } from '@/lib/nutrition';
 import { useSelectedDay } from '@/lib/selectedDay';
@@ -53,8 +55,13 @@ export default function DailyScore() {
 
   return (
     <View className="flex-1">
-      <Pressable accessibilityLabel="Close daily score" onPress={() => router.back()} className="absolute inset-x-0 bottom-0 bg-black/45" style={{ top }} />
-      <View className="absolute inset-x-0 rounded-[26px] bg-card px-[27px] pt-[27px]" style={{ top }}>
+      <Animated.View entering={FadeIn.duration(220)} style={[StyleSheet.absoluteFill, { top }]}>
+        <Press scale={1} dim={1} accessibilityLabel="Close daily score" onPress={() => router.back()} className="absolute inset-0 bg-black/45" />
+      </Animated.View>
+      <Animated.View
+        entering={SlideInUp.duration(420).easing(Easing.out(Easing.cubic))}
+        style={{ position: 'absolute', left: 0, right: 0, top, borderRadius: 26, backgroundColor: c.card, paddingHorizontal: 27, paddingTop: 27 }}
+      >
         <View className="flex-row items-center justify-between">
           <View className="flex-1 pr-2">
             <Text className="text-[12.5px] text-muted">{date} • Daily Score</Text>
@@ -83,7 +90,7 @@ export default function DailyScore() {
           ))}
         </View>
 
-        <Pressable
+        <Press
           accessibilityRole="button"
           accessibilityLabel="How Daily Score Works"
           onPress={() => router.push('/score-info')}
@@ -92,8 +99,8 @@ export default function DailyScore() {
           <Info size={16} color={c.muted} />
           <Text className="ml-[11px] flex-1 text-[12.5px] text-muted">How Daily Score Works</Text>
           <ChevronRight size={17} color={c.muted} />
-        </Pressable>
-      </View>
+        </Press>
+      </Animated.View>
     </View>
   );
 }

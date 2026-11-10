@@ -1,7 +1,8 @@
 import { router } from 'expo-router';
 import { Bookmark } from 'lucide-react-native';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
+import { Press } from '@/components/Press';
 import { Card } from '@/components/Screen';
 import type { Food } from '@/data/foods';
 import { fmt, servingSummary } from '@/lib/measure';
@@ -19,7 +20,7 @@ export function FoodRow({ food, trailing }: { food: Food; trailing?: React.React
   return (
     <Card className="px-4 py-3.5">
       <View className="flex-row items-center">
-        <Pressable accessibilityRole="button" accessibilityLabel={food.name} onPress={open} className="flex-1 pr-2">
+        <Press accessibilityRole="button" accessibilityLabel={food.name} onPress={open} className="flex-1 pr-2">
           <Text className="text-[16px] font-medium text-foreground" numberOfLines={1}>
             {food.name}
           </Text>
@@ -29,7 +30,7 @@ export function FoodRow({ food, trailing }: { food: Food; trailing?: React.React
           <View className="mt-1.5">
             <MacroLine nutrients={nutrients} />
           </View>
-        </Pressable>
+        </Press>
         {trailing}
       </View>
     </Card>
@@ -38,7 +39,7 @@ export function FoodRow({ food, trailing }: { food: Food; trailing?: React.React
 
 export function BookmarkToggle({ name, saved, onPress }: { name: string; saved: boolean; onPress: () => void }) {
   return (
-    <Pressable
+    <Press
       accessibilityRole="button"
       accessibilityLabel={saved ? `Unsave ${name}` : `Save ${name}`}
       accessibilityState={{ selected: saved }}
@@ -47,6 +48,6 @@ export function BookmarkToggle({ name, saved, onPress }: { name: string; saved: 
       className="h-10 w-10 items-center justify-center rounded-full"
     >
       <Bookmark size={20} color={saved ? tokens.colors.foreground : tokens.colors.muted} fill={saved ? tokens.colors.foreground : 'transparent'} />
-    </Pressable>
+    </Press>
   );
 }

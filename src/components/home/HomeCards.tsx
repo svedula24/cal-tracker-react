@@ -14,8 +14,9 @@ import {
   Wheat,
 } from 'lucide-react-native';
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 
+import { Press } from '@/components/Press';
 import { Ring } from '@/components/Ring';
 import { Card, cardShadow } from '@/components/Screen';
 import { STREAK_DAYS } from '@/lib/data';
@@ -27,7 +28,7 @@ const c = tokens.colors;
 // ── Header pills ─────────────────────────────────────────────────────────────
 export function ScorePill({ score }: { score: number }) {
   return (
-    <Pressable
+    <Press
       accessibilityRole="button"
       accessibilityLabel={`Daily score ${score}`}
       onPress={() => router.push('/daily-score')}
@@ -35,7 +36,7 @@ export function ScorePill({ score }: { score: number }) {
     >
       <Target size={19} color={c.foreground} strokeWidth={2.2} />
       <Text className="ml-[7px] text-[18px] font-semibold text-foreground">{score}</Text>
-    </Pressable>
+    </Press>
   );
 }
 
@@ -65,7 +66,7 @@ export function CalorieCard({ eaten, budget, rollover, burned }: { eaten: number
           </Text>
           {showLeft ? null : <Text className="mb-[5px] ml-[2px] text-[15px] text-muted">/{budget}</Text>}
         </View>
-        <Pressable
+        <Press
           accessibilityRole="button"
           accessibilityLabel={showLeft ? 'Show calories eaten' : 'Show calories left'}
           onPress={() => setShowLeft((v) => !v)}
@@ -73,7 +74,7 @@ export function CalorieCard({ eaten, budget, rollover, burned }: { eaten: number
         >
           <Text className="text-[12.5px] text-muted">{showLeft ? 'Calories left' : 'Calories eaten'}</Text>
           <ChevronsUpDown size={12} color={c.muted} style={{ marginLeft: 3 }} />
-        </Pressable>
+        </Press>
         <View className="mt-[9px] flex-row">
           {rollover > 0 ? <Chip icon={<History size={11} color={c.foreground} strokeWidth={2.4} />} text={`+${rollover}`} label="Rollover calories" /> : null}
           {burned > 0 ? <Chip icon={<Footprints size={11} color={c.muted} strokeWidth={2.4} />} text={`+${burned}`} label="Calories burned added" /> : null}
@@ -204,7 +205,7 @@ export function Dots({ count, index, onSelect }: { count: number; index: number;
   return (
     <View className="flex-row justify-center" style={{ gap: 7 }}>
       {Array.from({ length: count }, (_, i) => (
-        <Pressable
+        <Press
           key={i}
           accessibilityRole="button"
           accessibilityLabel={`Page ${i + 1}`}

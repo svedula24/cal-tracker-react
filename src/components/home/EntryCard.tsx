@@ -2,9 +2,10 @@ import { Image } from 'expo-image';
 import { useRef } from 'react';
 import { router } from 'expo-router';
 import { Droplet, Drumstick, Trash2, Wheat } from 'lucide-react-native';
-import { Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
+import { Press } from '@/components/Press';
 import type { Entry } from '@/lib/data';
 import { formatTime } from '@/lib/nutrition';
 import { tokens } from '@/lib/tokens';
@@ -41,7 +42,7 @@ export function EntryCard({ entry, onDelete }: { entry: Entry; onDelete: () => v
       }}
       rightThreshold={60}
       renderRightActions={() => (
-        <Pressable
+        <Press
           accessibilityRole="button"
           accessibilityLabel={`Delete ${entry.name}`}
           onPress={onDelete}
@@ -49,10 +50,10 @@ export function EntryCard({ entry, onDelete }: { entry: Entry; onDelete: () => v
         >
           <Trash2 size={22} color="#fff" />
           <Text className="mt-1 text-[13px] font-semibold text-white">Delete</Text>
-        </Pressable>
+        </Press>
       )}
     >
-      <Pressable
+      <Press
         accessibilityRole="button"
         accessibilityLabel={`Edit ${entry.name}`}
         onPress={() => {
@@ -81,7 +82,7 @@ export function EntryCard({ entry, onDelete }: { entry: Entry; onDelete: () => v
             <Macro icon={<Droplet size={14} color={c.fat} fill={c.fat} />} value={g(entry.nutrients.fat)} />
           </View>
         </View>
-      </Pressable>
+      </Press>
     </ReanimatedSwipeable>
   );
 }
