@@ -3,9 +3,10 @@
 
 // USDA nutrient ids → Kalo fields (values in the download are per 100 g).
 // Energy falls back to the Atwater factors some Foundation foods report instead
-// of 1008; sugar falls back to 1063 (Foundation uses it instead of 2000).
+// of 1008 (Specific first: USDA's more accurate figure; same order as the backend
+// loader); sugar falls back to 1063 (Foundation uses it instead of 2000).
 export const NUTRIENT_IDS = {
-  calories: [1008, 2047, 2048],
+  calories: [1008, 2048, 2047],
   protein: [1003],
   carbs: [1005],
   fat: [1004],

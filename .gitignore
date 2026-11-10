@@ -59,3 +59,11 @@ TOMORROW.md
 
 # verification harness output (generated)
 e2e/shots/
+
+# backend
+backend/data/
+backend/.venv/
+backend/.env
+__pycache__/
+.pytest_cache/
+.ruff_cache/

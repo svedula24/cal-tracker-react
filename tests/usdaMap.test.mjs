@@ -13,6 +13,9 @@ test('per100g maps nutrient ids, with energy and sugar fallbacks', () => {
   });
   const foundation = per100g({ foodNutrients: nutrients({ 2047: 97, 1063: 15.8 }) });
   assert.equal(foundation.calories, 97);
+  // Same order as the backend loader: kcal (1008), then Atwater Specific (2048) over General (2047).
+  assert.equal(per100g({ foodNutrients: nutrients({ 2047: 380, 2048: 375 }) }).calories, 375);
+  assert.equal(per100g({ foodNutrients: nutrients({ 1008: 370, 2047: 380, 2048: 375 }) }).calories, 370);
   assert.equal(foundation.sugar, 15.8);
   assert.equal(foundation.sodium, 0); // missing → 0
 });

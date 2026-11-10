@@ -38,3 +38,20 @@ jobs:
           name: e2e-shots
           path: e2e/shots/
           if-no-files-found: ignore
+
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+      - run: uv sync --locked
+      - name: Lint
+        run: uv run ruff check .
+      - name: Unit tests (no database needed)
+        run: uv run pytest
