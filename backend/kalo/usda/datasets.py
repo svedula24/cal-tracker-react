@@ -2,10 +2,12 @@
 
 Downloads go to backend/data/usda/ (gitignored) and are reused on later runs.
 The zips are read in place; nothing is extracted. USDA data is public domain.
+Each zip is verified against a pinned SHA-256, on download and on every reuse.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import urllib.request
@@ -22,6 +24,7 @@ DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "usda"
 class Dataset:
     file: str  # zip name without extension
     key: str  # the array in the JSON that holds the food records
+    sha256: str  # of the zip; `shasum -a 256 data/usda/<file>.zip`
 
     @property
     def release(self) -> str:
@@ -30,22 +33,58 @@ class Dataset:
 
 # The latest release of each generic dataset (https://fdc.nal.usda.gov/download-datasets/).
 # Same releases as the app's bundled JSON (scripts/build-usda-foods.mjs).
+# Bumping a release means updating its sha256 pin too.
 DATASETS = (
-    Dataset("FoodData_Central_foundation_food_json_2026-10-29", "FoundationFoods"),
-    Dataset("FoodData_Central_sr_legacy_food_json_2018-04", "SRLegacyFoods"),  # final release
-    Dataset("FoodData_Central_survey_food_json_2024-10-31", "SurveyFoods"),
+    Dataset(
+        "FoodData_Central_foundation_food_json_2026-10-29",
+        "FoundationFoods",
+        "dd414cc9f1a132626bad354ef6655972c78b44aff14f16114dc899708663c579",
+    ),
+    Dataset(  # final release
+        "FoodData_Central_sr_legacy_food_json_2018-04",
+        "SRLegacyFoods",
+        "0fe8ae486a2c8eb42cb96413f058deb51863a46c8fb8eeb4b1fb45006dd338ef",
+    ),
+    Dataset(
+        "FoodData_Central_survey_food_json_2024-10-31",
+        "SurveyFoods",
+        "dfb06ae7ddc397ccd570b91c14b75438ab2ba39f64f22d321f61d4a52a77f3eb",
+    ),
 )
 
 
+def sha256_of(path: Path) -> str:
+    with path.open("rb") as f:
+        return hashlib.file_digest(f, "sha256").hexdigest()
+
+
+def verify(dataset: Dataset, path: Path) -> None:
+    """Raise ValueError unless the file's SHA-256 matches the dataset's pin."""
+    actual = sha256_of(path)
+    if actual != dataset.sha256:
+        raise ValueError(
+            f"{path}: sha256 mismatch; expected {dataset.sha256}, got {actual}. "
+            "Delete the file and rerun to download it again; if USDA republished this release, "
+            "update the pin in kalo/usda/datasets.py"
+        )
+
+
 def fetch(dataset: Dataset, data_dir: Path = DATA_DIR) -> Path:
-    """The dataset's zip on disk, downloading it once."""
+    """The dataset's zip on disk, downloading it once and checking its SHA-256."""
     data_dir.mkdir(parents=True, exist_ok=True)
     path = data_dir / f"{dataset.file}.zip"
-    if not path.exists():
-        tmp = path.with_suffix(".zip.part")
-        with urllib.request.urlopen(BASE_URL + path.name, timeout=60) as resp, tmp.open("wb") as out:  # noqa: S310
-            shutil.copyfileobj(resp, out)
-        tmp.replace(path)
+    if path.exists():
+        verify(dataset, path)
+        return path
+    tmp = path.with_suffix(".zip.part")
+    with urllib.request.urlopen(BASE_URL + path.name, timeout=60) as resp, tmp.open("wb") as out:  # noqa: S310
+        shutil.copyfileobj(resp, out)
+    try:
+        verify(dataset, tmp)
+    except ValueError:
+        tmp.unlink(missing_ok=True)
+        raise
+    tmp.replace(path)
     return path
 
 
