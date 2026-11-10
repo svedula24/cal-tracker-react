@@ -18,9 +18,8 @@ export const defaultServing = (food: Food): Portion => food.portions[0] ?? HUNDR
 /**
  * The grams the Nutrition screen starts at: for a new food, its default
  * serving; for a logged entry, what it already stands for (its measure, or
- * the default serving when an older entry has none, × its quantity). Exact
- * and uncapped: an entry over MAX_QTY opens as an invalid amount (Done stays
- * off) rather than being quietly shrunk on save. The field rounds for display.
+ * the default serving when an older entry has none, × its quantity). Exact;
+ * the field rounds for display.
  */
 export function entryGrams(entry: Entry | undefined, food: Food): number {
   if (!entry) return defaultServing(food).grams;
@@ -45,12 +44,10 @@ export const foodOfEntry = (e: Entry): Food | null =>
 export const times = (n: Nutrients, quantity: number): Nutrients =>
   Object.fromEntries(NUTRIENT_KEYS.map((k) => [k, n[k] * quantity])) as Nutrients;
 
-export const MAX_QTY = 10000;
-
 /**
  * A typed quantity: digits with one "." or "," (a comma is a decimal point,
- * "1,5", unless it groups thousands, "1,000"), positive, at most MAX_QTY, kept
- * to 2 decimals. Null when invalid, so a typo can't become a day's total.
+ * "1,5", unless it groups thousands, "1,000"), positive, kept to 2 decimals.
+ * No upper bound. Null when invalid, so a typo can't become a day's total.
  */
 export function parseQty(text: string): number | null {
   const t = text.trim();
@@ -58,7 +55,7 @@ export function parseQty(text: string): number | null {
   const normalized = /^\d{1,3}(,\d{3})+$/.test(t) ? t.replace(/,/g, '') : t.replace(',', '.');
   if (!/^\d*\.?\d+$/.test(normalized) && !/^\d+\.$/.test(normalized)) return null;
   const n = Math.round(Number(normalized) * 100) / 100; // round first: "0.004" is 0, not a quantity
-  return n > 0 && n <= MAX_QTY ? n : null;
+  return n > 0 && Number.isFinite(n) ? n : null;
 }
 
 /** The quantity as shown in the field: "1", "1.5", "0.33". */

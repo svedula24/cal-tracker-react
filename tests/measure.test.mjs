@@ -56,8 +56,8 @@ test('entryGrams: a new food starts at its serving; an entry at the grams it sta
   assert.equal(entryGrams(entry, banana), 378); // no saved measure: 3 default servings, not 1
   close(entryGrams({ ...entry, servings: 1, measure: { label: '1 oz', grams: 28.3495 } }, banana), 28.3495, 'not rounded');
   assert.equal(entryGrams({ ...entry, servings: 0, measure: G }, banana), 126); // nothing to stand for: the serving
-  assert.equal(entryGrams({ ...entry, servings: 100, measure: banana.portions[0] }, banana), 12600); // over MAX_QTY: not shrunk; the field rejects it
-  assert.equal(parseQty(qtyText(12600)), null); // so Done stays off until the user types an amount
+  assert.equal(entryGrams({ ...entry, servings: 100, measure: banana.portions[0] }, banana), 12600); // large, and the field accepts it
+  assert.equal(parseQty(qtyText(12600)), 12600);
 });
 
 test('parseQty: decimals, a decimal comma, thousands separators, and rejects the rest', () => {
@@ -69,8 +69,9 @@ test('parseQty: decimals, a decimal comma, thousands separators, and rejects the
   assert.equal(parseQty('1,250'), 1250);
   assert.equal(parseQty('0.333'), 0.33); // kept to 2 decimals, as shown
   assert.equal(parseQty('10000'), 10000);
+  assert.equal(parseQty('12600'), 12600); // no upper bound
   assert.equal(parseQty('2.'), 2);
-  for (const bad of ['', '0', '0.004', '-1', 'abc', '1,000,5', '1.2.3', '1e21', '0x10', '10001', '1 0', 'Infinity']) assert.equal(parseQty(bad), null, bad);
+  for (const bad of ['', '0', '0.004', '-1', 'abc', '1,000,5', '1.2.3', '1e21', '0x10', '1 0', 'Infinity']) assert.equal(parseQty(bad), null, bad);
 });
 
 test('qtyText shows what is stored', () => {
