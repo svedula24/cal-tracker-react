@@ -8,7 +8,7 @@ import { Press } from '@/components/Press';
 import { cardShadow, goBack } from '@/components/Screen';
 import type { Food } from '@/data/foods';
 import { type Entry, newEntry, useEntries, useSavedFoods } from '@/lib/data';
-import { defaultServing, fmt, foodOfEntry, G, HUNDRED_G, parseQty, qtyText, scale, times } from '@/lib/measure';
+import { defaultServing, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, qtyText, scale, times } from '@/lib/measure';
 import { formatTime, type Nutrients, zero } from '@/lib/nutrition';
 import { parseFood } from '@/lib/savedFoods';
 import { useSelectedDay } from '@/lib/selectedDay';
@@ -72,7 +72,7 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
 
   const [name, setName] = useState(entry?.name ?? base?.name ?? '');
   // For a food: grams. For a hand-written entry: servings.
-  const initial = base ? initialGrams(entry, base) : (entry?.servings ?? 1);
+  const initial = base ? entryGrams(entry, base) : (entry?.servings ?? 1);
   const [qty, setQty] = useState(initial);
   const [text, setText] = useState(qtyText(initial));
   const [more, setMore] = useState(false);
@@ -266,12 +266,6 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
       </View>
     </View>
   );
-}
-
-/** The grams an entry already stands for (any older measure × its quantity), else the food's default serving. */
-function initialGrams(entry: Entry | undefined, food: Food): number {
-  const grams = entry?.measure ? entry.measure.grams * entry.servings : 0;
-  return grams > 0 ? Math.round(grams * 100) / 100 : defaultServing(food).grams;
 }
 
 function RoundButton({ label, onPress, children }: { label: string; onPress: () => void; children: React.ReactNode }) {

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { defaultServing, fmt, foodOfEntry, G, HUNDRED_G, parseQty, qtyText, scale, servingSummary, times } from '../src/lib/measure.ts';
+import { defaultServing, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, qtyText, scale, servingSummary, times } from '../src/lib/measure.ts';
 
 // USDA "Banana, raw" per 100 g; its portions, default first.
 const banana = {
@@ -46,6 +46,16 @@ test('foodOfEntry keeps the database name after a rename; null for hand-written 
   assert.deepEqual(foodOfEntry(entry), banana);
   assert.equal(foodOfEntry({ ...entry, foodName: undefined }).name, 'Breakfast'); // older entries: the label is all we have
   assert.equal(foodOfEntry({ id: 'e2', date: '2026-11-10', time: 't', name: 'Sandwich', servings: 1, nutrients: banana.per100g }), null);
+});
+
+test('entryGrams: a new food starts at its serving; an entry at the grams it stands for', () => {
+  const entry = { id: 'e1', date: '2026-11-10', time: 't', name: 'Banana, raw', servings: 3, nutrients: banana.per100g, per100g: banana.per100g, portions: banana.portions, foodId: banana.id };
+  assert.equal(entryGrams(undefined, banana), 126);
+  assert.equal(entryGrams({ ...entry, measure: G }, banana), 3); // logged in grams
+  assert.equal(entryGrams({ ...entry, servings: 1.5, measure: banana.portions[0] }, banana), 189); // 1.5 bananas
+  assert.equal(entryGrams(entry, banana), 378); // no saved measure: 3 default servings, not 1
+  close(entryGrams({ ...entry, servings: 1, measure: { label: '1 oz', grams: 28.3495 } }, banana), 28.3495, 'not rounded');
+  assert.equal(entryGrams({ ...entry, servings: 0, measure: G }, banana), 126); // nothing to stand for: the serving
 });
 
 test('parseQty: decimals, a decimal comma, thousands separators, and rejects the rest', () => {

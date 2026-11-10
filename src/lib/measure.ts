@@ -15,6 +15,19 @@ export const HUNDRED_G: Portion = { label: '100 g', grams: 100 };
 /** The food's default serving: its first portion, else 100 g. */
 export const defaultServing = (food: Food): Portion => food.portions[0] ?? HUNDRED_G;
 
+/**
+ * The grams the Nutrition screen starts at: for a new food, its default
+ * serving; for a logged entry, what it already stands for (its measure, or
+ * the default serving when an older entry has none, × its quantity). Exact;
+ * the field rounds for display.
+ */
+export function entryGrams(entry: Entry | undefined, food: Food): number {
+  if (!entry) return defaultServing(food).grams;
+  const per = entry.measure?.grams ?? defaultServing(food).grams;
+  const grams = per * entry.servings;
+  return grams > 0 ? grams : defaultServing(food).grams;
+}
+
 /** Nutrients in `grams` of a food. Exact; round only for display. */
 export const scale = (per100g: Nutrients, grams: number): Nutrients =>
   Object.fromEntries(NUTRIENT_KEYS.map((k) => [k, (per100g[k] * grams) / 100])) as Nutrients;
