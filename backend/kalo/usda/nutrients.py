@@ -25,7 +25,16 @@ FAT = ((1004, "G"),)
 DATA_TYPES = ("Foundation", "SR Legacy", "Survey (FNDDS)")
 
 
-class UnitMismatch(ValueError):
+class RecordError(ValueError):
+    """One USDA record cannot be mapped to a row. The loader collects these and reports them all."""
+
+    def __init__(self, fdc_id: int, message: str) -> None:
+        super().__init__(f"fdc_id {fdc_id}: {message}")
+        self.fdc_id = fdc_id
+        self.message = message
+
+
+class UnitMismatch(RecordError):
     """A nutrient record carries a unit other than the one its id is defined in."""
 
 
@@ -68,7 +77,7 @@ def pick(amounts: dict[int, tuple[float, str]], candidates: tuple[tuple[int, str
             continue
         amount, got = amounts[nutrient_id]
         if got.casefold() != unit.casefold():  # datasets differ in case: "KCAL" (SR Legacy), "kcal" (Foundation)
-            raise UnitMismatch(f"fdc_id {fdc_id}: nutrient {nutrient_id} is in {got!r}, expected {unit!r}")
+            raise UnitMismatch(fdc_id, f"nutrient {nutrient_id} is in {got!r}, expected {unit!r}")
         return amount * KCAL_PER_KJ if unit == "kJ" else amount
     return None
 
@@ -77,10 +86,10 @@ def to_row(record: dict[str, Any]) -> FoodRow:
     fdc_id = int(record["fdcId"])
     data_type = record["dataType"]
     if data_type not in DATA_TYPES:
-        raise ValueError(f"fdc_id {fdc_id}: unknown dataType {data_type!r}")
+        raise RecordError(fdc_id, f"unknown dataType {data_type!r}")
     description = " ".join(str(record["description"]).split())
     if not description:
-        raise ValueError(f"fdc_id {fdc_id}: empty description")
+        raise RecordError(fdc_id, "empty description")
     amounts = _amounts(record)
     return FoodRow(
         fdc_id=fdc_id,

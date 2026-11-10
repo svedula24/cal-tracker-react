@@ -18,7 +18,9 @@ One table, `foods` (`db/schema.sql`): one row per USDA food, nutrients per 100 g
 | `fat_per_100g` | 1004 |
 
 A nutrient the source does not report is **NULL**, never 0. The loader checks
-each nutrient's unit and fails if USDA changes one. Details: `kalo/usda/nutrients.py`.
+each nutrient's unit (and each record's dataType and description): a load with
+any unmappable record loads nothing and lists every bad record, by dataset and
+fdc_id, before exiting. Details: `kalo/usda/nutrients.py`.
 
 Releases: Foundation 2026-10-29, SR Legacy 2018-04 (final), FNDDS 2024-10-31
 (`kalo/usda/datasets.py`; the same releases the app's bundled JSON is built from).

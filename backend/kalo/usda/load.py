@@ -18,28 +18,44 @@ from pathlib import Path
 import psycopg
 
 from .datasets import DATASETS, records
-from .nutrients import FoodRow, to_row
+from .nutrients import FoodRow, RecordError, to_row
 
 DEFAULT_URL = "postgresql://kalo:kalo@localhost:5432/kalo"
 SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
 
 
 def read_rows() -> list[FoodRow]:
+    """Every row to load. A record that cannot be mapped is reported, with every other one, and the load is refused."""
     rows: list[FoodRow] = []
     seen: set[int] = set()
+    errors: dict[str, list[RecordError]] = {}  # release → the records that could not be mapped
     for dataset in DATASETS:
         started = time.monotonic()
         found = records(dataset)
         duplicates = 0
+        bad: list[RecordError] = []
         for record in found:
-            row = to_row(record)
+            try:
+                row = to_row(record)
+            except RecordError as e:
+                bad.append(e)
+                continue
             if row.fdc_id in seen:  # the three datasets should not overlap; the first wins
                 duplicates += 1
                 continue
             seen.add(row.fdc_id)
             rows.append(row)
+        if bad:
+            errors[dataset.release] = bad
         note = f", {duplicates} duplicate fdc_ids skipped" if duplicates else ""
+        note += f", {len(bad)} could not be mapped" if bad else ""
         print(f"{dataset.release}: {len(found)} foods{note} ({time.monotonic() - started:.1f}s)")
+    if errors:
+        for release, bad in errors.items():
+            print(f"{release}:", file=sys.stderr)
+            for e in bad:
+                print(f"  fdc_id {e.fdc_id}: {e.message}", file=sys.stderr)
+        raise SystemExit(f"{sum(len(bad) for bad in errors.values())} records could not be mapped; nothing loaded")
     return rows
 
 
