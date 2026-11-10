@@ -22,6 +22,8 @@ each nutrient's unit and fails if USDA changes one. Details: `kalo/usda/nutrient
 
 Releases: Foundation 2026-10-29, SR Legacy 2018-04 (final), FNDDS 2024-10-31
 (`kalo/usda/datasets.py`; the same releases the app's bundled JSON is built from).
+Each download is verified against a SHA-256 pinned in `kalo/usda/datasets.py`,
+so bumping a release means updating its pin.
 
 ## Run it
 
