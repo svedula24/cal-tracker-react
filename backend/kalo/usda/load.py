@@ -59,10 +59,39 @@ def read_rows() -> list[FoodRow]:
     return rows
 
 
+# Every constraint db/schema.sql declares, by Postgres's generated name. An existing table
+# that lacks one predates a schema change: CREATE TABLE IF NOT EXISTS would silently keep it.
+EXPECTED_CONSTRAINTS = frozenset(
+    {
+        "foods_pkey",
+        "foods_data_type_check",
+        "foods_calories_per_100g_check",
+        "foods_protein_per_100g_check",
+        "foods_carbs_per_100g_check",
+        "foods_fat_per_100g_check",
+    }
+)
+
+
+class SchemaOutOfDate(RuntimeError):
+    """The existing foods table does not match db/schema.sql."""
+
+
+def ensure_schema(cur: psycopg.Cursor) -> None:
+    cur.execute(SCHEMA.read_text())
+    cur.execute("SELECT conname FROM pg_constraint WHERE conrelid = 'foods'::regclass")
+    missing = EXPECTED_CONSTRAINTS - {name for (name,) in cur.fetchall()}
+    if missing:
+        raise SchemaOutOfDate(
+            f"the foods table predates db/schema.sql (missing {', '.join(sorted(missing))}); "
+            "run DROP TABLE foods and load again"
+        )
+
+
 def load(rows: list[FoodRow], url: str) -> Counter[str]:
     columns = ", ".join(FoodRow.columns())
     with psycopg.connect(url) as conn, conn.cursor() as cur:
-        cur.execute(SCHEMA.read_text())
+        ensure_schema(cur)
         cur.execute("TRUNCATE foods")
         with cur.copy(f"COPY foods ({columns}) FROM STDIN") as copy:
             for row in rows:

@@ -33,6 +33,19 @@ def test_energy_prefers_kcal_then_atwater_specific_then_general():
     assert to_row(record(data_type="Foundation", nutrients=[(2047, 380.0, "KCAL")])).calories_per_100g == 380.0
 
 
+def test_wrong_unit_falls_through_to_the_next_energy_candidate():
+    # 1008 reported in kJ is skipped when an Atwater value is usable; a lone wrong unit is still an error.
+    row = to_row(record(nutrients=[(1008, 1548.0, "kJ"), (2048, 370.0, "KCAL")]))
+    assert row.calories_per_100g == 370.0
+    with pytest.raises(UnitMismatch, match="nutrient 1008 is in 'kJ'"):
+        to_row(record(nutrients=[(1008, 1548.0, "kJ")]))
+
+
+def test_non_finite_amounts_are_not_reported():
+    row = to_row(record(nutrients=[(1003, float("inf"), "G"), (1004, float("nan"), "G"), (1005, 1.0, "G")]))
+    assert (row.protein_per_100g, row.fat_per_100g, row.carbs_per_100g) == (None, None, 1.0)
+
+
 def test_energy_in_kj_alone_is_converted():
     row = to_row(record(nutrients=[(1062, 418.4, "kJ")]))
     assert row.calories_per_100g == pytest.approx(418.4 * KCAL_PER_KJ) == pytest.approx(100.0)

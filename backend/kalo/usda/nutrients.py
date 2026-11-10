@@ -8,6 +8,7 @@ A reported negative value is 0 (same as scripts/usda/map.mjs, the app's mapper).
 
 from __future__ import annotations
 
+import math
 from dataclasses import astuple, dataclass, fields
 from typing import Any
 
@@ -68,21 +69,31 @@ def _amounts(record: dict[str, Any]) -> dict[int, tuple[float, str]]:
         amount = item.get("amount")
         if not isinstance(nutrient_id, int) or isinstance(amount, bool) or not isinstance(amount, int | float):
             continue  # no id, or no numeric amount: not reported
+        if not math.isfinite(amount):
+            continue  # json.load accepts NaN/Infinity; neither is a measurement
         out[nutrient_id] = (float(amount), str(nutrient.get("unitName") or ""))
     return out
 
 
 def pick(amounts: dict[int, tuple[float, str]], candidates: tuple[tuple[int, str], ...], fdc_id: int) -> float | None:
-    """The first candidate the record reports, converted to the column's unit; None when it reports none."""
+    """The first candidate the record reports in the expected unit, converted to the column's unit.
+
+    None when it reports none. A candidate in the wrong unit is skipped when a later one is usable
+    (one odd record must not block a whole release); it is an error only when nothing else is.
+    """
+    mismatch: UnitMismatch | None = None
     for nutrient_id, unit in candidates:
         if nutrient_id not in amounts:
             continue
         amount, got = amounts[nutrient_id]
         if got.casefold() != unit.casefold():  # datasets differ in case: "KCAL" (SR Legacy), "kcal" (Foundation)
-            raise UnitMismatch(fdc_id, f"nutrient {nutrient_id} is in {got!r}, expected {unit!r}")
+            mismatch = mismatch or UnitMismatch(fdc_id, f"nutrient {nutrient_id} is in {got!r}, expected {unit!r}")
+            continue
         value = amount * KCAL_PER_KJ if unit == "kJ" else amount
         # USDA's "carbohydrate by difference" can come out slightly negative; it is 0, as in the app's mapper.
         return max(0.0, value)
+    if mismatch:
+        raise mismatch
     return None
 
 

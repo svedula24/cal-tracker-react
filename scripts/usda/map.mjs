@@ -15,6 +15,8 @@ export const NUTRIENT_IDS = {
   sugar: [2000, 1063],
   sodium: [1093], // mg
 };
+// Units are trusted here (the releases are pinned by hash in backend/kalo/usda/datasets.py);
+// the backend mapper checks each record's unitName and is the one that would catch a change.
 export const FIELDS = Object.keys(NUTRIENT_IDS);
 const KJ = 1062;
 const KCAL_PER_KJ = 1 / 4.184;

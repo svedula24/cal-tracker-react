@@ -63,6 +63,9 @@ or set the variable inline.
 ## Develop
 
 ```sh
-uv run pytest          # mapping tests, no database needed
+uv run pytest          # mapping and download tests; the database tests skip without DATABASE_URL
+DATABASE_URL=postgresql://kalo:kalo@localhost:5432/kalo uv run pytest   # all, against docker-compose
 uv run ruff check .
 ```
+
+The database tests run in a throwaway schema and never touch the `foods` table.
