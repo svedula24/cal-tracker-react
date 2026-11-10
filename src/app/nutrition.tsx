@@ -6,16 +6,15 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { Press } from '@/components/Press';
 import { cardShadow, goBack } from '@/components/Screen';
-import type { Food, Portion } from '@/data/foods';
+import type { Food } from '@/data/foods';
 import { type Entry, newEntry, useEntries, useSavedFoods } from '@/lib/data';
-import { chipLabel, defaultServing, fmt, foodOfEntry, measurementsFor, parseQty, qtyText, scale, times } from '@/lib/measure';
+import { defaultServing, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, qtyText, scale, times } from '@/lib/measure';
 import { formatTime, type Nutrients, zero } from '@/lib/nutrition';
 import { parseFood } from '@/lib/savedFoods';
 import { useSelectedDay } from '@/lib/selectedDay';
 import { tokens } from '@/lib/tokens';
 
 const c = tokens.colors;
-const SERVING: Portion = { label: '1 serving', grams: 0 }; // entries without a known weight
 
 const MACROS = [
   { key: 'protein', label: 'Protein', Icon: Drumstick, color: c.protein, unit: 'g' },
@@ -30,8 +29,9 @@ const MICROS = [
 
 /**
  * The Nutrition screen: open from a food (adding it to the day) or from a
- * logged entry (editing it). Pick a measurement (the food's portions, ounces or
- * grams) and a quantity; nutrients are per100g × grams × quantity / 100.
+ * logged entry (editing it). Type the amount in grams; nutrients are
+ * per100g × grams / 100. A hand-written entry (no per-100 g data) keeps a
+ * servings field instead.
  */
 export default function Nutrition() {
   const { id, food: foodParam } = useLocalSearchParams<{ id?: string; food?: string }>();
@@ -71,18 +71,19 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
   const pager = useRef<ScrollView>(null);
 
   const [name, setName] = useState(entry?.name ?? base?.name ?? '');
-  const [measure, setMeasure] = useState<Portion>(entry?.measure ?? (base ? defaultServing(base) : SERVING));
-  const [qty, setQty] = useState(entry?.servings ?? 1);
-  const [text, setText] = useState(qtyText(entry?.servings ?? 1));
+  // For a food: grams. For a hand-written entry: servings.
+  const initial = base ? entryGrams(entry, base) : (entry?.servings ?? 1);
+  const [qty, setQty] = useState(initial);
+  const [text, setText] = useState(qtyText(initial));
   const [more, setMore] = useState(false);
   const [menu, setMenu] = useState(false);
   const [page, setPage] = useState(0);
 
-  const measurements = base ? measurementsFor(base.portions) : [SERVING];
-  // Per one measure (what the day's totals multiply by `servings`), and the amount shown.
-  const perMeasure: Nutrients = base ? scale(base.per100g, measure.grams) : (entry?.nutrients ?? zero());
-  const nutrients = times(perMeasure, qty);
-  const grams = base ? measure.grams * qty : 0;
+  // Per one unit (1 g, or one serving of a hand-written entry): what the day's
+  // totals multiply by `servings`. The cards show the typed amount.
+  const perUnit: Nutrients = base ? scale(base.per100g, 1) : (entry?.nutrients ?? zero());
+  const nutrients = times(perUnit, qty);
+  const serving = base ? defaultServing(base) : null;
   const isSaved = !!base && saved.items.some((s) => s.id === base.id);
   const time = formatTime(entry?.time ?? new Date().toISOString());
 
@@ -98,10 +99,10 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
     if (!valid) return;
     const finalName = name.trim() || base?.name || entry?.name || 'Food';
     if (entry) {
-      entries.update(entry.id, { name: finalName, servings: qty, measure: base ? measure : entry.measure, nutrients: perMeasure });
+      entries.update(entry.id, { name: finalName, servings: qty, measure: base ? G : entry.measure, nutrients: perUnit });
       goBack();
     } else if (base) {
-      entries.add({ ...newEntry(base, measure, qty, day), name: finalName });
+      entries.add({ ...newEntry(base, G, qty, day), name: finalName });
       router.dismissTo('/');
     }
   };
@@ -167,46 +168,26 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
             ) : null}
           </View>
 
-          <Text className="mt-[26px] px-[6px] text-[20px] font-semibold text-foreground">Measurement</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mt-[16px] -mx-[22px]" contentContainerStyle={{ paddingHorizontal: 28, gap: 8 }} keyboardShouldPersistTaps="handled">
-            {measurements.map((m) => {
-              const on = m.label === measure.label;
-              return (
-                <Press
-                  key={m.label}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Measure in ${chipLabel(m)}`}
-                  accessibilityState={{ selected: on }}
-                  onPress={() => setMeasure(m)}
-                  className={`h-[44px] items-center justify-center rounded-full px-[22px] ${on ? 'bg-foreground' : 'bg-chip'}`}
-                >
-                  <Text className={`text-[18px] ${on ? 'font-semibold text-card' : 'text-foreground'}`} numberOfLines={1}>
-                    {chipLabel(m)}
-                  </Text>
-                </Press>
-              );
-            })}
-          </ScrollView>
-
           <View className="mt-[28px] flex-row items-center justify-between px-[6px]">
-            <Text className="flex-1 text-[20px] font-semibold text-foreground">Number of Servings</Text>
-            <View className={`h-[40px] w-[112px] flex-row items-center justify-center rounded-full border bg-card ${valid ? 'border-border' : 'border-bad'}`}>
+            <Text className="flex-1 text-[20px] font-semibold text-foreground">{base ? 'Amount' : 'Number of Servings'}</Text>
+            <View className={`h-[40px] flex-row items-center justify-center rounded-full border bg-card pl-2 pr-3 ${valid ? 'border-border' : 'border-bad'}`}>
               <TextInput
-                accessibilityLabel="Number of servings"
+                accessibilityLabel={base ? 'Grams' : 'Number of servings'}
                 value={text}
                 onChangeText={onQty}
                 onBlur={() => setText(qtyText(qty))} // parseQty already rounds to what is shown
                 keyboardType="decimal-pad"
                 selectTextOnFocus
                 className="text-center text-[18px] font-semibold text-foreground"
-                style={{ width: 52, outlineStyle: 'none' } as object}
+                style={{ width: 64, outlineStyle: 'none' } as object}
               />
+              {base ? <Text className="text-[18px] font-semibold text-foreground">g</Text> : null}
               <Pencil size={16} color={c.foreground} style={{ marginLeft: 6 }} />
             </View>
           </View>
-          {base ? (
+          {serving && serving !== HUNDRED_G ? (
             <Text className="mt-[8px] px-[6px] text-[13px] text-muted">
-              {chipLabel(measure)} = {fmt(measure.grams)} g · total {fmt(grams)} g
+              {serving.label} = {fmt(serving.grams)} g
             </Text>
           ) : null}
 
@@ -265,12 +246,6 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
                   </Text>
                 </View>
               ))}
-              {base ? (
-                <View className="flex-row items-center justify-between border-t border-border py-3">
-                  <Text className="text-[16px] text-foreground">Weight</Text>
-                  <Text className="text-[16px] font-medium text-foreground">{fmt(grams)}g</Text>
-                </View>
-              ) : null}
             </View>
           ) : null}
         </ScrollView>
