@@ -34,9 +34,9 @@ def read_rows() -> list[FoodRow]:
         found = records(dataset)
         duplicates = 0
         bad: list[RecordError] = []
-        for record in found:
+        for index, record in enumerate(found):
             try:
-                row = to_row(record)
+                row = to_row(record, index)
             except RecordError as e:
                 bad.append(e)
                 continue

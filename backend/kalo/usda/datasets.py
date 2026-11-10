@@ -77,14 +77,13 @@ def fetch(dataset: Dataset, data_dir: Path = DATA_DIR) -> Path:
         verify(dataset, path)
         return path
     tmp = path.with_suffix(".zip.part")
-    with urllib.request.urlopen(BASE_URL + path.name, timeout=60) as resp, tmp.open("wb") as out:  # noqa: S310
-        shutil.copyfileobj(resp, out)
     try:
+        with urllib.request.urlopen(BASE_URL + path.name, timeout=60) as resp, tmp.open("wb") as out:  # noqa: S310
+            shutil.copyfileobj(resp, out)
         verify(dataset, tmp)
-    except ValueError:
-        tmp.unlink(missing_ok=True)
-        raise
-    tmp.replace(path)
+        tmp.replace(path)
+    finally:
+        tmp.unlink(missing_ok=True)  # a failed or rejected download leaves nothing behind
     return path
 
 

@@ -28,7 +28,8 @@ DATA_TYPES = ("Foundation", "SR Legacy", "Survey (FNDDS)")
 class RecordError(ValueError):
     """One USDA record cannot be mapped to a row. The loader collects these and reports them all."""
 
-    def __init__(self, fdc_id: int, message: str) -> None:
+    def __init__(self, fdc_id: int | str, message: str) -> None:
+        # fdc_id is the record's id, or "record #N" (its position) when the id itself is missing or invalid.
         super().__init__(f"fdc_id {fdc_id}: {message}")
         self.fdc_id = fdc_id
         self.message = message
@@ -64,9 +65,9 @@ def _amounts(record: dict[str, Any]) -> dict[int, tuple[float, str]]:
         nutrient = item.get("nutrient") or {}
         nutrient_id = nutrient.get("id")
         amount = item.get("amount")
-        if nutrient_id is None or isinstance(amount, bool) or not isinstance(amount, int | float):
-            continue
-        out[int(nutrient_id)] = (float(amount), str(nutrient.get("unitName") or ""))
+        if not isinstance(nutrient_id, int) or isinstance(amount, bool) or not isinstance(amount, int | float):
+            continue  # no id, or no numeric amount: not reported
+        out[nutrient_id] = (float(amount), str(nutrient.get("unitName") or ""))
     return out
 
 
@@ -82,12 +83,18 @@ def pick(amounts: dict[int, tuple[float, str]], candidates: tuple[tuple[int, str
     return None
 
 
-def to_row(record: dict[str, Any]) -> FoodRow:
-    fdc_id = int(record["fdcId"])
-    data_type = record["dataType"]
+def to_row(record: dict[str, Any], index: int | None = None) -> FoodRow:
+    """The row for a record. A malformed field raises RecordError; `index` names the record if its id is unusable."""
+    where = f"record #{index}" if index is not None else "record"
+    if not isinstance(record, dict):
+        raise RecordError(where, "not an object")
+    fdc_id = record.get("fdcId")
+    if isinstance(fdc_id, bool) or not isinstance(fdc_id, int):
+        raise RecordError(where, f"missing or invalid fdcId {fdc_id!r}")
+    data_type = record.get("dataType")
     if data_type not in DATA_TYPES:
         raise RecordError(fdc_id, f"unknown dataType {data_type!r}")
-    description = " ".join(str(record["description"]).split())
+    description = " ".join(str(record.get("description") or "").split())
     if not description:
         raise RecordError(fdc_id, "empty description")
     amounts = _amounts(record)

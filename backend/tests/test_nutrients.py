@@ -2,7 +2,7 @@
 
 import pytest
 
-from kalo.usda.nutrients import KCAL_PER_KJ, FoodRow, UnitMismatch, to_row
+from kalo.usda.nutrients import KCAL_PER_KJ, FoodRow, RecordError, UnitMismatch, to_row
 
 
 def record(fdc_id=1, data_type="SR Legacy", description="Banana, raw", nutrients=(), brand=None):
@@ -73,6 +73,24 @@ def test_description_whitespace_is_collapsed_and_brand_kept():
     assert row.description == "Yogurt, Greek, plain"
     assert row.brand_name == "Acme"
     assert to_row(record(brand="")).brand_name is None
+
+
+def test_malformed_records_are_record_errors_not_crashes():
+    # Every malformed field is reported as a RecordError so the loader can list them all.
+    for rec, pattern in [
+        ({"dataType": "SR Legacy", "description": "X"}, "record #7: missing or invalid fdcId None"),
+        ({"fdcId": "abc", "dataType": "SR Legacy", "description": "X"}, "record #7: missing or invalid fdcId 'abc'"),
+        ({"fdcId": 5, "description": "X"}, "fdc_id 5: unknown dataType None"),
+        ({"fdcId": 5, "dataType": "SR Legacy"}, "fdc_id 5: empty description"),
+        ("not a record", "record #7: not an object"),
+    ]:
+        with pytest.raises(RecordError, match=pattern):
+            to_row(rec, 7)
+    # Nutrient items with a missing id or amount are "not reported", not errors.
+    rec = record(nutrients=[(1003, 1.0, "G")])
+    rec["foodNutrients"].append({"nutrient": {"unitName": "G"}, "amount": 2.0})
+    rec["foodNutrients"].append({"nutrient": {"id": "1004"}, "amount": 3.0})
+    assert to_row(rec).protein_per_100g == 1.0
 
 
 def test_unknown_data_type_and_empty_description_are_rejected():
