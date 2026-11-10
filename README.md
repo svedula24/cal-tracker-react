@@ -13,6 +13,7 @@ Needs Node 20.19.4+ (22 recommended).
 npm install
 npm run web        # or: npm run ios / npm run android
 npm run verify     # web export + headless check that every route renders and flows pass
+npm test           # unit tests for the food-search data mapping (Node's built-in runner)
 ```
 
 ## Food search
