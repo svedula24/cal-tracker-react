@@ -60,7 +60,7 @@ export function EntryCard({ entry, onDelete }: { entry: Entry; onDelete: () => v
             dragged.current = false;
             return;
           }
-          router.push({ pathname: '/entry/[id]', params: { id: entry.id } });
+          router.push({ pathname: '/nutrition', params: { id: entry.id } });
         }}
         className="h-[120px] flex-row overflow-hidden rounded-2xl border border-border bg-entry"
       >

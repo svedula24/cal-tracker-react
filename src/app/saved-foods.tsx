@@ -1,6 +1,5 @@
 import { router } from 'expo-router';
 import { Bookmark, Trash2 } from 'lucide-react-native';
-import { useState } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
@@ -13,7 +12,6 @@ import { tokens } from '@/lib/tokens';
 
 export default function SavedFoods() {
   const saved = useSavedFoods();
-  const [openId, setOpenId] = useState<string | null>(null);
   // Stored entries are cleaned when the list loads; this also skips any that
   // couldn't be, so a bad entry can never break the screen.
   const list = saved.items.filter(isSavedFood).map((s) => s.food);
@@ -53,8 +51,6 @@ export default function SavedFoods() {
           >
             <FoodRow
               food={food}
-              expanded={openId === food.id}
-              onToggle={() => setOpenId(openId === food.id ? null : food.id)}
               trailing={
                 <Pressable
                   accessibilityRole="button"

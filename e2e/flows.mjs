@@ -118,5 +118,5 @@ const home = [
   },
 ];
 
-export const routes = ['/', ...logging.routes, '/daily-score', '/score-info'];
+export const routes = ['/', ...logging.routes, '/daily-score', '/score-info', '/nutrition'];
 export const flows = [...home, ...logging.flows];

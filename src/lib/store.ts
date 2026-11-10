@@ -81,6 +81,9 @@ export class Collection<T extends WithId> {
               next = migrated;
             } catch {}
           }
+          // A new array even when the data equals the seed, so subscribers
+          // re-render after hydration (and see `ready`); the store compares references.
+          if (next === this.items) next = [...next];
           // Nothing stored yet: save the seed now, so date-relative seed data is
           // fixed at first launch instead of being rebuilt on every cold start.
           if (queued.length || raw == null || changed) this.commit(next);

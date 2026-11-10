@@ -80,6 +80,14 @@ test('nothing stored yet: the seed is migrated and saved', async () => {
   assert.deepEqual(JSON.parse(disk.get('f')), c.items);
 });
 
+test('hydration re-renders subscribers even when the data equals the seed', async () => {
+  const seed = [{ id: 's' }];
+  const c = await hydrated(new Collection('h', seed)); // nothing stored: the seed is kept
+  assert.equal(c.ready, true);
+  assert.deepEqual(c.items, seed);
+  assert.notEqual(c.items, seed, 'a new snapshot reference, or useSyncExternalStore would skip the render');
+});
+
 test('corrupt stored JSON falls back to the seed, which is migrated', async () => {
   disk.set('g', '{not json');
   const c = await hydrated(new Collection('g', [{ id: 's' }], (items) => items.map((i) => ({ ...i, upgraded: true }))));

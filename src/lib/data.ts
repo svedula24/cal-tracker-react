@@ -12,7 +12,8 @@ import {
   stepsToCalories,
   sum,
 } from '@/lib/nutrition';
-import type { Food } from '@/data/foods';
+import type { Food, Portion } from '@/data/foods';
+import { defaultServing, scale } from '@/lib/measure';
 import { migrateSavedFoods, type SavedFood } from '@/lib/savedFoods';
 import { PAST_DAY_FOODS, SAVED_FOODS } from '@/lib/seedFoods';
 
@@ -21,9 +22,15 @@ export type Entry = {
   date: string; // YYYY-MM-DD
   time: string; // ISO timestamp
   name: string;
-  servings: number;
-  nutrients: Nutrients; // per serving
+  servings: number; // quantity of `measure`
+  nutrients: Nutrients; // per one `measure` (what the day's totals sum)
+  // The food behind the entry, so its measurement can be changed later. Absent
+  // on the hand-written demo entries, which only have a serving.
+  per100g?: Nutrients;
+  portions?: Portion[];
+  measure?: Portion;
   foodId?: string;
+  foodName?: string; // the database name, even after the entry is renamed
   photo?: string;
 };
 export type DayLog = { id: string; steps: number; waterCups: number; rollover: number }; // id = date
@@ -65,7 +72,7 @@ function seedEntries(): Entry[] {
   for (let back = 1; back <= 5; back++) {
     const d = addDays(now, -back);
     for (const [name, h, m, food] of PAST_DAY_FOODS) {
-      out.push({ id: makeId(), date: dayKey(d), time: at(d, h, m), name, servings: back % 2 ? 1.5 : 1.25, nutrients: food.nutrients, foodId: food.id });
+      out.push({ ...newEntry(food, defaultServing(food), back % 2 ? 1.5 : 1.25, dayKey(d)), time: at(d, h, m), name });
     }
   }
   return out;
@@ -135,9 +142,21 @@ export function nowOn(date: string): string {
   return t.toISOString();
 }
 
-/** Log a database food for a day (time = now on that day). */
-export function newEntry(food: Food, servings: number, date: string): Entry {
-  return { id: makeId(), date, time: nowOn(date), name: food.name, servings, nutrients: food.nutrients, foodId: food.id };
+/** Log `quantity` × `measure` of a food for a day (time = now on that day). */
+export function newEntry(food: Food, measure: Portion, quantity: number, date: string): Entry {
+  return {
+    id: makeId(),
+    date,
+    time: nowOn(date),
+    name: food.name,
+    servings: quantity,
+    nutrients: scale(food.per100g, measure.grams),
+    per100g: food.per100g,
+    portions: food.portions,
+    measure,
+    foodId: food.id,
+    foodName: food.name,
+  };
 }
 
 /** The calorie budget for a day: goal + rollover + calories burned from steps. */

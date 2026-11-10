@@ -20,6 +20,16 @@ const btn = (page, name) => page.getByRole('button', { name, exact: true });
 // exported chunk (usda-foods-<hash>.js) and the dev server's (usda-foods.bundle?…).
 const FOOD_CHUNK = '**/usda-foods*';
 
+// The Calories card on the Nutrition screen shows a bare number (macros carry units).
+const expectCalories = (page, value) =>
+  page
+    .getByText(value, { exact: true })
+    .first()
+    .waitFor({ timeout: 3000 })
+    .catch(() => {
+      throw new Error(`expected the Calories card to show ${value}`);
+    });
+
 export const flows = [
   {
     name: 'food database: loading state until the data arrives, then the empty-search prompt',
@@ -87,18 +97,66 @@ export const flows = [
     },
   },
   {
-    name: 'food database: add "Banana, raw" -> shows on Home and persists',
+    name: 'nutrition: measurements compute from per-100 g data (portion, grams, ounces, quantity)',
     run: async (page, base, { wait }) => {
       await go(page, base + '/food-database', wait);
       await page.getByLabel('Search foods').fill('banana');
       await btn(page, 'Banana, raw').click();
-      await btn(page, 'Add Banana, raw to log').click();
-      await settle(page, wait);
-      await go(page, base + '/', wait);
-      if ((await visible(page, 'Banana, raw')) === 0) throw new Error('Banana, raw not on Home after adding');
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      // USDA Banana, raw: 97 kcal per 100 g; default portion 1 banana = 126 g.
+      await expectCalories(page, '122');
+      await btn(page, 'Measure in G').click();
+      await page.getByLabel('Number of servings').fill('100');
+      await expectCalories(page, '97');
+      await page.getByLabel('Number of servings').fill('50');
+      await expectCalories(page, '49'); // 48.5, shown whole (values ≥ 10 round)
+      await btn(page, 'Measure in Oz').click(); // 50 oz = 1417.5 g
+      await expectCalories(page, '1375');
+      await page.getByLabel('Number of servings').fill('1');
+      await expectCalories(page, '27'); // 28.3495 g
+      await btn(page, 'Measure in Banana').click();
+      await page.getByLabel('Number of servings').fill('2');
+      await expectCalories(page, '244');
+      await btn(page, 'Done').click();
+      await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+      await page.getByText(/244 Calories/).waitFor({ timeout: 3000 });
       await page.reload({ waitUntil: 'networkidle' });
       await wait(800);
-      if ((await visible(page, 'Banana, raw')) === 0) throw new Error('Banana, raw did not persist on Home');
+      if ((await page.getByText(/244 Calories/).count()) === 0) throw new Error('2 bananas did not persist on Home');
+    },
+  },
+  {
+    name: 'nutrition (edit): a bookmark saves the food under its database name, not the renamed label',
+    run: async (page, base, { wait }) => {
+      await go(page, base + '/', wait);
+      await page.getByText('Banana, raw', { exact: true }).first().click(); // logged by the previous flow
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      await page.getByLabel('Food name').fill('Breakfast');
+      await btn(page, 'Save Banana, raw').click();
+      await btn(page, 'Unsave Banana, raw').waitFor({ timeout: 3000 });
+      await btn(page, 'Done').click();
+      await page.getByText('Breakfast', { exact: true }).waitFor({ timeout: 5000 });
+      await go(page, base + '/saved-foods', wait);
+      if ((await visible(page, 'Banana, raw')) === 0) throw new Error('saved food is not under its database name');
+      if ((await visible(page, 'Breakfast')) > 0) throw new Error('saved food took the renamed label');
+    },
+  },
+  {
+    name: 'nutrition: other nutrition facts expand; bookmark saves the food',
+    run: async (page, base, { wait }) => {
+      await go(page, base + '/food-database', wait);
+      await page.getByLabel('Search foods').fill('honey');
+      await btn(page, 'Honey').click();
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      await btn(page, 'Other nutrition facts').click();
+      await page.getByText('Weight', { exact: true }).waitFor({ timeout: 3000 });
+      if ((await page.getByText('21g', { exact: true }).count()) === 0) throw new Error('weight of 1 tbsp honey (21 g) not shown');
+      if ((await btn(page, 'Unsave Honey').count()) === 0) {
+        await btn(page, 'Save Honey').click();
+        await btn(page, 'Unsave Honey').waitFor({ timeout: 3000 });
+      }
+      await go(page, base + '/saved-foods', wait);
+      if ((await visible(page, 'Honey')) === 0) throw new Error('Honey not in saved foods');
     },
   },
   {
@@ -139,7 +197,12 @@ export const flows = [
     run: async (page, base, { wait }) => {
       await go(page, base + '/', wait);
       // An older build's storage: a pre-USDA id, a broken snapshot, a duplicate, and a valid entry.
-      const banana = { id: 'usda:2709224', name: 'Banana (saved)', serving: '1 banana (126 g)', nutrients: { calories: 122, protein: 1, carbs: 29, fat: 0, fiber: 2, sugar: 20, sodium: 0 } };
+      const banana = {
+        id: 'usda:2709224',
+        name: 'Banana (saved)',
+        per100g: { calories: 97, protein: 0.74, carbs: 22.7, fat: 0.28, fiber: 1.7, sugar: 15.8, sodium: 0 },
+        portions: [{ label: '1 banana', grams: 126 }],
+      };
       await page.evaluate(
         (b) => localStorage.setItem('savedFoods', JSON.stringify([{ id: 'protein-bar' }, { id: 'x', food: {} }, { id: b.id, food: b }, { id: b.id, food: b }])),
         banana,
@@ -154,31 +217,39 @@ export const flows = [
     },
   },
   {
-    name: 'entry detail: rename Honey -> "Raw Honey" persists',
+    name: 'nutrition (edit): rename Honey -> "Raw Honey" persists',
     run: async (page, base, { wait }) => {
       await go(page, base + '/', wait);
       await page.getByText('Honey', { exact: true }).first().click();
-      await settle(page, wait);
-      const input = page.getByLabel('Food name');
-      await input.fill('Raw Honey');
-      await input.blur();
-      await wait(200);
-      await btn(page, 'Back').click();
-      await settle(page, wait);
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      // Opened by URL: the form must wait for storage, not start from empty defaults.
+      await page.reload({ waitUntil: 'networkidle' });
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      await expectCalories(page, '64'); // the seeded entry's calories
+      const title = await page.getByLabel('Food name').inputValue();
+      if (title !== 'Honey') throw new Error(`form not seeded from the stored entry: "${title}"`);
+      await page.getByLabel('Food name').fill('Raw Honey');
+      await btn(page, 'Done').click();
+      await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
       await page.reload({ waitUntil: 'networkidle' });
       await wait(800);
       if ((await visible(page, 'Raw Honey')) === 0) throw new Error('"Raw Honey" not shown after reload');
     },
   },
   {
-    name: 'entry detail: delete entry -> gone after reload',
+    name: 'nutrition (edit): servings change updates Home; delete removes the entry',
     run: async (page, base, { wait }) => {
       await go(page, base + '/', wait);
       await page.getByText('Raw Honey', { exact: true }).first().click();
-      await settle(page, wait);
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      await page.getByLabel('Number of servings').fill('3');
+      await expectCalories(page, '192');
+      await btn(page, 'Done').click();
+      await page.getByText(/192 Calories/).waitFor({ timeout: 5000 });
+      await page.getByText('Raw Honey', { exact: true }).first().click();
+      await btn(page, 'More options').click();
       await btn(page, 'Delete entry').click();
-      await settle(page, wait);
-      await go(page, base + '/', wait);
+      await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
       await page.reload({ waitUntil: 'networkidle' });
       await wait(800);
       if ((await visible(page, 'Raw Honey')) > 0) throw new Error('"Raw Honey" still on Home after delete');

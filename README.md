@@ -25,9 +25,11 @@ opens, not at app start (on web it is a separate chunk; if that fetch fails the
 screen offers Retry). Search runs offline; there are no API calls or keys. USDA
 data is public domain.
 
-`npm run build:foods` downloads the USDA releases, trims them to the fields Kalo
-uses (name, a default serving, calories, macros, fiber, sugar, sodium) and
-rewrites the file. Update the release names in `scripts/build-usda-foods.mjs`
+`npm run build:foods` downloads the USDA releases, trims them to what Kalo uses
+(name, per-100 g calories, macros, fiber, sugar and sodium, and the food's USDA
+portions with their weights) and rewrites the file. Tapping a food opens the
+Nutrition screen, where the amount can be entered in any of its portions, in
+ounces or in grams; nutrients are per100g × grams × quantity / 100. Update the release names in `scripts/build-usda-foods.mjs`
 when USDA publishes new data. Branded/packaged products are not included yet.
 
 ## Build the UI from screenshots

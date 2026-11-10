@@ -11,9 +11,10 @@ const foods = data.rows.map(rowToFood);
 const search = createFoodIndex(foods);
 const top = (q, n = 1) => search(q).slice(0, n).map((f) => f.name);
 
-test('the bundled data is the full generic USDA set', () => {
+test('the bundled data is the full generic USDA set, per 100 g with portions', () => {
   assert.ok(foods.length > 13000, `only ${foods.length} foods`);
-  assert.ok(foods.every((f) => f.name && f.serving && Number.isFinite(f.nutrients.calories)));
+  assert.ok(foods.every((f) => f.name && Number.isFinite(f.per100g.calories) && f.portions.every((p) => p.label && p.grams > 0)));
+  assert.ok(foods.filter((f) => f.portions.length).length > 12000, 'most foods should have at least one portion');
 });
 
 test('plain foods rank first', () => {
