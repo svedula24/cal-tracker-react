@@ -52,18 +52,6 @@ const home = [
     },
   },
   {
-    name: 'home: Log Water adds cups and persists across reload',
-    run: async (page, base, { wait }) => {
-      await go(page, base + '/', wait);
-      await btn(page, 'Page 3').click();
-      await btn(page, 'Log Water').click();
-      await btn(page, 'Log Water').click();
-      await must(page, '16 fl oz (2 cups)', 'after logging');
-      await go(page, base + '/', wait);
-      await must(page, '16 fl oz (2 cups)', 'after reload');
-    },
-  },
-  {
     name: 'home: daily score sheet opens and links to score info',
     run: async (page, base, { wait }) => {
       await go(page, base + '/', wait);

@@ -12,7 +12,6 @@ export type Nutrients = {
 
 export type Goals = Nutrients & {
   id: 'goals';
-  waterCups: number;
   steps: number;
   goal: 'lose' | 'maintain' | 'gain';
 };
