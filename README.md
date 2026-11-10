@@ -20,8 +20,10 @@ npm test           # unit tests: USDA data mapping and food search (Node's built
 
 Food Database searches every generic food in USDA FoodData Central (Foundation
 Foods, SR Legacy and FNDDS, about 13,400 foods), bundled in the app as
-`src/data/usda-foods.json` (1.4 MB). Search runs offline; there are no API calls
-or keys. USDA data is public domain.
+`src/data/usda-foods.json` (1.4 MB). It is loaded the first time Food Database
+opens, not at app start (on web it is a separate chunk; if that fetch fails the
+screen offers Retry). Search runs offline; there are no API calls or keys. USDA
+data is public domain.
 
 `npm run build:foods` downloads the USDA releases, trims them to the fields Kalo
 uses (name, a default serving, calories, macros, fiber, sugar, sodium) and

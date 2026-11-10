@@ -15,7 +15,65 @@ const go = async (page, url, wait) => {
 const visible = (page, text) => page.getByText(text, { exact: true }).count();
 const btn = (page, name) => page.getByRole('button', { name, exact: true });
 
+// The food database is its own chunk, fetched when Food Database opens, so the
+// screen's loading and failed states can be driven from the network. Matches the
+// exported chunk (usda-foods-<hash>.js) and the dev server's (usda-foods.bundle?…).
+const FOOD_CHUNK = '**/usda-foods*';
+
 export const flows = [
+  {
+    name: 'food database: loading state until the data arrives, then the empty-search prompt',
+    run: async (page, base) => {
+      let release;
+      const held = new Promise((r) => (release = r));
+      let handled = Promise.resolve();
+      // continue() may run after the page moved on; swallow that so a failed
+      // assertion in this flow can't surface as an unrelated error later.
+      await page.route(FOOD_CHUNK, (route) => (handled = held.then(() => route.continue().catch(() => {}))));
+      try {
+        await page.goto(base + '/food-database', { waitUntil: 'domcontentloaded' });
+        await page.getByLabel('Loading foods').waitFor({ timeout: 5000 });
+        if ((await page.getByText(/Works offline/).count()) > 0) throw new Error('empty-search prompt shown before the data loaded');
+        release();
+        await page.getByText(/^Search [\d,]+ foods from USDA FoodData Central\. Works offline\.$/).waitFor({ timeout: 5000 });
+        if ((await page.getByLabel('Loading foods').count()) > 0) throw new Error('spinner still shown after loading');
+        if ((await page.getByRole('button', { name: /^Save .+/ }).count()) > 0) throw new Error('rows shown with an empty search');
+      } finally {
+        release();
+        await handled;
+        await page.unroute(FOOD_CHUNK);
+      }
+    },
+  },
+  {
+    name: 'food database: a failed data load shows Retry, and Retry recovers',
+    // The blocked chunk is logged by the browser itself; it is the point of this flow.
+    allowErrors: /Failed to load resource: net::ERR_FAILED \([^)]*usda-foods/,
+    run: async (page, base, { wait }) => {
+      // Watch the chunk's own errors, so a failure of the real fetch after Retry
+      // is reported with its URL instead of being hidden by allowErrors.
+      const chunkErrors = [];
+      const onConsole = (m) => m.type() === 'error' && /usda-foods/.test(m.location().url) && chunkErrors.push(`${m.text()} (${m.location().url})`);
+      page.on('console', onConsole);
+      await page.route(FOOD_CHUNK, (route) => route.abort());
+      try {
+        await go(page, base + '/food-database', wait);
+        await page.getByText("Couldn't load the food database.", { exact: true }).waitFor({ timeout: 5000 });
+        if ((await page.getByLabel('Loading foods').count()) > 0) throw new Error('spinner still shown after the failure');
+        if (chunkErrors.length !== 1) throw new Error(`expected the one blocked chunk request, saw: ${chunkErrors.join(' | ') || 'none'}`);
+        await page.unroute(FOOD_CHUNK);
+        await btn(page, 'Retry').click();
+        await page.getByText(/Works offline/).waitFor({ timeout: 5000 }).catch(() => {
+          throw new Error(`Retry did not recover; chunk errors after Retry: ${chunkErrors.slice(1).join(' | ') || 'none'}`);
+        });
+        await page.getByLabel('Search foods').fill('honey');
+        await page.getByText('Honey', { exact: true }).waitFor({ timeout: 3000 });
+      } finally {
+        page.off('console', onConsole);
+        await page.unroute(FOOD_CHUNK);
+      }
+    },
+  },
   {
     name: 'food database: offline USDA search ranks the plain food first',
     run: async (page, base, { wait }) => {
