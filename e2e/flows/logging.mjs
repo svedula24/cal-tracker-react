@@ -109,6 +109,10 @@ export const flows = [
         await page.getByLabel('Search foods').fill('apple');
         await page.getByText(/Couldn't reach/).waitFor({ timeout: 5000 });
         if ((await visible(page, 'Apple')) === 0) throw new Error('local Apple missing during outage');
+        // No local match either: the outage line explains it, not "No foods match".
+        await page.getByLabel('Search foods').fill('zzqx');
+        await page.getByText(/Couldn't reach/).waitFor({ timeout: 5000 });
+        if ((await page.getByText(/No foods match/).count()) > 0) throw new Error('"No foods match" shown during an outage');
       } finally {
         failOnline = false;
       }

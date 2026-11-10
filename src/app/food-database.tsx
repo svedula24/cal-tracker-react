@@ -29,7 +29,8 @@ export default function FoodDatabase() {
     ...(local.length ? [{ key: 'kalo', title: q ? 'Kalo foods' : '', data: local }] : []),
     ...(remote.foods.length ? [{ key: 'online', title: OFF_ENABLED ? 'USDA & Open Food Facts' : 'USDA', data: remote.foods }] : []),
   ];
-  const nothing = !local.length && !remote.foods.length && !remote.loading;
+  // Only a finished search can say nothing matched; during an outage the error line explains it.
+  const nothing = !local.length && !remote.foods.length && !remote.loading && remote.errors.length === 0;
 
   return (
     <PushedScreen title="Food Database">

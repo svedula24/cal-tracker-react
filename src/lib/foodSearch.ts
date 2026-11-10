@@ -80,10 +80,11 @@ async function searchUsda(q: string, signal: AbortSignal): Promise<Food[]> {
   if (!res.ok) throw new Error(res.status === 429 ? 'USDA (hourly limit reached)' : 'USDA');
   const data: { foods?: UsdaFood[] } = await res.json();
   // Foundation and SR Legacy often list the same food twice; keep the first of each name.
-  const seen = new Set<string>();
-  return (data.foods ?? [])
-    .map(fromUsda)
-    .filter((f): f is Food => !!f && !seen.has(f.name.toLowerCase()) && !!seen.add(f.name.toLowerCase()));
+  const byName = new Map<string, Food>();
+  for (const f of (data.foods ?? []).map(fromUsda)) {
+    if (f && !byName.has(f.name.toLowerCase())) byName.set(f.name.toLowerCase(), f);
+  }
+  return [...byName.values()];
 }
 
 async function searchOff(q: string, signal: AbortSignal): Promise<Food[]> {
