@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { Apple, ArrowLeft, Bookmark, Candy, ChevronDown, ChevronRight, Droplet, Drumstick, Ellipsis, Flame, Pencil, Soup, Wheat } from 'lucide-react-native';
 import { useMemo, useRef, useState } from 'react';
-import { ScrollView, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { ScrollView, type ScrollViewInstance, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Press } from '@/components/Press';
@@ -68,7 +68,7 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
   const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const pageWidth = width - 44;
-  const pager = useRef<ScrollView>(null);
+  const pager = useRef<ScrollViewInstance>(null);
 
   const [name, setName] = useState(entry?.name ?? base?.name ?? '');
   // For a food: grams. For a hand-written entry: servings.

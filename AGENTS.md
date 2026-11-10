@@ -7,8 +7,8 @@ canvas the skill fills in. See the engine at
 
 ## Expo version
 
-Expo **SDK 56** (React Native 0.85, React 19.2). APIs have changed across recent
-SDKs — read the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/
+Expo **SDK 58** (React Native 0.88, React 19.3). APIs have changed across recent
+SDKs — read the exact versioned docs at https://docs.expo.dev/versions/v58.0.0/
 before writing Expo code. Don't assume older-SDK APIs.
 
 ## Conventions

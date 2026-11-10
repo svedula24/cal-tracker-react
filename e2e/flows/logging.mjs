@@ -146,7 +146,8 @@ export const flows = [
       await btn(page, 'Save Banana, raw').click();
       await btn(page, 'Unsave Banana, raw').waitFor({ timeout: 3000 });
       await btn(page, 'Done').click();
-      await page.getByText('Breakfast', { exact: true }).waitFor({ timeout: 5000 });
+      // The Home card, not any "Breakfast" text: the name field is still mounted while the screen closes.
+      await page.getByLabel('Edit Breakfast').waitFor({ timeout: 5000 });
       await go(page, base + '/saved-foods', wait);
       if ((await visible(page, 'Banana, raw')) === 0) throw new Error('saved food is not under its database name');
       if ((await visible(page, 'Breakfast')) > 0) throw new Error('saved food took the renamed label');
