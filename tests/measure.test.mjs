@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { defaultServing, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, qtyText, scale, servingSummary, times } from '../src/lib/measure.ts';
+import { defaultServing, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, MAX_QTY, parseQty, qtyText, scale, servingSummary, times } from '../src/lib/measure.ts';
 
 // USDA "Banana, raw" per 100 g; its portions, default first.
 const banana = {
@@ -56,6 +56,7 @@ test('entryGrams: a new food starts at its serving; an entry at the grams it sta
   assert.equal(entryGrams(entry, banana), 378); // no saved measure: 3 default servings, not 1
   close(entryGrams({ ...entry, servings: 1, measure: { label: '1 oz', grams: 28.3495 } }, banana), 28.3495, 'not rounded');
   assert.equal(entryGrams({ ...entry, servings: 0, measure: G }, banana), 126); // nothing to stand for: the serving
+  assert.equal(entryGrams({ ...entry, servings: 100, measure: banana.portions[0] }, banana), MAX_QTY); // 12600 g: capped so the field accepts it
 });
 
 test('parseQty: decimals, a decimal comma, thousands separators, and rejects the rest', () => {

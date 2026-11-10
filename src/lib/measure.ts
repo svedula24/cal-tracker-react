@@ -18,14 +18,14 @@ export const defaultServing = (food: Food): Portion => food.portions[0] ?? HUNDR
 /**
  * The grams the Nutrition screen starts at: for a new food, its default
  * serving; for a logged entry, what it already stands for (its measure, or
- * the default serving when an older entry has none, × its quantity). Exact;
- * the field rounds for display.
+ * the default serving when an older entry has none, × its quantity), capped
+ * at MAX_QTY so the field accepts it. Exact; the field rounds for display.
  */
 export function entryGrams(entry: Entry | undefined, food: Food): number {
   if (!entry) return defaultServing(food).grams;
   const per = entry.measure?.grams ?? defaultServing(food).grams;
   const grams = per * entry.servings;
-  return grams > 0 ? grams : defaultServing(food).grams;
+  return grams > 0 ? Math.min(grams, MAX_QTY) : defaultServing(food).grams;
 }
 
 /** Nutrients in `grams` of a food. Exact; round only for display. */
