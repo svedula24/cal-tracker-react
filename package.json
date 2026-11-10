@@ -43,7 +43,7 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "verify": "expo export --platform web && node e2e/verify.mjs"
+    "verify": "EXPO_PUBLIC_OFF_ON_WEB=1 expo export --platform web && node e2e/verify.mjs"
   },
   "private": true
 }

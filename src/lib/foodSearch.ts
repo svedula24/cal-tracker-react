@@ -27,7 +27,11 @@ const USDA_IDS: Record<keyof Nutrients, number[]> = {
   sodium: [1093], // mg
 };
 
-const round = (v: number, step = 1) => Math.round(v / step) * step;
+// Round to `decimals` places by multiplying (dividing by 0.1 leaves float artifacts like 0.30000000000000004).
+const round = (v: number, decimals = 0) => {
+  const f = 10 ** decimals;
+  return Math.round(v * f) / f;
+};
 const titleCase = (s: string) => (s === s.toUpperCase() ? s.toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase()) : s);
 
 type UsdaFood = { fdcId: number; description: string; foodNutrients?: { nutrientId: number; value?: number }[] };
@@ -38,7 +42,7 @@ export function fromUsda(f: UsdaFood): Food | null {
   if (!f.description || !USDA_IDS.calories.some((id) => typeof values.get(id) === 'number')) return null;
   const pick = (ids: number[]) => ids.map((id) => values.get(id)).find((v) => typeof v === 'number') ?? 0;
   const n = Object.fromEntries(
-    (Object.keys(USDA_IDS) as (keyof Nutrients)[]).map((k) => [k, round(pick(USDA_IDS[k]), k === 'calories' || k === 'sodium' ? 1 : 0.1)]),
+    (Object.keys(USDA_IDS) as (keyof Nutrients)[]).map((k) => [k, round(pick(USDA_IDS[k]), k === 'calories' || k === 'sodium' ? 0 : 1)]),
   ) as Nutrients;
   return { id: `usda:${f.fdcId}`, name: titleCase(f.description), serving: '100 g', source: 'usda', nutrients: n };
 }
@@ -49,7 +53,7 @@ export function fromOff(h: OffHit): Food | null {
   const m = h.nutriments ?? {};
   const kcal = m['energy-kcal_100g'];
   if (!h.code || !h.product_name || typeof kcal !== 'number') return null; // skip products without calories
-  const g = (k: string) => round(m[k] ?? 0, 0.1);
+  const g = (k: string) => round(m[k] ?? 0, 1);
   const brand = Array.isArray(h.brands) ? h.brands[0] : h.brands?.split(',')[0];
   return {
     id: `off:${h.code}`,
@@ -94,38 +98,53 @@ async function searchOff(q: string, signal: AbortSignal): Promise<Food[]> {
 }
 
 // search.openfoodfacts.org sends no CORS header, so browsers can't call it: the web
-// preview searches USDA only. The e2e suite sets __KALO_OFF_ON_WEB to test it behind mocks.
-export const offOnWeb = () => !!(globalThis as { __KALO_OFF_ON_WEB?: boolean }).__KALO_OFF_ON_WEB;
-const offAvailable = () => Platform.OS !== 'web' || offOnWeb();
+// preview searches USDA only. EXPO_PUBLIC_OFF_ON_WEB=1 (set only by `npm run verify`,
+// whose flows mock the API) turns it on for web at build time; it's inlined, not a runtime switch.
+export const OFF_ENABLED = Platform.OS !== 'web' || process.env.EXPO_PUBLIC_OFF_ON_WEB === '1';
 
 // Same query (any case) → same results, so retyping doesn't spend the USDA hourly limit.
+// Keeps the 50 most recently used queries (a Map iterates in insertion order).
+const CACHE_MAX = 50;
 const cache = new Map<string, Food[]>();
+function cacheGet(key: string) {
+  const hit = cache.get(key);
+  if (hit) {
+    cache.delete(key);
+    cache.set(key, hit); // mark as most recently used
+  }
+  return hit;
+}
+function cacheSet(key: string, foods: Food[]) {
+  cache.delete(key);
+  cache.set(key, foods);
+  if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
+}
 
 export type RemoteSearch = { foods: Food[]; loading: boolean; errors: string[] };
+type State = RemoteSearch & { key: string }; // key = the query these results belong to
 
 /** Debounced search across both databases; a failing source doesn't hide the other's results. */
 export function useRemoteFoodSearch(query: string): RemoteSearch {
   const q = query.trim();
-  const [state, setState] = useState<RemoteSearch>({ foods: [], loading: false, errors: [] });
+  const key = q.toLowerCase();
+  const [state, setState] = useState<State>({ key: '', foods: [], loading: false, errors: [] });
 
   useEffect(() => {
     if (q.length < 2) {
-      setState({ foods: [], loading: false, errors: [] });
+      setState({ key, foods: [], loading: false, errors: [] });
       return;
     }
-    const key = q.toLowerCase();
-    const hit = cache.get(key);
+    const hit = cacheGet(key);
     if (hit) {
-      setState({ foods: hit, loading: false, errors: [] });
+      setState({ key, foods: hit, loading: false, errors: [] });
       return;
     }
     const ctrl = new AbortController();
-    // Clear the previous query's results so they can't be tapped under the new search.
-    setState({ foods: [], loading: true, errors: [] });
+    setState({ key, foods: [], loading: true, errors: [] });
     const timer = setTimeout(async () => {
       const sources = [
         { name: 'USDA', run: searchUsda },
-        ...(offAvailable() ? [{ name: 'Open Food Facts', run: searchOff }] : []),
+        ...(OFF_ENABLED ? [{ name: 'Open Food Facts', run: searchOff }] : []),
       ];
       const results = await Promise.allSettled(sources.map((src) => src.run(q, ctrl.signal)));
       if (ctrl.signal.aborted) return;
@@ -134,14 +153,18 @@ export function useRemoteFoodSearch(query: string): RemoteSearch {
       const errors = results.flatMap((r, i) =>
         r.status === 'rejected' ? [r.reason instanceof Error && r.reason.message.startsWith(sources[i].name) ? r.reason.message : sources[i].name] : [],
       );
-      if (!errors.length) cache.set(key, foods); // never cache a partial (failed) result
-      setState({ foods, loading: false, errors });
+      if (!errors.length) cacheSet(key, foods); // never cache a partial (failed) result
+      setState({ key, foods, loading: false, errors });
     }, 350);
     return () => {
       clearTimeout(timer);
       ctrl.abort();
     };
-  }, [q]);
+  }, [q, key]);
 
-  return state;
+  // On the render right after the query changes, the effect hasn't run yet: report
+  // loading and hide the old query's results, so neither "No foods match" nor stale
+  // rows show for that frame.
+  if (state.key !== key) return { foods: [], loading: q.length >= 2, errors: [] };
+  return { foods: state.foods, loading: state.loading, errors: state.errors };
 }

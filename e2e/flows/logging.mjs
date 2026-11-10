@@ -46,10 +46,6 @@ const mocked = new WeakSet();
 export async function mockOnlineFoods(page) {
   if (mocked.has(page)) return;
   mocked.add(page);
-  // Open Food Facts is web-disabled in the app (no CORS); enable it behind the mock.
-  await page.addInitScript(() => {
-    globalThis.__KALO_OFF_ON_WEB = true;
-  });
   // Like the real APIs, only return items whose name contains the search term.
   const reply = (param, key, fixture, name) => (route) => {
     if (failOnline) return route.fulfill({ status: 503, body: 'down' });
@@ -139,7 +135,9 @@ export const flows = [
     run: async (page, base, { wait }) => {
       await go(page, base + '/food-database', wait);
       await page.getByLabel('Search foods').fill('zzqx');
-      // Shown once the (mocked) online search has also come back empty.
+      // Not while the online search is still running (no one-frame flash)...
+      if ((await page.getByText('No foods match "zzqx"').count()) > 0) throw new Error('no-results shown before online search finished');
+      // ...only once the (mocked) online search has also come back empty.
       await page.getByText('No foods match "zzqx"').waitFor({ timeout: 5000 });
     },
   },

@@ -1,12 +1,12 @@
 import { Search, X } from 'lucide-react-native';
 import { useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, Pressable, SectionList, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, SectionList, Text, TextInput, View } from 'react-native';
 
 import { BookmarkToggle, FoodRow } from '@/components/logging/FoodRow';
 import { PushedScreen } from '@/components/Screen';
 import { foods, type Food } from '@/data/foods';
 import { useSavedFoods } from '@/lib/data';
-import { offOnWeb, useRemoteFoodSearch } from '@/lib/foodSearch';
+import { OFF_ENABLED, useRemoteFoodSearch } from '@/lib/foodSearch';
 import { tokens } from '@/lib/tokens';
 
 const Separator = () => <View className="h-2.5" />;
@@ -27,7 +27,7 @@ export default function FoodDatabase() {
 
   const sections = [
     ...(local.length ? [{ key: 'kalo', title: q ? 'Kalo foods' : '', data: local }] : []),
-    ...(remote.foods.length ? [{ key: 'online', title: Platform.OS === 'web' && !offOnWeb() ? 'USDA' : 'USDA & Open Food Facts', data: remote.foods }] : []),
+    ...(remote.foods.length ? [{ key: 'online', title: OFF_ENABLED ? 'USDA & Open Food Facts' : 'USDA', data: remote.foods }] : []),
   ];
   const nothing = !local.length && !remote.foods.length && !remote.loading;
 
