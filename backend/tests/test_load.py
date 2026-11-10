@@ -24,7 +24,7 @@ UNKNOWN_TYPE = record(fdc_id=333, data_type="Branded")
 
 
 def test_every_bad_record_is_reported_and_nothing_is_returned(monkeypatch, capsys):
-    monkeypatch.setattr(load, "DATASETS", (Dataset("FoodData_Central_fake_2099-01-01", "Fake"),))
+    monkeypatch.setattr(load, "DATASETS", (Dataset("FoodData_Central_fake_2099-01-01", "Fake", "0" * 64),))
     monkeypatch.setattr(load, "records", lambda dataset: [GOOD, WRONG_UNIT, UNKNOWN_TYPE])
 
     with pytest.raises(SystemExit, match=r"^2 records could not be mapped; nothing loaded$"):
@@ -38,7 +38,7 @@ def test_every_bad_record_is_reported_and_nothing_is_returned(monkeypatch, capsy
 
 
 def test_clean_datasets_still_skip_duplicate_fdc_ids(monkeypatch, capsys):
-    datasets = (Dataset("FoodData_Central_a_2099", "A"), Dataset("FoodData_Central_b_2099", "B"))
+    datasets = (Dataset("FoodData_Central_a_2099", "A", "0" * 64), Dataset("FoodData_Central_b_2099", "B", "0" * 64))
     monkeypatch.setattr(load, "DATASETS", datasets)
     monkeypatch.setattr(load, "records", lambda dataset: [GOOD, record(fdc_id=2)])
 
