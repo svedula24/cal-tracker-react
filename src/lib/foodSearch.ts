@@ -121,8 +121,9 @@ function cacheSet(key: string, foods: Food[]) {
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value!);
 }
 
-export type RemoteSearch = { foods: Food[]; loading: boolean; errors: string[] };
-type State = RemoteSearch & { key: string }; // key = the query these results belong to
+/** `stale`: `foods` belong to the previous query and are shown (disabled) until the new results arrive. */
+export type RemoteSearch = { foods: Food[]; loading: boolean; errors: string[]; stale: boolean };
+type State = { key: string; foods: Food[]; loading: boolean; errors: string[] }; // key = the query `foods` belong to
 
 /** Debounced search across both databases; a failing source doesn't hide the other's results. */
 export function useRemoteFoodSearch(query: string): RemoteSearch {
@@ -141,7 +142,8 @@ export function useRemoteFoodSearch(query: string): RemoteSearch {
       return;
     }
     const ctrl = new AbortController();
-    setState({ key, foods: [], loading: true, errors: [] });
+    // Keep the previous results (and their key) on screen while this query loads.
+    setState((s) => ({ ...s, loading: true, errors: [] }));
     const timer = setTimeout(async () => {
       const sources = [
         { name: 'USDA', run: searchUsda },
@@ -163,9 +165,10 @@ export function useRemoteFoodSearch(query: string): RemoteSearch {
     };
   }, [q, key]);
 
-  // On the render right after the query changes, the effect hasn't run yet: report
-  // loading and hide the old query's results, so neither "No foods match" nor stale
-  // rows show for that frame.
-  if (state.key !== key) return { foods: [], loading: q.length >= 2, errors: [] };
-  return { foods: state.foods, loading: state.loading, errors: state.errors };
+  if (q.length < 2) return { foods: [], loading: false, errors: [], stale: false };
+  // Results for an older query: keep showing them so the list doesn't jump while
+  // typing, but flagged stale (the screen disables them) and still loading, so
+  // "No foods match" can't show before the current query's results arrive.
+  if (state.key !== key) return { foods: state.foods, loading: true, errors: [], stale: state.foods.length > 0 };
+  return { foods: state.foods, loading: state.loading, errors: state.errors, stale: false };
 }

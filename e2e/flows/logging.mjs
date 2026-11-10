@@ -69,6 +69,12 @@ export const flows = [
       await page.getByLabel('Search foods').fill('banana');
       await page.getByText('100 g · 89 cal · USDA').waitFor({ timeout: 5000 });
       if ((await visible(page, 'Bananas, raw')) === 0) throw new Error('USDA food missing');
+      // Refining the query keeps the old rows on screen (no jump), disabled until the new results land.
+      await page.getByLabel('Search foods').fill('bananas');
+      const row = btn(page, 'Bananas, raw');
+      if ((await row.count()) === 0) throw new Error('online rows vanished while typing');
+      if ((await row.getAttribute('aria-disabled')) !== 'true') throw new Error('stale row was not disabled');
+      await page.waitForFunction(() => !document.querySelector('[aria-label="Bananas, raw"][aria-disabled="true"]'), null, { timeout: 5000 });
     },
   },
   {

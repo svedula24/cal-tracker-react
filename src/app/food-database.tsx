@@ -68,9 +68,10 @@ export default function FoodDatabase() {
         renderSectionHeader={({ section }) =>
           section.title ? <Text className="mb-2 mt-3 text-[13px] font-semibold uppercase tracking-wide text-muted">{section.title}</Text> : null
         }
-        renderItem={({ item }) => (
+        renderItem={({ item, section }) => (
           <FoodRow
             food={item}
+            disabled={section.key === 'online' && remote.stale}
             expanded={openId === item.id}
             onToggle={() => setOpenId(openId === item.id ? null : item.id)}
             trailing={<BookmarkToggle name={item.name} saved={savedIds.has(item.id)} onPress={() => toggleSaved(item)} />}
