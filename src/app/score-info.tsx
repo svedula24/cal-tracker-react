@@ -60,7 +60,7 @@ export default function ScoreInfo() {
         <Section title="Your calorie goal">
           <P>
             The calories goal used for the score is your daily goal plus any rollover calories plus the calories you've
-            burned from steps and exercise.
+            burned from steps.
           </P>
         </Section>
 

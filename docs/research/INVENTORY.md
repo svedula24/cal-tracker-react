@@ -10,6 +10,6 @@ Source: `docs/screenshots/` (5 iPhone screenshots, 706×1536, ~353pt wide @2x; l
 | home-activity.jpeg | Home | carousel page 3 (steps, calories burned, water) | same |
 | home-add-menu.jpeg | Home | scrolled to Recently uploaded; + menu open; FAB shows X | dimmed overlay, tab bar visible |
 
-Not captured (designed in the same style, see SCREEN_GRAPH.md): Progress, Groups, Profile tabs; Log exercise, Saved foods, Food Database, Scan food; entry detail; How Daily Score Works.
+Not captured (designed in the same style, see SCREEN_GRAPH.md): Saved foods, Food Database, Scan food; entry detail; How Daily Score Works. The reference's tab bar and Log exercise were left out by request: Kalo is a single screen.
 
 Branding is replaced: "Cal AI" + apple → **Kalo** + K-flame mark.

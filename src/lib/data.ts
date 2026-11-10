@@ -24,7 +24,6 @@ export type Entry = {
   foodId?: string;
   photo?: string;
 };
-export type Exercise = { id: string; date: string; time: string; type: string; minutes: number; intensity: 'low' | 'medium' | 'high'; calories: number };
 export type DayLog = { id: string; steps: number; waterCups: number; rollover: number }; // id = date
 export type SavedFood = { id: string }; // id = food id
 
@@ -99,28 +98,24 @@ export const STREAK_DAYS = 16;
 // ── Hooks ────────────────────────────────────────────────────────────────────
 const entriesSeed = seedEntries();
 export const useEntries = () => useCollection<Entry>('entries', entriesSeed);
-export const useExercise = () => useCollection<Exercise>('exercise', []);
 export const useDayLogs = () => useCollection<DayLog>('dayLogs', dayLogSeed);
 export const useSavedFoods = () => useCollection<SavedFood>('savedFoods', [{ id: 'protein-bar' }, { id: 'greek-yogurt' }, { id: 'honey' }]);
 
 export function useGoals() {
-  const { items, update } = useCollection<Goals>('goals', goalsSeed);
-  return { goals: items[0] ?? goalsSeed[0], setGoals: (patch: Partial<Goals>) => update('goals', patch) };
+  const { items } = useCollection<Goals>('goals', goalsSeed);
+  return { goals: items[0] ?? goalsSeed[0] };
 }
 
 /** Everything Home shows for one day, derived from the logs. */
 export function useDay(date: string) {
   const { goals } = useGoals();
   const entries = useEntries().items.filter((e) => e.date === date).sort((a, b) => b.time.localeCompare(a.time));
-  const exercise = useExercise().items.filter((e) => e.date === date);
   const dayLogs = useDayLogs();
   const log = dayLogs.items.find((d) => d.id === date) ?? { id: date, steps: 0, waterCups: 0, rollover: 0 };
 
   const totals = sum(entries);
-  const stepsBurned = stepsToCalories(log.steps);
-  const exerciseBurned = exercise.reduce((s, e) => s + e.calories, 0);
-  const burned = stepsBurned + exerciseBurned;
-  const budget = dayBudget(goals.calories, log, exercise, date);
+  const burned = stepsToCalories(log.steps);
+  const budget = dayBudget(goals.calories, log);
 
   const setWater = (cups: number) => {
     const waterCups = Math.max(0, cups);
@@ -129,7 +124,7 @@ export function useDay(date: string) {
   };
 
   return {
-    goals, entries, exercise, log, totals, stepsBurned, exerciseBurned, burned, budget, setWater,
+    goals, entries, log, totals, burned, budget, setWater,
     score: dailyScore(totals, budget, goals),
     health: healthScore(totals, budget, goals),
   };
@@ -148,12 +143,8 @@ export function newEntry(food: Food, servings: number, date: string): Entry {
   return { id: makeId(), date, time: nowOn(date), name: food.name, servings, nutrients: food.nutrients, foodId: food.id };
 }
 
-/** The calorie budget for a day: goal + rollover + calories burned. */
-export function dayBudget(goalCalories: number, log: DayLog | undefined, exercise: Exercise[], date: string) {
-  const burned = stepsToCalories(log?.steps ?? 0) + exercise.filter((e) => e.date === date).reduce((s, e) => s + e.calories, 0);
-  return goalCalories + (log?.rollover ?? 0) + burned;
+/** The calorie budget for a day: goal + rollover + calories burned from steps. */
+export function dayBudget(goalCalories: number, log: DayLog | undefined) {
+  return goalCalories + (log?.rollover ?? 0) + stepsToCalories(log?.steps ?? 0);
 }
 
-const MET = { low: 4, medium: 7, high: 10 } as const;
-/** Rough calories for an exercise: MET × 75 kg × hours. */
-export const exerciseCalories = (minutes: number, intensity: keyof typeof MET) => Math.round((MET[intensity] * 75 * minutes) / 60);

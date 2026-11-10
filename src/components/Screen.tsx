@@ -26,16 +26,6 @@ export function PushedScreen({ title, right, children }: { title: string; right?
   );
 }
 
-/** Tab-screen chrome: large title, content below. */
-export function TabScreen({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <SafeAreaView edges={['top']} className="flex-1 bg-background">
-      <Text className="px-[22px] pb-3 pt-4 text-[30px] font-bold tracking-tight text-foreground">{title}</Text>
-      {children}
-    </SafeAreaView>
-  );
-}
-
 /** Honest placeholder for features that need a camera, AI or a server. */
 export function ComingSoon({ icon, title, body, action }: { icon: React.ReactNode; title: string; body: string; action?: React.ReactNode }) {
   return (

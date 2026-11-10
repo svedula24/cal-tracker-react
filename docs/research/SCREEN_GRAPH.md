@@ -1,29 +1,28 @@
 # Screen graph: Kalo
 
+One main screen (Home). Everything else is pushed from it. The reference's tab
+bar (Home / Progress / Groups / Profile) and its "Log exercise" action were
+removed on purpose: the app is a single screen.
+
 ## Screens & states
 | Screen | Route | States (screenshot) |
 | --- | --- | --- |
-| Home | `/` (tab) | macros page (home-macros), micros page (home-micros), activity page (home-activity), add-menu open (home-add-menu) |
+| Home | `/` | macros page (home-macros), micros page (home-micros), activity page (home-activity), add-menu open (home-add-menu) |
 | Daily Score | `/daily-score` (transparent modal) | default (home-daily-score) |
 | How Daily Score Works | `/score-info` | designed |
-| Progress | `/progress` (tab) | designed |
-| Groups | `/groups` (tab) | coming soon |
-| Profile | `/profile` (tab) | designed (goals editor) |
 | Food Database | `/food-database` | designed (search + add) |
 | Saved foods | `/saved-foods` | designed |
-| Log exercise | `/log-exercise` | designed |
 | Scan food | `/scan-food` | coming soon (camera/AI = backend) |
 | Entry detail | `/entry/[id]` | designed (edit name/servings, delete) |
 
 ## Navigation
-- **Tabs** (persistent floating pill bar): Home · Progress · Groups · Profile.
-- Black round **+ FAB** beside the bar opens the AddMenu overlay (tiles: Log exercise, Saved foods, Food Database, Scan food); FAB turns into X.
-- Everything else is a push on the root Stack; Daily Score is a transparent modal.
+- **Stack** with Home as the root. No tab bar.
+- Black round **+ button** (bottom right) opens the AddMenu overlay: Saved foods, Food Database, Scan food; the button turns into X.
 
 ```
 Home ──score pill──▶ Daily Score ──"How Daily Score Works"──▶ Score info
 Home ──entry card──▶ Entry detail
-Any tab ──+ FAB──▶ AddMenu ──▶ Log exercise | Saved foods | Food Database | Scan food
-Scan food ──"Search instead"──▶ Food Database
+Home ──+ button──▶ AddMenu ──▶ Saved foods | Food Database | Scan food
+Scan food ──"Search food database"──▶ Food Database
 Food Database / Saved foods ──add──▶ back to Home (selected day)
 ```

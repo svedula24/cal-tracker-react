@@ -1,8 +1,8 @@
-// Logging-screen flows (Food Database, Saved foods, Log exercise, Entry detail).
+// Logging-screen flows (Food Database, Saved foods, Entry detail).
 // Shape matches e2e/flows.mjs. Flows share one page, so state carries over;
 // each flow guards its own preconditions.
 
-export const routes = ['/food-database', '/saved-foods', '/log-exercise', '/scan-food'];
+export const routes = ['/food-database', '/saved-foods', '/scan-food'];
 
 const settle = async (page, wait, ms = 600) => {
   await page.waitForLoadState('networkidle');
@@ -64,23 +64,6 @@ export const flows = [
       await page.reload({ waitUntil: 'networkidle' });
       await wait(800);
       if ((await visible(page, 'Avocado')) > 0) throw new Error('Avocado came back after reload');
-    },
-  },
-  {
-    name: 'log exercise (Run 30 min) -> listed and persists',
-    run: async (page, base, { wait }) => {
-      await go(page, base + '/log-exercise', wait);
-      const before = await btn(page, 'Delete Run').count();
-      await btn(page, 'Run').click();
-      await btn(page, '30 minutes').click();
-      await btn(page, 'Log exercise').click();
-      await settle(page, wait);
-      await go(page, base + '/log-exercise', wait);
-      if ((await page.getByText("Today's exercise").count()) === 0) throw new Error("no Today's exercise list");
-      if ((await btn(page, 'Delete Run').count()) !== before + 1) throw new Error('Run not added to list');
-      await page.reload({ waitUntil: 'networkidle' });
-      await wait(800);
-      if ((await btn(page, 'Delete Run').count()) !== before + 1) throw new Error('Run did not persist');
     },
   },
   {
