@@ -142,7 +142,11 @@ export function nowOn(date: string): string {
   return t.toISOString();
 }
 
-/** Log `quantity` × `measure` of a food for a day (time = now on that day). */
+/**
+ * Log `quantity` × `measure` of a food for a day (time = now on that day). The
+ * entry snapshots the food (per100g, portions), so it can be re-measured later
+ * without the 13k-food database being loaded, and survives a data refresh.
+ */
 export function newEntry(food: Food, measure: Portion, quantity: number, date: string): Entry {
   return {
     id: makeId(),

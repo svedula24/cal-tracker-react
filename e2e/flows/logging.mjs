@@ -115,8 +115,12 @@ export const flows = [
       await page.getByLabel('Number of servings').fill('1');
       await expectCalories(page, '27'); // 28.3495 g
       await btn(page, 'Measure in Banana').click();
+      // An invalid quantity disables Done and keeps the last valid amount on the cards.
+      await page.getByLabel('Number of servings').fill('abc');
+      if ((await btn(page, 'Done').getAttribute('aria-disabled')) !== 'true') throw new Error('Done enabled with an invalid quantity');
       await page.getByLabel('Number of servings').fill('2');
       await expectCalories(page, '244');
+      if ((await btn(page, 'Done').getAttribute('aria-disabled')) === 'true') throw new Error('Done still disabled with a valid quantity');
       await btn(page, 'Done').click();
       await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
       await page.getByText(/244 Calories/).waitFor({ timeout: 3000 });

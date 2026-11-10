@@ -85,12 +85,16 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
   const isSaved = !!base && saved.items.some((s) => s.id === base.id);
   const time = formatTime(entry?.time ?? new Date().toISOString());
 
+  // The field may hold an invalid draft ("abc", or emptied): the cards keep the
+  // last valid quantity, the field shows the error and Done is disabled.
+  const valid = parseQty(text) !== null;
   const onQty = (t: string) => {
     setText(t);
     const n = parseQty(t);
     if (n !== null) setQty(n);
   };
   const done = () => {
+    if (!valid) return;
     const finalName = name.trim() || base?.name || entry?.name || 'Food';
     if (entry) {
       entries.update(entry.id, { name: finalName, servings: qty, measure: base ? measure : entry.measure, nutrients: perMeasure });
@@ -185,7 +189,7 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
 
           <View className="mt-[28px] flex-row items-center justify-between px-[6px]">
             <Text className="flex-1 text-[20px] font-semibold text-foreground">Number of Servings</Text>
-            <View className="h-[40px] w-[112px] flex-row items-center justify-center rounded-full border border-border bg-card">
+            <View className={`h-[40px] w-[112px] flex-row items-center justify-center rounded-full border bg-card ${valid ? 'border-border' : 'border-bad'}`}>
               <TextInput
                 accessibilityLabel="Number of servings"
                 value={text}
@@ -272,7 +276,15 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
       </SafeAreaView>
 
       <View className="absolute inset-x-0 bottom-0 bg-background px-[22px] pt-3" style={{ paddingBottom: Math.max(insets.bottom, 16) }}>
-        <Pressable accessibilityRole="button" accessibilityLabel="Done" onPress={done} className="h-[56px] items-center justify-center rounded-full bg-fab active:opacity-80">
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Done"
+          accessibilityState={{ disabled: !valid }}
+          aria-disabled={!valid}
+          disabled={!valid}
+          onPress={done}
+          className={`h-[56px] items-center justify-center rounded-full ${valid ? 'bg-fab active:opacity-80' : 'bg-faint'}`}
+        >
           <Text className="text-[20px] font-semibold text-white">Done</Text>
         </Pressable>
       </View>
