@@ -1,31 +1,34 @@
-// ────────────────────────────────────────────────────────────────────────────
-// Runtime design tokens. The `/clone-app` foundation phase OVERWRITES these with
-// the cloned app's real values (extracted from screenshots, or from the DOM in
-// web mode). Prefer NativeWind classes (see tailwind.config.js) for styling;
-// reach for these only where a `className` can't — e.g. a color passed to a
-// native prop, the StatusBar, or navigation theming.
-// ────────────────────────────────────────────────────────────────────────────
+// Runtime design tokens for Kalo (values estimated from the reference
+// screenshots; refined in the diff loop). Use NativeWind classes for styling;
+// use these where a className can't reach (SVG strokes, StatusBar, icons).
+// Keep in sync with tailwind.config.js.
 export const tokens = {
   colors: {
-    background: '#ffffff',
-    foreground: '#0a0a0a',
-    primary: '#208aef',
-    primaryForeground: '#ffffff',
-    muted: '#f4f4f5',
-    mutedForeground: '#71717a',
-    border: '#e4e4e7',
-    accent: '#f4f4f5',
+    background: '#FFFFFF',
+    card: '#FFFFFF',
+    foreground: '#111111',
+    muted: '#8E8E93',
+    faint: '#C7C7CC',
+    track: '#EFEFF5',
+    border: '#EEEEF3',
+    protein: '#DF6767',
+    carbs: '#DC9A69',
+    fat: '#6A98DC',
+    fiber: '#A089CD',
+    sugar: '#E890AE',
+    sodium: '#EAB771',
+    good: '#28A96C',
+    bad: '#E14945',
+    water: '#5AA9E6',
+    entry: '#F8F7FC',
+    chip: '#F6F5FA',
+    health: '#82DE7A',
+    tabActive: '#E8E8EA',
+    fab: '#1E1A24',
   },
-  fonts: {
-    sans: 'System',
-    mono: 'Menlo',
-  },
-  radii: {
-    card: 16,
-  },
-  spacing: {
-    screenX: 24,
-  },
+  fonts: { sans: 'System' },
+  radii: { card: 18, tile: 16, pill: 999 },
+  spacing: { screenX: 22, gap: 10 },
 } as const;
 
 export type Tokens = typeof tokens;

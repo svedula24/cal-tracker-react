@@ -1,0 +1,39 @@
+{
+  "name": "Kalo",
+  "source": { "mode": "screenshots", "ref": "docs/screenshots/" },
+  "tokens": {
+    "colors": {
+      "background": "#F6F6F8",
+      "card": "#FFFFFF",
+      "foreground": "#111111",
+      "muted": "#8A8A8E",
+      "track": "#EEEEF2",
+      "border": "#E9E9EE",
+      "protein": "#D46A6A",
+      "carbs": "#D49A68",
+      "fat": "#6F96DB",
+      "fiber": "#A58AD8",
+      "sugar": "#E58EAB",
+      "sodium": "#D8B26A",
+      "good": "#4CAF6E",
+      "bad": "#D9534F"
+    },
+    "fonts": { "sans": "System" },
+    "spacing": { "screenX": 22, "cardGap": 10 },
+    "radii": { "card": 24, "pill": 999, "tile": 22 }
+  },
+  "navigation": { "type": "mixed", "items": ["Home", "Progress", "Groups", "Profile"] },
+  "screens": [
+    { "name": "Home", "route": "/", "states": ["macros", "micros", "activity", "add-menu"], "sourceShots": ["home-macros.jpeg", "home-micros.jpeg", "home-activity.jpeg", "home-add-menu.jpeg"], "transitionsTo": ["Daily Score", "Entry detail", "Log exercise", "Saved foods", "Food Database", "Scan food"], "spec": "docs/research/components/home.spec.md" },
+    { "name": "Daily Score", "route": "/daily-score", "states": ["modal"], "sourceShots": ["home-daily-score.jpeg"], "transitionsTo": ["Score info"], "spec": "docs/research/components/daily-score.spec.md" },
+    { "name": "Score info", "route": "/score-info", "states": ["default"], "spec": "docs/research/components/secondary-screens.spec.md" },
+    { "name": "Progress", "route": "/progress", "states": ["default"], "spec": "docs/research/components/secondary-screens.spec.md" },
+    { "name": "Groups", "route": "/groups", "states": ["coming-soon"], "spec": "docs/research/components/secondary-screens.spec.md" },
+    { "name": "Profile", "route": "/profile", "states": ["default"], "spec": "docs/research/components/secondary-screens.spec.md" },
+    { "name": "Food Database", "route": "/food-database", "states": ["default", "empty-search"], "transitionsTo": ["Home"], "spec": "docs/research/components/logging-screens.spec.md" },
+    { "name": "Saved foods", "route": "/saved-foods", "states": ["default", "empty"], "transitionsTo": ["Home"], "spec": "docs/research/components/logging-screens.spec.md" },
+    { "name": "Log exercise", "route": "/log-exercise", "states": ["default"], "transitionsTo": ["Home"], "spec": "docs/research/components/logging-screens.spec.md" },
+    { "name": "Scan food", "route": "/scan-food", "states": ["coming-soon"], "transitionsTo": ["Food Database"], "spec": "docs/research/components/logging-screens.spec.md" },
+    { "name": "Entry detail", "route": "/entry/[id]", "states": ["default"], "spec": "docs/research/components/logging-screens.spec.md" }
+  ]
+}
