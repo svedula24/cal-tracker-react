@@ -32,7 +32,7 @@ def read_rows() -> list[FoodRow]:
     for dataset in DATASETS:
         started = time.monotonic()
         found = records(dataset)
-        duplicates = 0
+        duplicates = incomplete = 0
         bad: list[RecordError] = []
         for index, record in enumerate(found):
             try:
@@ -44,10 +44,14 @@ def read_rows() -> list[FoodRow]:
                 duplicates += 1
                 continue
             seen.add(row.fdc_id)
+            if not row.complete:  # missing calories, protein, carbs or fat: not useful for tracking
+                incomplete += 1
+                continue
             rows.append(row)
         if bad:
             errors[dataset.release] = bad
         note = f", {duplicates} duplicate fdc_ids skipped" if duplicates else ""
+        note += f", {incomplete} without calories, protein, carbs and fat skipped" if incomplete else ""
         note += f", {len(bad)} could not be mapped" if bad else ""
         print(f"{dataset.release}: {len(found)} foods{note} ({time.monotonic() - started:.1f}s)")
     if errors:
@@ -73,6 +77,10 @@ EXPECTED_CONSTRAINTS = frozenset(
 )
 
 
+# Postgres 17 keeps NOT NULL out of pg_constraint, so these are checked on the columns.
+NOT_NULL_COLUMNS = frozenset(FoodRow.columns()) - {"brand_name"}
+
+
 class SchemaOutOfDate(RuntimeError):
     """The existing foods table does not match db/schema.sql."""
 
@@ -81,6 +89,8 @@ def ensure_schema(cur: psycopg.Cursor) -> None:
     cur.execute(SCHEMA.read_text())
     cur.execute("SELECT conname FROM pg_constraint WHERE conrelid = 'foods'::regclass")
     missing = EXPECTED_CONSTRAINTS - {name for (name,) in cur.fetchall()}
+    cur.execute("SELECT attname FROM pg_attribute WHERE attrelid = 'foods'::regclass AND attnum > 0 AND attnotnull")
+    missing |= {f"{column} NOT NULL" for column in NOT_NULL_COLUMNS - {name for (name,) in cur.fetchall()}}
     if missing:
         raise SchemaOutOfDate(
             f"the foods table predates db/schema.sql (missing {', '.join(sorted(missing))}); "

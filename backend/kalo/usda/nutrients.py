@@ -52,6 +52,11 @@ class FoodRow:
     carbs_per_100g: float | None
     fat_per_100g: float | None
 
+    @property
+    def complete(self) -> bool:
+        """Reports calories, protein, carbs and fat: only complete rows are loaded."""
+        return None not in (self.calories_per_100g, self.protein_per_100g, self.carbs_per_100g, self.fat_per_100g)
+
     @classmethod
     def columns(cls) -> tuple[str, ...]:
         return tuple(f.name for f in fields(cls))
