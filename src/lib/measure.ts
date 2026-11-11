@@ -34,30 +34,72 @@ export const scale = (per100g: Nutrients, grams: number): Nutrients =>
 
 /**
  * The database food behind a logged entry (null for hand-written entries), under
- * its database name even after the entry was renamed, so a bookmark saves the
- * food, not the user's label.
+ * its database name even after the entry was renamed and with its database
+ * values even after the entry's were typed over, so a bookmark saves the food,
+ * not the user's label or edits.
  */
 export const foodOfEntry = (e: Entry): Food | null =>
-  e.per100g && e.portions && e.foodId ? { id: e.foodId, name: e.foodName ?? e.name, per100g: e.per100g, portions: e.portions } : null;
+  e.per100g && e.portions && e.foodId
+    ? { id: e.foodId, name: e.foodName ?? e.name, per100g: e.foodPer100g ?? e.per100g, portions: e.portions }
+    : null;
 
 /** `quantity` × a per-measure nutrient set. */
 export const times = (n: Nutrients, quantity: number): Nutrients =>
   Object.fromEntries(NUTRIENT_KEYS.map((k) => [k, n[k] * quantity])) as Nutrients;
 
 /**
- * A typed quantity: digits with one "." or "," (a comma is a decimal point,
- * "1,5", unless it groups thousands, "1,000"), positive, kept to 2 decimals.
- * No upper bound, except that the value must print back (qtyText) as plain
- * digits the field accepts again; from 1e21 JS prints an exponent. Null when
- * invalid, so a typo can't become a day's total.
+ * A typed number: digits with one "." or "," (a comma is a decimal point,
+ * "1,5", unless it groups thousands, "1,000"), not negative, kept to 2
+ * decimals. No upper bound, except that the value must print back (qtyText) as
+ * plain digits the field accepts again; from 1e21 JS prints an exponent. Null
+ * when invalid, so a typo can't become a day's total.
  */
-export function parseQty(text: string): number | null {
+export function parseValue(text: string): number | null {
   const t = text.trim();
   if (!/^[\d.,]+$/.test(t)) return null;
   const normalized = /^\d{1,3}(,\d{3})+$/.test(t) ? t.replace(/,/g, '') : t.replace(',', '.');
   if (!/^\d*\.?\d+$/.test(normalized) && !/^\d+\.$/.test(normalized)) return null;
-  const n = Math.round(Number(normalized) * 100) / 100; // round first: "0.004" is 0, not a quantity
-  return n > 0 && Number.isFinite(n) && !String(n).includes('e') ? n : null;
+  const n = Math.round(Number(normalized) * 100) / 100; // round first: "0.004" is 0
+  return Number.isFinite(n) && !String(n).includes('e') ? n : null;
+}
+
+/** A typed quantity (grams, servings): a typed number above 0. */
+export function parseQty(text: string): number | null {
+  const n = parseValue(text);
+  return n !== null && n > 0 ? n : null;
+}
+
+/**
+ * A per-unit nutrient set after the user types `shown` for one nutrient while
+ * the screen shows `quantity` units: the nutrient becomes shown / quantity per
+ * unit, so the card reads back what was typed and still scales with the amount.
+ */
+export const withValue = (perUnit: Nutrients, key: keyof Nutrients, shown: number, quantity: number): Nutrients => ({
+  ...perUnit,
+  [key]: shown / quantity,
+});
+
+/**
+ * An entry's per-100 g values after some were typed over: only the edited
+ * nutrients are replaced (per gram × 100), so the others stay exactly as stored.
+ */
+export const editedPer100g = (per100g: Nutrients, perGram: Nutrients, edited: Iterable<keyof Nutrients>): Nutrients => {
+  const out = { ...per100g };
+  for (const key of edited) out[key] = perGram[key] * 100;
+  return out;
+};
+
+/**
+ * What typing `text` into a value field means: the number to apply, or null
+ * for no change (an invalid draft, or nothing to do). Typing back exactly what
+ * the field showed when it took focus ("0.7" for 0.74) is not an edit: the
+ * exact value at focus is kept, or restored if something else was typed since.
+ */
+export function typedValue(text: string, atFocus: { text: string; value: number }, current: number): number | null {
+  const n = parseValue(text);
+  if (n === null) return null;
+  if (text.trim() !== atFocus.text) return n;
+  return current !== atFocus.value ? atFocus.value : null;
 }
 
 /** The quantity as shown in the field: "1", "1.5", "0.33". */

@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { defaultServing, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, qtyText, scale, servingSummary, times } from '../src/lib/measure.ts';
+import { defaultServing, editedPer100g, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, parseValue, qtyText, scale, servingSummary, times, typedValue, withValue } from '../src/lib/measure.ts';
 
 // USDA "Banana, raw" per 100 g; its portions, default first.
 const banana = {
@@ -88,3 +88,43 @@ test('serving summary for list rows', () => {
   close(nutrients.calories, 112.14, 'calories');
   assert.equal(servingSummary({ ...banana, portions: [] }).serving, '100 g');
 });
+
+test('parseValue: a typed nutrient value may be 0; parseQty still needs more than 0', () => {
+  assert.equal(parseValue('0'), 0);
+  assert.equal(parseValue('0.004'), 0); // rounds to 0, which a nutrient may be
+  assert.equal(parseValue('12,5'), 12.5);
+  assert.equal(parseValue(' 30 '), 30);
+  for (const bad of ['', 'abc', '-1', '1.2.3', '1e3']) assert.equal(parseValue(bad), null, bad);
+  assert.equal(parseQty('0'), null);
+  assert.equal(parseQty('0.004'), null);
+});
+
+test('withValue: the typed value reads back at this amount and scales with a new one', () => {
+  const perGram = scale(banana.per100g, 1);
+  const edited = withValue(perGram, 'protein', 5, 126); // "5" typed while the screen shows 126 g
+  close(times(edited, 126).protein, 5, 'reads back');
+  close(times(edited, 252).protein, 10, 'double the amount');
+  close(times(edited, 126).calories, times(perGram, 126).calories, 'other nutrients untouched');
+  assert.equal(times(withValue(perGram, 'sugar', 0, 126), 300).sugar, 0);
+  close(times(times(edited, 100), 1.26).protein, 5, 'kept through the per-100 g copy an entry stores');
+});
+
+test('an entry with typed-over values keeps the database food beside them', () => {
+  const perGram = withValue(scale(banana.per100g, 1), 'protein', 5, 100);
+  const per100g = editedPer100g(banana.per100g, perGram, ['protein']);
+  close(per100g.protein, 5, 'the edited nutrient');
+  assert.deepEqual({ ...per100g, protein: banana.per100g.protein }, banana.per100g); // the others are exactly as stored
+  const entry = { id: 'e1', date: '2026-11-10', time: 't', name: 'Banana, raw', servings: 100, nutrients: perGram, per100g, foodPer100g: banana.per100g, portions: banana.portions, measure: G, foodId: banana.id, foodName: banana.name };
+  assert.deepEqual(foodOfEntry(entry), banana); // what a bookmark saves
+});
+
+test('typedValue: an edit, an invalid draft, and typing back what the field showed', () => {
+  const atFocus = { text: '0.7', value: 0.74 };
+  assert.equal(typedValue('5', atFocus, 0.74), 5);
+  assert.equal(typedValue('0.72', atFocus, 0.74), 0.72); // rounds to the same display, still an edit
+  assert.equal(typedValue('abc', atFocus, 0.74), null);
+  assert.equal(typedValue('0.7', atFocus, 0.74), null); // retyped: the exact 0.74 stays
+  assert.equal(typedValue(' 0.7 ', atFocus, 5), 0.74); // typed back after an edit: the exact value is restored
+  assert.equal(typedValue('0', { text: '12', value: 12 }, 12), 0);
+});
+

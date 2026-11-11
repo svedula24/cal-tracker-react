@@ -20,15 +20,18 @@ const btn = (page, name) => page.getByRole('button', { name, exact: true });
 // exported chunk (usda-foods-<hash>.js) and the dev server's (usda-foods.bundle?…).
 const FOOD_CHUNK = '**/usda-foods*';
 
-// The Calories card on the Nutrition screen shows a bare number (macros carry units).
-const expectCalories = (page, value) =>
-  page
-    .getByText(value, { exact: true })
-    .first()
-    .waitFor({ timeout: 3000 })
-    .catch(() => {
-      throw new Error(`expected the Calories card to show ${value}`);
-    });
+// A nutrient card on the Nutrition screen ("Calories", "Protein", …) is a field: wait for its value.
+const expectValue = async (page, label, value) => {
+  const field = page.getByLabel(label, { exact: true });
+  let got;
+  for (let i = 0; i < 30; i++) {
+    got = await field.inputValue().catch(() => undefined);
+    if (got === value) return;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  throw new Error(`expected the ${label} card to show ${value}, it shows ${got}`);
+};
+const expectCalories = (page, value) => expectValue(page, 'Calories', value);
 
 export const flows = [
   {
@@ -265,6 +268,65 @@ export const flows = [
       await page.reload({ waitUntil: 'networkidle' });
       await wait(800);
       if ((await visible(page, 'Raw Honey')) > 0) throw new Error('"Raw Honey" still on Home after delete');
+    },
+  },
+  {
+    name: 'nutrition: a typed nutrient value is kept, scales with the amount, and persists',
+    run: async (page, base, { wait }) => {
+      await go(page, base + '/food-database', wait);
+      await page.getByLabel('Search foods').fill('banana');
+      await btn(page, 'Banana, raw').click();
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      await page.getByLabel('Food name').fill('Edited banana');
+      await page.getByLabel('Grams').fill('100');
+      await expectValue(page, 'Protein', '0.7'); // USDA: 0.74 g per 100 g
+      // An invalid draft changes nothing and is dropped when the field is left.
+      await page.getByLabel('Protein', { exact: true }).fill('abc');
+      await page.getByLabel('Grams').click();
+      await expectValue(page, 'Protein', '0.7');
+      // Retyping the shown value is not an edit: the exact 0.74 stays, so 1000 g still shows 7.4.
+      await page.getByLabel('Protein', { exact: true }).fill('0.7');
+      await page.getByLabel('Grams').fill('1000');
+      await expectValue(page, 'Protein', '7.4');
+      await page.getByLabel('Grams').fill('100');
+      // A value that rounds to the same display is still an edit: 0.72 also shows "0.7".
+      await page.getByLabel('Protein', { exact: true }).fill('0.72');
+      await page.getByLabel('Grams').fill('1000');
+      await expectValue(page, 'Protein', '7.2');
+      await page.getByLabel('Grams').fill('100');
+      await page.getByLabel('Protein', { exact: true }).fill('5');
+      await page.getByLabel('Calories', { exact: true }).fill('150');
+      await page.getByLabel('Grams').fill('200');
+      await expectValue(page, 'Protein', '10');
+      await expectCalories(page, '300');
+      await expectValue(page, 'Carbs', '45'); // untouched: 22.7 g per 100 g
+      await btn(page, 'Done').click();
+      await page.getByText(/300 Calories/).waitFor({ timeout: 5000 });
+      await page.reload({ waitUntil: 'networkidle' });
+      await wait(800);
+      await page.getByText('Edited banana', { exact: true }).first().click();
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      if ((await page.getByLabel('Grams').inputValue()) !== '200') throw new Error('the edited entry did not reopen at 200 g');
+      await expectValue(page, 'Protein', '10');
+      await expectCalories(page, '300');
+      // Editing a logged entry: a 0 is a value, and it persists too.
+      await page.getByLabel('Fats', { exact: true }).fill('0');
+      await btn(page, 'Done').click();
+      await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+      await page.getByText('Edited banana', { exact: true }).first().click();
+      await expectValue(page, 'Fats', '0');
+      // A bookmark from the edited entry saves the database food, not the typed values.
+      if ((await btn(page, 'Unsave Banana, raw').count()) > 0) await btn(page, 'Unsave Banana, raw').click();
+      await btn(page, 'Save Banana, raw').click();
+      await btn(page, 'Unsave Banana, raw').waitFor({ timeout: 3000 });
+      await go(page, base + '/saved-foods', wait);
+      await page.getByText('1 banana (126 g) · 122 cal').waitFor({ timeout: 3000 }); // USDA's 97 kcal per 100 g, not the typed 150
+      await go(page, base + '/', wait);
+      await page.getByText('Edited banana', { exact: true }).first().click();
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      await btn(page, 'More options').click();
+      await btn(page, 'Delete entry').click();
+      await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
     },
   },
 ];
