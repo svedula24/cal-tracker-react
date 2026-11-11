@@ -45,6 +45,7 @@ export class Collection<T extends WithId> {
   // Writes made before hydration finishes: replayed onto the stored data, so an
   // early add neither vanishes nor overwrites what was saved.
   private pending: ((items: T[]) => T[])[] = [];
+  private hydrated: Promise<void>;
 
   // A plain field (not a constructor parameter property) so Node can strip the
   // types and unit-test this file: tests/store.test.mjs.
@@ -56,10 +57,14 @@ export class Collection<T extends WithId> {
     // Hydrate once from storage without blocking render. On web, AsyncStorage is
     // localStorage; guard SSR/prerender where `window` is absent.
     if (typeof window !== 'undefined') {
+      let done!: () => void;
+      this.hydrated = new Promise<void>((resolve) => (done = resolve));
       // Load whatever is stored under this key — including an empty array. A key
       // that EXISTS wins over the seed, so deleting every item persists as empty
       // instead of silently resurrecting the seed data on the next reload.
-      void AsyncStorage.getItem(this.key)
+      // getItem inside the chain, so a storage that throws outright still hydrates (from the seed).
+      void Promise.resolve()
+        .then(() => AsyncStorage.getItem(this.key))
         .catch(() => null)
         .then((raw) => {
           let base = seed;
@@ -94,9 +99,15 @@ export class Collection<T extends WithId> {
             this.items = next;
             this.emit();
           }
+        })
+        // Whatever happened above (a subscriber that threw), nobody waits for ever.
+        .then(done, () => {
+          this.ready = true;
+          done();
         });
     } else {
       this.ready = true;
+      this.hydrated = Promise.resolve();
     }
   }
 
@@ -132,6 +143,12 @@ export class Collection<T extends WithId> {
   update = (id: string, patch: Partial<T>) =>
     this.apply((items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i)));
   remove = (id: string) => this.apply((items) => items.filter((i) => i.id !== id));
+  /** Replaces the item with this id, or appends it. Unlike `update`, nothing of the old item is kept. */
+  put = (item: T) =>
+    this.apply((items) => (items.some((i) => i.id === item.id) ? items.map((i) => (i.id === item.id ? item : i)) : [...items, item]));
+
+  /** Resolves once the stored data has loaded (at once if it already has); never rejects. */
+  whenReady = (): Promise<void> => this.hydrated;
 }
 
 const collections = new Map<string, Collection<WithId>>();

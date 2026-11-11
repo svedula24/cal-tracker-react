@@ -98,3 +98,75 @@ test('corrupt stored JSON falls back to the seed, which is migrated', async () =
   const c = await hydrated(new Collection('g', [{ id: 's' }], (items) => items.map((i) => ({ ...i, upgraded: true }))));
   assert.deepEqual(c.items, [{ id: 's', upgraded: true }]);
 });
+
+// ── put and whenReady (used by sync: src/lib/sync/local.ts and index.ts) ─────
+test('put replaces the item with that id whole (no merge), or appends it', async () => {
+  disk.set('p1', JSON.stringify([{ id: 'a', v: 1, extra: true }, { id: 'b', v: 2 }]));
+  const c = await hydrated(new Collection('p1', []));
+  c.put({ id: 'a', v: 9 });
+  assert.deepEqual(c.items, [{ id: 'a', v: 9 }, { id: 'b', v: 2 }], 'replaced in place; `extra` is gone');
+  c.put({ id: 'c', v: 3 });
+  assert.deepEqual(c.items, [{ id: 'a', v: 9 }, { id: 'b', v: 2 }, { id: 'c', v: 3 }]);
+  assert.deepEqual(JSON.parse(disk.get('p1')), c.items);
+});
+
+test('put notifies subscribers', async () => {
+  const c = await hydrated(new Collection('p2', [{ id: 'a' }]));
+  let calls = 0;
+  c.subscribe(() => calls++);
+  c.put({ id: 'a', v: 1 });
+  assert.equal(calls, 1);
+});
+
+test('a put before hydration is shown at once and replayed onto the stored data', async () => {
+  disk.set('p3', JSON.stringify([{ id: 'stored', v: 1 }, { id: 'both', v: 1, old: true }]));
+  const c = new Collection('p3', [{ id: 'seed' }]);
+  c.put({ id: 'both', v: 2 }); // replaces the stored one
+  c.put({ id: 'new', v: 3 }); // appended to the stored data, not to the seed
+  assert.deepEqual(c.items, [{ id: 'seed' }, { id: 'both', v: 2 }, { id: 'new', v: 3 }], 'visible before storage has loaded');
+  await c.whenReady();
+  assert.deepEqual(c.items, [{ id: 'stored', v: 1 }, { id: 'both', v: 2 }, { id: 'new', v: 3 }]);
+  assert.deepEqual(JSON.parse(disk.get('p3')), c.items);
+});
+
+test('whenReady resolves after hydration, with the stored data in place', async () => {
+  disk.set('w1', JSON.stringify([{ id: 'stored' }]));
+  const c = new Collection('w1', [{ id: 'seed' }]);
+  assert.equal(c.ready, false);
+  assert.deepEqual(c.items, [{ id: 'seed' }]);
+  await c.whenReady();
+  assert.equal(c.ready, true);
+  assert.deepEqual(c.items, [{ id: 'stored' }]);
+});
+
+test('whenReady resolves at once on a collection that has already hydrated, every time', async () => {
+  const c = await hydrated(new Collection('w2', [{ id: 's' }]));
+  await c.whenReady();
+  await c.whenReady();
+  assert.equal(c.ready, true);
+});
+
+for (const [how, getItem] of [
+  ['rejects', async () => Promise.reject(new Error('storage is broken'))],
+  ['throws', () => { throw new Error('storage is missing'); }],
+]) {
+  test(`whenReady resolves when reading storage ${how}: the seed is used`, async (t) => {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    t.mock.method(AsyncStorage, 'getItem', getItem);
+    const c = new Collection(`w3-${how}`, [{ id: 'seed' }]);
+    await c.whenReady();
+    assert.equal(c.ready, true);
+    assert.deepEqual(c.items, [{ id: 'seed' }]);
+  });
+}
+
+test('whenReady resolves even when a subscriber throws during hydration', async () => {
+  disk.set('w5', JSON.stringify([{ id: 'stored' }]));
+  const c = new Collection('w5', []);
+  c.subscribe(() => {
+    throw new Error('a broken screen');
+  });
+  await c.whenReady();
+  assert.equal(c.ready, true);
+  assert.deepEqual(c.items, [{ id: 'stored' }]);
+});

@@ -1,6 +1,8 @@
-// App data on top of the on-device store (src/lib/store.ts). UI only: nothing
-// here talks to a server. First launch is seeded so Home matches the reference
-// screenshots exactly; anything the user logs adds on top.
+// App data on top of the on-device store (src/lib/store.ts). Every action is a
+// local write; when the app has an API URL, the write is also reported to the
+// background sync (src/lib/sync/), which copies it to the server later. First
+// launch is seeded so Home matches the reference screenshots exactly; anything
+// the user logs adds on top.
 import { getCollection, makeId, useCollection } from '@/lib/store';
 import {
   addDays,
@@ -17,6 +19,8 @@ import { defaultServing, scale } from '@/lib/measure';
 import { migrateEntries } from '@/lib/migrateEntries';
 import { migrateSavedFoods, type SavedFood } from '@/lib/savedFoods';
 import { PAST_DAY_FOODS, SAVED_FOODS } from '@/lib/seedFoods';
+import { markDirty } from '@/lib/sync/dirty';
+import { fdcIdOf } from '@/lib/sync/mapping';
 
 export type Entry = {
   id: string;
@@ -103,20 +107,91 @@ const dayLogSeed: DayLog[] = [
 export const STREAK_DAYS = 16;
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
+// Each collection is made in one place (key, seed, migration), for the hooks and
+// for sync. The writers are module-level, so the functions the hooks return are
+// stable. Each reports the row to sync AFTER the local write (markDirty does
+// nothing without an API URL and never throws).
 const entriesSeed = seedEntries();
 // Stored entries are upgraded once at load (UUID ids, the `seed` flag); see migrateEntries.
 const entriesStore = () => getCollection<Entry>('entries', entriesSeed, migrateEntries);
-// Any edit makes a demo entry the user's. Module-level, so the function is stable.
-const updateEntry = (id: string, patch: Partial<Entry>) => entriesStore().update(id, { ...patch, seed: false });
-export const useEntries = () => ({ ...useCollection<Entry>('entries', entriesSeed, migrateEntries), update: updateEntry });
-export { migrateEntries };
-export const useDayLogs = () => useCollection<DayLog>('dayLogs', dayLogSeed);
 const savedSeed: SavedFood[] = SAVED_FOODS.map((food) => ({ id: food.id, food }));
-
 // Stored entries are cleaned once when the list loads (and saved), so every
 // item has a usable snapshot; see migrateSavedFoods.
-export const useSavedFoods = () => useCollection<SavedFood>('savedFoods', savedSeed, migrateSavedFoods);
+const savedStore = () => getCollection<SavedFood>('savedFoods', savedSeed, migrateSavedFoods);
+const goalsStore = () => getCollection<Goals>('goals', goalsSeed);
+const dayLogsStore = () => getCollection<DayLog>('dayLogs', dayLogSeed);
 
+/** The collections sync reads and writes (src/lib/sync/index.ts): the same instances the hooks use. */
+export const syncStores = () => ({ entries: entriesStore(), saved: savedStore(), goals: goalsStore(), dayLogs: dayLogsStore() });
+
+const addEntry = (entry: Entry) => {
+  entriesStore().add(entry);
+  markDirty('food_logs', entry.id);
+};
+// Any edit makes a demo entry the user's.
+const updateEntry = (id: string, patch: Partial<Entry>) => {
+  entriesStore().update(id, { ...patch, seed: false });
+  markDirty('food_logs', id);
+};
+const removeEntry = (id: string) => {
+  const store = entriesStore();
+  // A demo entry was never sent, so there is nothing to delete on the server.
+  const demo = store.items.find((e) => e.id === id)?.seed === true;
+  store.remove(id);
+  if (!demo) markDirty('food_logs', id, true);
+};
+export const useEntries = () => ({
+  ...useCollection<Entry>('entries', entriesSeed, migrateEntries),
+  add: addEntry,
+  update: updateEntry,
+  remove: removeEntry,
+});
+export { migrateEntries };
+// A day's steps: its sync key is the date. Nothing in the app writes these yet (no step source),
+// but a screen that does must not have to remember sync, so the writers report like the others.
+const addDayLog = (log: DayLog) => {
+  dayLogsStore().add(log);
+  markDirty('daily_steps', log.id);
+};
+const updateDayLog = (id: string, patch: Partial<DayLog>) => {
+  dayLogsStore().update(id, patch);
+  markDirty('daily_steps', id);
+};
+const removeDayLog = (id: string) => {
+  dayLogsStore().remove(id);
+  markDirty('daily_steps', id, true);
+};
+export const useDayLogs = () => ({
+  ...useCollection<DayLog>('dayLogs', dayLogSeed),
+  add: addDayLog,
+  update: updateDayLog,
+  remove: removeDayLog,
+});
+
+// Only database foods (`usda:<n>`) exist on the server; its key is the number as text.
+const markSaved = (id: string, deleted: boolean) => {
+  const fdcId = fdcIdOf(id);
+  if (fdcId !== null) markDirty('saved_foods', String(fdcId), deleted);
+};
+// The time is recorded here, for every screen that bookmarks a food.
+const addSaved = (item: SavedFood) => {
+  savedStore().add({ ...item, savedAt: item.savedAt ?? new Date().toISOString() });
+  markSaved(item.id, false);
+};
+const removeSaved = (id: string) => {
+  savedStore().remove(id);
+  markSaved(id, true);
+};
+export const useSavedFoods = () => ({
+  ...useCollection<SavedFood>('savedFoods', savedSeed, migrateSavedFoods),
+  add: addSaved,
+  remove: removeSaved,
+});
+
+// Read-only: the app has no screen to change goals, so there is no writer to report to sync
+// (the one goal row is uploaded by the first sync). When a goals screen is built, a change is a
+// NEW row dated the day it takes effect (user_goals is dated history), which the sync key
+// (GOALS_SINCE in src/lib/sync/local.ts) and this hook must then be changed for.
 export function useGoals() {
   const { items } = useCollection<Goals>('goals', goalsSeed);
   return { goals: items[0] ?? goalsSeed[0] };
