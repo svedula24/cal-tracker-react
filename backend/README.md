@@ -181,8 +181,8 @@ That exposes the API to the whole network. The food data is public, but anyone
 on the network can also register a device (below), so use it on a network you
 trust.
 
-CORS: any origin may call the API (`Access-Control-Allow-Origin: *`) with `GET`,
-`POST`, `PATCH` or `DELETE` and the `Authorization` and `Content-Type` headers,
+CORS: any origin may call the API (`Access-Control-Allow-Origin: *`) with `GET`
+or `POST` and the `Authorization` and `Content-Type` headers,
 because the web build and the Expo web dev server call it from another origin.
 Cookies are never used (credentials are off): a user is identified only by the
 bearer token the client sends itself.
@@ -205,8 +205,10 @@ curl localhost:8000/api/v1/me -H 'Authorization: Bearer kalo_…'
 - Every other user endpoint takes `Authorization: Bearer <token>` and resolves the
   user from it. No endpoint accepts a user id.
 - A missing, malformed, unknown or revoked token is 401 with `WWW-Authenticate: Bearer`.
-- To revoke a token, set `user_tokens.revoked_at`. There is no endpoint for it yet,
-  and registration has no rate limit: both are needed before the API is public.
+- Registration needs no token, so it is limited to 20 an hour per client address
+  (429 with `Retry-After` above that). The count is kept in the server process:
+  with several workers or instances, limit at the proxy as well.
+- To revoke a token, set `user_tokens.revoked_at`. There is no endpoint for it yet.
 
 In the code, services write into the request's session and never commit; a route
 that writes ends with one `session.commit()` (`app/api/deps.py`).

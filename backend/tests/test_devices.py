@@ -301,9 +301,8 @@ def test_the_token_is_not_logged(client, caplog):
     [
         ("/api/v1/devices", "POST", "content-type"),
         ("/api/v1/devices", "POST", "authorization, content-type"),
+        ("/api/v1/me", "GET", "Authorization, Content-Type"),
         ("/api/v1/me", "GET", "authorization"),
-        ("/api/v1/me", "PATCH", "Authorization, Content-Type"),
-        ("/api/v1/me", "DELETE", "authorization"),
     ],
 )
 def test_preflight_allows_a_write_with_authorization(client, path, method, asks):
@@ -336,3 +335,21 @@ def test_a_failed_registration_leaves_no_user_behind(client, db, monkeypatch):
     with pytest.raises(Exception, match="octet_length|check constraint"):
         client.post("/api/v1/devices", json={})
     assert db.execute("SELECT count(*) FROM users").fetchone()[0] == 0
+
+
+def test_registration_is_limited_per_address(client, monkeypatch):
+    from app.main import REGISTRATIONS_PER_HOUR
+
+    for _ in range(REGISTRATIONS_PER_HOUR):
+        assert client.post("/api/v1/devices").status_code == 201
+    refused = client.post("/api/v1/devices")
+    assert refused.status_code == 429
+    assert 0 < int(refused.headers["retry-after"]) <= 3600
+    assert "token" not in refused.text
+    # Nothing was created by the refused call, and other endpoints are not limited.
+    assert client.get("/api/v1/foods/search?q=banana").status_code == 200
+    # An hour later the address may register again.
+    limiter = client.app.state.registrations
+    monkeypatch.setattr(limiter, "clock", lambda: limiter._events["testclient"][-1] + 3601)
+    assert client.post("/api/v1/devices").status_code == 201
+

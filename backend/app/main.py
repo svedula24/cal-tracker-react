@@ -15,10 +15,14 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.orm import sessionmaker
 
+from app.api.limits import SlidingWindow
 from app.api.v1.devices import router as devices_router
 from app.api.v1.foods import router as foods_router
 from app.db.session import make_engine
 from kalo.db import database_url, require_head
+
+# A household or office shares one address; an app registers once per install.
+REGISTRATIONS_PER_HOUR = 20
 
 
 def create_app(url: str | None = None) -> FastAPI:
@@ -43,6 +47,8 @@ def create_app(url: str | None = None) -> FastAPI:
     app = FastAPI(title="Kalo", lifespan=lifespan)
     app.include_router(foods_router)
     app.include_router(devices_router)
+    # Registration needs no token, so one address may only register this often (POST /api/v1/devices).
+    app.state.registrations = SlidingWindow(REGISTRATIONS_PER_HOUR, per_seconds=3600)
     # Any origin may call the API (the web build and the Expo web dev server call it cross-origin).
     # What makes "*" safe is that credentials stay off: there are no cookies, and a user is known only
     # by the bearer token the app itself puts in the Authorization header, which another site's page
@@ -51,7 +57,7 @@ def create_app(url: str | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_methods=["GET", "POST"],  # a route that needs another method adds it here
         allow_headers=["Authorization", "Content-Type"],
     )
     # A page of 50 foods with their portions is 18 to 36 kB of JSON and gzips to about 3 kB (measured
