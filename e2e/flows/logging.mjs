@@ -329,4 +329,114 @@ export const flows = [
       await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
     },
   },
+  {
+    // Self-contained: logs its own food and deletes the two entries it creates.
+    name: 'quick add: a recent food on the + menu opens Nutrition at its last amount; Done logs a new entry',
+    run: async (page, base, { wait }) => {
+      const recent = (grams) => btn(page, `Log Avocado, raw again, ${grams} g`);
+      const openMenu = async () => {
+        await btn(page, 'Add').click();
+        await btn(page, 'Scan food').waitFor({ timeout: 3000 });
+        await wait(400); // the tiles spring in
+      };
+      const openEntry = async (name) => {
+        await btn(page, `Edit ${name}`).first().click();
+        await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      };
+      const deleteEntry = async (name) => {
+        await openEntry(name);
+        await btn(page, 'More options').click();
+        await btn(page, 'Delete entry').click();
+        await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+        await wait(400);
+      };
+
+      // Log 80 g of avocado (its serving is 150 g) under another name.
+      await go(page, base + '/food-database', wait);
+      await page.getByLabel('Search foods').fill('avocado raw');
+      await btn(page, 'Avocado, raw').click();
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      if ((await page.getByLabel('Grams').inputValue()) !== '150') throw new Error('avocado should start at its serving, 150 g');
+      await page.getByLabel('Grams').fill('80');
+      await page.getByLabel('Food name').fill('Quick add test');
+      await btn(page, 'Done').click();
+      await btn(page, 'Edit Quick add test').waitFor({ timeout: 5000 });
+      await wait(400);
+
+      // The + menu offers the database food (not the renamed label) at that amount.
+      await openMenu();
+      await page.getByText('Recent', { exact: true }).waitFor({ timeout: 3000 });
+      await recent(80).waitFor({ timeout: 3000 });
+      if ((await recent(80).innerText()) !== 'Avocado, raw\n80 g · 128 cal') throw new Error(`recent row reads "${await recent(80).innerText()}"`);
+      const rows = await page.getByRole('button', { name: /^Log .+ again/ }).count();
+      if (rows > 3) throw new Error(`${rows} recent foods offered, at most 3 expected`);
+      // The card must not push the tiles or the close button away.
+      for (const name of ['Saved foods', 'Food Database', 'Scan food']) {
+        const box = await btn(page, name).boundingBox();
+        if (!box || box.y < 0 || box.y + box.height > page.viewportSize().height) throw new Error(`${name} tile is off screen with Recent shown`);
+      }
+      // It is a card like the tiles: on screen, as wide as the full-width tile, with the same background.
+      const card = page.getByLabel('Recent foods', { exact: true });
+      const [cardBox, scanBox] = [await card.boundingBox(), await btn(page, 'Scan food').boundingBox()];
+      if (cardBox.y < 0) throw new Error('the Recent card runs off the top of the screen');
+      if (Math.abs(cardBox.width - scanBox.width) > 1 || Math.abs(cardBox.x - scanBox.x) > 1) throw new Error(`the Recent card is ${cardBox.width}px wide at x ${cardBox.x}, the tiles ${scanBox.width}px at ${scanBox.x}`);
+      const bg = (loc) => loc.evaluate((el) => getComputedStyle(el).backgroundColor);
+      if ((await bg(card)) !== (await bg(btn(page, 'Scan food')))) throw new Error(`the Recent card's background is ${await bg(card)}: className lost`);
+      if (cardBox.y + cardBox.height > (await btn(page, 'Saved foods').boundingBox()).y) throw new Error('the Recent card overlaps the tiles');
+
+      // Tapping it opens Nutrition prefilled; nothing is logged until Done.
+      await recent(80).click();
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      if (!/\/nutrition\?/.test(page.url())) throw new Error(`expected /nutrition, got ${page.url()}`);
+      if ((await page.getByLabel('Grams').inputValue()) !== '80') throw new Error(`Grams starts at ${await page.getByLabel('Grams').inputValue()}, not 80`);
+      if ((await page.getByLabel('Food name').inputValue()) !== 'Avocado, raw') throw new Error('the name is not the database name');
+      await expectCalories(page, '128');
+      await page.getByText('1 fruit = 150 g').waitFor({ timeout: 2000 }); // the serving hint is unchanged
+      if ((await btn(page, 'More options').count()) > 0) throw new Error('opened an existing entry instead of a new food');
+      const stored = () => page.evaluate(() => JSON.parse(localStorage.getItem('entries')).filter((e) => e.foodId === 'usda:2709223').length);
+      if ((await stored()) !== 1) throw new Error(`tapping a recent food logged it: ${await stored()} avocado entries before Done`);
+      await page.getByLabel('Grams').fill('90');
+      await expectCalories(page, '144');
+      await btn(page, 'Done').click();
+      await btn(page, 'Edit Avocado, raw').waitFor({ timeout: 5000 });
+      await wait(400);
+
+      // A new entry beside the first: nothing merged, the first one untouched.
+      if ((await btn(page, 'Edit Avocado, raw').count()) !== 1 || (await btn(page, 'Edit Quick add test').count()) !== 1) throw new Error('expected the first entry and one new entry on Home');
+      if ((await stored()) !== 2) throw new Error(`expected 2 avocado entries, found ${await stored()}`);
+      await page.reload({ waitUntil: 'networkidle' });
+      await wait(800);
+      await openEntry('Quick add test');
+      if ((await page.getByLabel('Grams').inputValue()) !== '80') throw new Error('the first entry changed');
+      await btn(page, 'Back').click();
+      await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+      await wait(400);
+
+      // One row per food, now at the newer amount; opening it again starts from that amount.
+      await openMenu();
+      await recent(90).waitFor({ timeout: 3000 });
+      if ((await recent(80).count()) > 0) throw new Error('the food is listed twice, or at its older amount');
+      await recent(90).click();
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      if ((await page.getByLabel('Grams').inputValue()) !== '90') throw new Error(`reopened at ${await page.getByLabel('Grams').inputValue()} g, not 90`);
+      await btn(page, 'Back').click(); // leaves without logging
+      await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+      await wait(400);
+      if ((await stored()) !== 2) throw new Error('Back from a recent food logged an entry');
+
+      // Clean up, so later flows and Home's totals are unaffected; a deleted entry is no longer recent.
+      await go(page, base + '/', wait);
+      await deleteEntry('Avocado, raw');
+      await openMenu();
+      await recent(80).waitFor({ timeout: 3000 }); // back to the remaining entry's amount
+      await btn(page, 'Close menu').last().click();
+      await wait(300);
+      await deleteEntry('Quick add test');
+      if ((await stored()) !== 0) throw new Error('clean-up left an avocado entry');
+      await openMenu();
+      if ((await page.getByRole('button', { name: /^Log Avocado, raw again/ }).count()) > 0) throw new Error('a deleted food is still under Recent');
+      await btn(page, 'Close menu').last().click();
+      await wait(300);
+    },
+  },
 ];
