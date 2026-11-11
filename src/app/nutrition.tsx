@@ -293,7 +293,7 @@ function NutrientCard({ label, value, unit, icon, big = false }: { label: string
             {icon}
             <Text className="ml-2 text-[13px] text-muted">{label}</Text>
           </View>
-          <Text className="mt-0.5 text-[20px] font-bold text-foreground">
+          <Text className="mt-0.5 text-center text-[20px] font-bold text-foreground">
             {value}
             {unit}
           </Text>
