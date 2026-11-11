@@ -188,6 +188,9 @@ def upsert_food_log(
             raise LogRejected("not_found")
     food = None
     if row.deleted_at is None and row.fdc_id is not None:
+        # None only for an fdc_id a client made up or took from another release. A log that is
+        # already stored always finds its food: food_logs.fdc_id references foods, and a food is
+        # retired, never deleted, so re-sending a stored row (PATCH) cannot turn it into a custom entry.
         food = session.get(Food, row.fdc_id)
     log, applied = apply_food_log(
         user.id, row, existing, food, datetime.now(UTC), zero_means_unknown=zero_means_unknown

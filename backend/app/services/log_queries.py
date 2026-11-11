@@ -94,7 +94,7 @@ FROM (
     SELECT DISTINCT ON (fdc_id) fdc_id, quantity, logged_at
     FROM food_logs
     WHERE user_id = :user_id AND deleted_at IS NULL AND fdc_id IS NOT NULL
-    ORDER BY fdc_id, logged_at DESC
+    ORDER BY fdc_id, logged_at DESC, id DESC  -- id: two logs of one food at the same instant give one answer
 ) recent
 JOIN foods f ON f.fdc_id = recent.fdc_id
 ORDER BY recent.logged_at DESC, f.fdc_id

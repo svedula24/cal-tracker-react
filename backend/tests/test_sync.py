@@ -966,3 +966,17 @@ def test_zero_means_unknown_only_through_sync(client, me, db):
     edit = {**pushed, "id": r.json()["id"], "updated_at": (datetime.now(UTC) + timedelta(minutes=1)).isoformat()}
     assert sync(client, me, food_logs=[edit])["rejected"] == []
     assert stored(db)[-1]["unit_fiber_g"] is None and str(stored(db)[-1]["id"]) == r.json()["id"]
+
+
+def test_a_body_over_the_size_limit_is_413_before_it_is_parsed(client, me, db):
+    from app.main import MAX_BODY_BYTES
+
+    # Not valid for /sync (an unknown key would be a 422): the 413 shows it was never parsed.
+    padding = "x" * MAX_BODY_BYTES
+    r = client.post(URL, json={"cursor": None, "changes": {}, "padding": padding}, headers={**me, "Origin": "http://localhost:8081"})
+    assert r.status_code == 413, r.text[:200]
+    assert r.headers["access-control-allow-origin"] == "*"  # readable by the web build
+    assert db.execute("SELECT count(*) FROM food_logs").fetchone() == (0,)
+    # A body under the limit is handled as usual.
+    assert sync(client, me)["rejected"] == []
+

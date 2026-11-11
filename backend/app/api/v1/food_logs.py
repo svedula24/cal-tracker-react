@@ -41,7 +41,11 @@ Day = Annotated[date | None, Query(alias="date", description="YYYY-MM-DD. Defaul
 
 
 def food_per_100g(food: Food) -> dict[str, float | None]:
-    """A foods row's nutrients under the wire names. The values are passed on as they were read."""
+    """A foods row's nutrients under the wire names. The values are passed on as they were read.
+
+    Calories, protein, carbs and fat are NOT NULL in `foods` (a food without one is never loaded), so
+    only fiber, sugar and sodium can be None here, which the wire format allows.
+    """
     return {
         "calories": food.calories_per_100g,
         "protein_g": food.protein_per_100g,

@@ -1,4 +1,4 @@
-"""A small in-process rate limit, for the one endpoint anyone can call without a token."""
+"""Request limits: a rate limit for the one endpoint anyone can call without a token, and a cap on body size."""
 
 from __future__ import annotations
 
@@ -6,6 +6,9 @@ import threading
 import time
 from collections import deque
 from collections.abc import Callable
+
+from starlette.responses import JSONResponse
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 SWEEP_EVERY = 60.0  # seconds between sweeps of keys that have gone quiet
 
@@ -42,3 +45,26 @@ class SlidingWindow:
                 return events[0] + self.per_seconds - now
             events.append(now)
             return None
+
+
+class BodyLimit:
+    """Refuses (413) a request whose declared Content-Length is over `max_bytes`, before reading any of it.
+
+    Plain ASGI, not BaseHTTPMiddleware: that one streams every response, which would cost the gzip
+    middleware its Content-Length. A body sent without a Content-Length (chunked) is not caught
+    here: cap that at the proxy.
+    """
+
+    def __init__(self, app: ASGIApp, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] == "http":
+            declared = dict(scope["headers"]).get(b"content-length", b"").decode("latin-1")
+            if declared.isdigit() and int(declared) > self.max_bytes:
+                refusal = JSONResponse({"detail": f"request body over {self.max_bytes} bytes"}, status_code=413)
+                await refusal(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+

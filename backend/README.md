@@ -254,7 +254,8 @@ curl -X POST localhost:8000/api/v1/sync -H 'Authorization: Bearer kalo_…' \
 - **Pull:** the user's rows with `rev` above `cursor`, at most 500 a call; call
   again with the returned cursor while `has_more`. The rows this request wrote are
   not sent back; a pushed row that lost to a newer copy is.
-- More than 500 rows in one request is 413. The whole request is one transaction,
+- More than 500 rows in one request is 413, and so is any request body over 2 MB,
+  refused by its `Content-Length` before it is read. The whole request is one transaction,
   and it locks the user's row first, so one user's changes are numbered in the
   order they commit.
 
