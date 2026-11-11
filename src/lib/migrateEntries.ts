@@ -7,10 +7,21 @@ import { isUuid, uuid } from './uuid.ts';
 
 /**
  * (1) An entry whose id is not a UUID gets a new one (the server's log ids are
- * client-made UUIDs). (2) An entry from before the `seed` flag is tagged: demo
- * data when it has no food or is not measured in grams (every entry the app logs
- * itself uses the gram measure; hand-written ones exist only as seeds), else the
- * user's. Returns the same array when nothing changes, so storage isn't rewritten.
+ * client-made UUIDs). Nothing stored refers to an entry by id: the id only
+ * travels in the Nutrition route's `id` parameter, so the one stale reference
+ * possible is a web URL opened before the upgrade, which shows "Entry not found".
+ *
+ * (2) An entry from before the `seed` flag is tagged: demo data when it has no
+ * food or is not measured in grams, else the user's. This is a guess from the
+ * entry's shape, since older data did not record where an entry came from:
+ * - every entry logged from a food uses the gram measure, and so does a demo
+ *   entry of a past day once it was edited (Done rewrites its measure to grams),
+ *   so both are the user's;
+ * - a hand-written entry has no food, and those exist only as demo data. One
+ *   the user edited before this flag existed is still tagged demo, until it is
+ *   edited again.
+ *
+ * Returns the same array when nothing changes, so storage isn't rewritten.
  */
 export function migrateEntries(items: Entry[]): Entry[] {
   let changed = false;
