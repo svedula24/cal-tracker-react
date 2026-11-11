@@ -96,6 +96,25 @@ const home = [
     },
   },
   {
+    // Must stay ahead of every flow that logs a food: storage is shared, and this is the fresh install.
+    name: 'home: a fresh install (demo data only) has no Recent foods on the + menu',
+    run: async (page, base, { wait }) => {
+      await go(page, base + '/', wait);
+      // The demo data includes real database foods (the past days): they must not be offered.
+      const demoFoods = await page.evaluate(() => JSON.parse(localStorage.getItem('entries') ?? '[]').filter((e) => e.seed && e.foodId).length);
+      if (demoFoods === 0) throw new Error('no demo entries of database foods in storage: this check would prove nothing');
+      await btn(page, 'Add').click();
+      await btn(page, 'Scan food').waitFor({ timeout: 3000 });
+      await wait(400);
+      if ((await page.getByText('Recent', { exact: true }).count()) > 0) throw new Error('Recent card shown with demo data only');
+      const rows = await page.getByRole('button', { name: /^Log .+ again/ }).count();
+      if (rows > 0) throw new Error(`${rows} recent food(s) offered with demo data only`);
+      await btn(page, 'Close menu').last().click();
+      await wait(300);
+      if ((await btn(page, 'Scan food').count()) > 0) throw new Error('the + menu did not close');
+    },
+  },
+  {
     name: 'home: + menu opens Food Database',
     run: async (page, base, { wait }) => {
       await go(page, base + '/', wait);
