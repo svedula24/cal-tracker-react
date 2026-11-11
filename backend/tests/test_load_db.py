@@ -10,7 +10,8 @@ import os
 import psycopg
 import pytest
 
-from kalo.usda.load import SchemaOutOfDate, load, require_head
+from kalo.db import SchemaOutOfDate, require_head
+from kalo.usda.load import load
 from kalo.usda.nutrients import FoodRow
 from kalo.usda.portions import Portion
 

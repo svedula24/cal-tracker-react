@@ -120,7 +120,8 @@ uv run python -m kalo.usda.load
 
 FastAPI over the two tables (`app/`), through SQLAlchemy 2.0: sync sessions on
 the psycopg 3 driver. Migrate and load the database first (above); the server
-reads it, it never writes.
+reads it, it never writes. It refuses to start against a database that is not at
+the migration head, with the same message as the loader.
 
 ```sh
 uv run uvicorn app.main:app --reload   # http://localhost:8000, docs at /docs
