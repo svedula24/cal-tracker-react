@@ -27,6 +27,9 @@ export type Entry = {
   // The food behind the entry, so its measurement can be changed later. Absent
   // on the hand-written demo entries, which only have a serving.
   per100g?: Nutrients;
+  // The database food's own values, kept once a value of this entry was typed over
+  // (per100g then holds the entry's), so a bookmark still saves the database food.
+  foodPer100g?: Nutrients;
   portions?: Portion[];
   measure?: Portion;
   foodId?: string;

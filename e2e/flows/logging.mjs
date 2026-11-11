@@ -315,6 +315,15 @@ export const flows = [
       await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
       await page.getByText('Edited banana', { exact: true }).first().click();
       await expectValue(page, 'Fats', '0');
+      // A bookmark from the edited entry saves the database food, not the typed values.
+      if ((await btn(page, 'Unsave Banana, raw').count()) > 0) await btn(page, 'Unsave Banana, raw').click();
+      await btn(page, 'Save Banana, raw').click();
+      await btn(page, 'Unsave Banana, raw').waitFor({ timeout: 3000 });
+      await go(page, base + '/saved-foods', wait);
+      await page.getByText('1 banana (126 g) · 122 cal').waitFor({ timeout: 3000 }); // USDA's 97 kcal per 100 g, not the typed 150
+      await go(page, base + '/', wait);
+      await page.getByText('Edited banana', { exact: true }).first().click();
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
       await btn(page, 'More options').click();
       await btn(page, 'Delete entry').click();
       await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });

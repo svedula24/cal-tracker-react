@@ -8,7 +8,7 @@ import { Press } from '@/components/Press';
 import { cardShadow, goBack } from '@/components/Screen';
 import type { Food } from '@/data/foods';
 import { type Entry, newEntry, useEntries, useSavedFoods } from '@/lib/data';
-import { defaultServing, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, parseValue, qtyText, scale, times, withValue } from '@/lib/measure';
+import { defaultServing, editedPer100g, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, parseValue, qtyText, scale, times, typedValue, withValue } from '@/lib/measure';
 import { formatTime, type Nutrients, zero } from '@/lib/nutrition';
 import { parseFood } from '@/lib/savedFoods';
 import { useSelectedDay } from '@/lib/selectedDay';
@@ -83,12 +83,14 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
   // Per one unit (1 g, or one serving of a hand-written entry): what the day's
   // totals multiply by `servings`. The cards show the typed amount. State, because
   // a value typed into a card replaces the food's own for this entry.
-  const [perUnit, setPerUnit] = useState<Nutrients>(() => (base ? scale(base.per100g, 1) : (entry?.nutrients ?? zero())));
-  const [edited, setEdited] = useState(false);
+  // An entry's own per-100 g values (they differ from the food's once one was typed over), else the food's.
+  const stored = entry?.per100g ?? base?.per100g;
+  const [perUnit, setPerUnit] = useState<Nutrients>(() => (base && stored ? scale(stored, 1) : (entry?.nutrients ?? zero())));
+  const [editedKeys, setEditedKeys] = useState<ReadonlySet<keyof Nutrients>>(new Set());
   const nutrients = times(perUnit, qty);
   const edit = (key: keyof Nutrients) => (shown: number) => {
     setPerUnit((n) => withValue(n, key, shown, qty));
-    setEdited(true);
+    setEditedKeys((keys) => new Set(keys).add(key));
   };
   const serving = base ? defaultServing(base) : null;
   const isSaved = !!base && saved.items.some((s) => s.id === base.id);
@@ -102,17 +104,17 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
     const n = parseQty(t);
     if (n !== null) setQty(n);
   };
+  // Typed-over values replace the entry's per-100 g copy (what reopening it reads); the food's
+  // own values are kept beside them, so `base` stays the database food.
+  const typedOver = base && stored && editedKeys.size ? { per100g: editedPer100g(stored, perUnit, editedKeys), foodPer100g: base.per100g } : {};
   const done = () => {
     if (!valid) return;
     const finalName = name.trim() || base?.name || entry?.name || 'Food';
     if (entry) {
-      // An edited value also replaces the entry's per-100 g copy, which is what reopening it reads.
-      const per100g = edited && base ? { per100g: times(perUnit, 100) } : {};
-      entries.update(entry.id, { name: finalName, servings: qty, measure: base ? G : entry.measure, nutrients: perUnit, ...per100g });
+      entries.update(entry.id, { name: finalName, servings: qty, measure: base ? G : entry.measure, nutrients: perUnit, ...typedOver });
       goBack();
     } else if (base) {
-      const food = edited ? { ...base, per100g: times(perUnit, 100) } : base;
-      entries.add({ ...newEntry(food, G, qty, day), name: finalName });
+      entries.add({ ...newEntry(base, G, qty, day), name: finalName, nutrients: perUnit, ...typedOver });
       router.dismissTo('/');
     }
   };
@@ -336,15 +338,14 @@ function NutrientCard({
  */
 function ValueField({ label, value, onEdit, big = false }: { label: string; value: number; onEdit: (shown: number) => void; big?: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
-  // What the field showed, and the exact value behind it, when it took focus.
+  // What the field showed, and the exact value behind it, when it took focus (see typedValue).
   const atFocus = useRef({ text: '', value: 0 });
   const shown = draft ?? fmt(value);
   const invalid = draft !== null && parseValue(draft) === null;
   // The small cards centre "29g": the field is as wide as its text, so the unit sits against it.
-  // A native field sizes to its text (at any system font size); a web <input> does not, so it gets an
-  // estimate for the 20 px bold digits used here (12.5 px a digit, 6 px a separator).
-  const estimate = 4 + [...shown].reduce((w, ch) => w + (ch === '.' || ch === ',' ? 6 : 12.5), 0);
-  const width = big || Platform.OS !== 'web' ? undefined : estimate;
+  // A native field sizes to its text (at any system font size); a web <input> does not, so there it
+  // is one `ch` (the width of a digit in the field's own font) per character.
+  const width = big || Platform.OS !== 'web' ? undefined : `${Math.max(shown.length, 1)}ch`;
   return (
     <TextInput
       accessibilityLabel={label}
@@ -355,12 +356,8 @@ function ValueField({ label, value, onEdit, big = false }: { label: string; valu
       }}
       onChangeText={(t) => {
         setDraft(t);
-        const n = parseValue(t);
-        if (n === null) return;
-        // Typing back exactly what the card showed at focus ("0.7" for 0.74) is not an edit: the
-        // exact value is kept, or restored if something else was typed in between.
-        if (t.trim() !== atFocus.current.text) onEdit(n);
-        else if (value !== atFocus.current.value) onEdit(atFocus.current.value);
+        const n = typedValue(t, atFocus.current, value);
+        if (n !== null) onEdit(n);
       }}
       onBlur={() => setDraft(null)}
       keyboardType="decimal-pad"
