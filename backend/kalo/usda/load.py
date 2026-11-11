@@ -84,6 +84,8 @@ def load(rows: list[FoodRow], portions: list[Portion], url: str) -> tuple[Counte
     values = [column for column in columns if column != "fdc_id"]
     with psycopg.connect(url) as conn, conn.cursor() as cur:
         require_head(cur)
+        # One load at a time: a second one waits here until the first commits, then sees its result.
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext('kalo.usda.load'))")
         # Same column types as foods, so a REAL compares equal to the stored one; the key rejects a duplicate id.
         cur.execute("CREATE TEMP TABLE foods_stage (LIKE foods) ON COMMIT DROP")
         cur.execute("ALTER TABLE foods_stage ADD PRIMARY KEY (fdc_id)")

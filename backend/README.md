@@ -210,7 +210,8 @@ curl localhost:8000/api/v1/me -H 'Authorization: Bearer kalo_…'
   - The address is the connection's peer. Behind a reverse proxy that is the
     proxy itself, so all clients would share the 20. Start uvicorn with
     `--proxy-headers --forwarded-allow-ips <the proxy's address>` so it uses the
-    forwarded client address.
+    forwarded client address. Name the proxy: with `*`, any client could send its
+    own forwarded address and get around the limit.
   - The count is kept in the server process. With several workers or instances,
     limit at the proxy as well.
 - To revoke a token, set `user_tokens.revoked_at`. There is no endpoint for it yet.
