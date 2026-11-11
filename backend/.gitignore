@@ -1,0 +1,24 @@
+# Python backend (uv). The repo-root .gitignore covers .env files and macOS junk.
+
+# uv virtualenv
+.venv/
+
+# USDA downloads (re-fetched and SHA-256 checked by the loader)
+data/
+
+# bytecode
+__pycache__/
+*.py[cod]
+
+# tool caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# build output
+build/
+dist/
+*.egg-info/

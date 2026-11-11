@@ -1,7 +1,9 @@
 # Kalo backend
 
 Postgres with USDA FoodData Central's generic foods, loaded by a small Python
-package. FastAPI comes later; this is the data layer it will read.
+package and served by a FastAPI app: food search and lookup by FDC id. The Expo
+app is not wired to it yet; it still searches its bundled copy of the same foods
+(`src/data/usda-foods.json`).
 
 ## What's in the database
 
@@ -45,7 +47,8 @@ uv run python -m kalo.usda.load
 ```
 
 The loader downloads the three USDA zips to `data/usda/` (cached, gitignored),
-creates the table if missing and replaces its rows: a few seconds, plus the
+creates the table and its search indexes if missing (`pg_trgm`, a full-text
+and a trigram GIN index on `description`) and replaces its rows: a few seconds, plus the
 download the first time. It parses each JSON file in memory (peak about 1.5 GB
 for the FNDDS file); it is a one-off tool, not a service.
 
@@ -64,10 +67,76 @@ docker exec kalo-db psql -U kalo -d kalo -c \
 `.env.example` to `.env` and run `uv run --env-file .env python -m kalo.usda.load`,
 or set the variable inline.
 
+## API
+
+FastAPI over the `foods` table (`kalo/api/`). Load the database first (above);
+the server reads it, it never writes.
+
+```sh
+uv run uvicorn kalo.api.app:app --reload   # http://localhost:8000, docs at /docs
+```
+
+`DATABASE_URL` overrides the database, as for the loader; `kalo.api.app.create_app(url)`
+builds an app against any other. The app is not wired to the API yet: the Expo
+app still searches `src/data/usda-foods.json`.
+
+Search, best first:
+
+```sh
+curl 'localhost:8000/api/v1/foods/search?q=banana&limit=3'
+```
+
+```json
+{"results": [
+  {"fdc_id": 2709224, "description": "Banana, raw", "data_type": "Survey (FNDDS)", "brand_name": null, "calories_per_100g": 97.0},
+  {"fdc_id": 2705660, "description": "Banana split", "data_type": "Survey (FNDDS)", "brand_name": null, "calories_per_100g": 199.0},
+  {"fdc_id": 2709200, "description": "Banana chips", "data_type": "Survey (FNDDS)", "brand_name": null, "calories_per_100g": 519.0}
+]}
+```
+
+One food, every column:
+
+```sh
+curl localhost:8000/api/v1/foods/2709224
+```
+
+```json
+{"fdc_id": 2709224, "description": "Banana, raw", "data_type": "Survey (FNDDS)", "brand_name": null,
+ "calories_per_100g": 97.0, "protein_per_100g": 0.74, "carbs_per_100g": 22.7, "fat_per_100g": 0.28}
+```
+
+The four nutrients are always numbers, never null (the loader skips foods
+missing any of them); `brand_name` is null for every generic food. An unknown id
+is 404 `{"detail": "food not found"}`.
+
+Ranking (`kalo/api/search.py`), case-insensitive, whitespace collapsed:
+
+1. the description is exactly the query;
+2. the description starts with the query;
+3. full text: every query word matches a description word (English stemming, the
+   last word as a prefix, so `chicken bre` finds "Chicken breast, ...");
+4. fuzzy: pg_trgm word similarity ≥ 0.4, for misspellings (`brocoli`, `chiken brest`).
+
+Within a tier: higher word similarity, then the shorter description, then `fdc_id`.
+`%`, `_` and `\` in the query are literal. A query under 3 characters uses only tiers
+1 and 2 (shorter description first): `s` would otherwise full-text and fuzzy match half the table.
+
+Limits: `q` is 1 to 100 characters and not only whitespace; `limit` is 1 to 50,
+default 20. Anything else is 422.
+
+Benchmark the search SQL (no HTTP) against the loaded database: p50/p95 per query
+for a fixed set of queries, against a target of p95 < 100 ms. `--explain` prints
+each query's plan, to check it uses the GIN indexes.
+
+```sh
+uv run python scripts/bench_search.py            # --n 200 for more runs per query
+uv run python scripts/bench_search.py --explain
+```
+
 ## Develop
 
 ```sh
-uv run pytest          # mapping and download tests; the database tests skip without DATABASE_URL
+uv run pytest          # mapping, download and search-query tests; database and API tests skip without DATABASE_URL
 DATABASE_URL=postgresql://kalo:kalo@localhost:5432/kalo uv run pytest   # all, against docker-compose
 uv run ruff check .
 ```

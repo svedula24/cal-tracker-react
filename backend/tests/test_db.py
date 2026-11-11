@@ -5,7 +5,6 @@ Each test runs in its own schema so it never touches the real foods table.
 """
 
 import os
-import uuid
 
 import psycopg
 import pytest
@@ -15,18 +14,6 @@ from kalo.usda.nutrients import FoodRow
 
 URL = os.environ.get("DATABASE_URL")
 pytestmark = pytest.mark.skipif(not URL, reason="DATABASE_URL not set")
-
-
-@pytest.fixture
-def scratch_url():
-    """A connection URL whose search_path is a fresh schema, dropped afterwards."""
-    name = f"test_{uuid.uuid4().hex[:8]}"
-    with psycopg.connect(URL, autocommit=True) as conn:
-        conn.execute(f"CREATE SCHEMA {name}")
-    sep = "&" if "?" in URL else "?"
-    yield f"{URL}{sep}options=-c%20search_path%3D{name}"
-    with psycopg.connect(URL, autocommit=True) as conn:
-        conn.execute(f"DROP SCHEMA {name} CASCADE")
 
 
 def row(fdc_id, **over):
