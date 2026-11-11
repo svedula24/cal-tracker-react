@@ -1,10 +1,11 @@
-"""Load every USDA generic food into the `foods` table.
+"""Load every USDA generic food, and its portions, into `foods` and `food_portions`.
 
+    uv run alembic upgrade head
     uv run python -m kalo.usda.load
 
-Reads DATABASE_URL (default: the docker-compose database). Applies
-db/schema.sql (CREATE TABLE IF NOT EXISTS), then replaces the table's contents
-in one transaction, so a rerun is a clean reload.
+Reads DATABASE_URL (default: the docker-compose database). The schema belongs to
+the Alembic migrations: the loader refuses a database that is not at their head,
+then replaces both tables' contents in one transaction, so a rerun is a clean reload.
 """
 
 from __future__ import annotations
@@ -12,20 +13,24 @@ from __future__ import annotations
 import sys
 import time
 from collections import Counter
-from pathlib import Path
 
 import psycopg
+from alembic.script import ScriptDirectory
+from psycopg import sql
 
-from ..db import database_url
+from ..db import alembic_config, database_url
 from .datasets import DATASETS, records
 from .nutrients import FoodRow, RecordError, to_row
+from .portions import Portion, portions_of
 
-SCHEMA = Path(__file__).resolve().parents[2] / "db" / "schema.sql"
 
+def read_rows() -> tuple[list[FoodRow], list[Portion]]:
+    """Every food row to load, and the portions of those foods (a skipped food's portions are dropped).
 
-def read_rows() -> list[FoodRow]:
-    """Every row to load. A record that cannot be mapped is reported, with every other one, and the load is refused."""
+    A record that cannot be mapped is reported, with every other one, and the load is refused.
+    """
     rows: list[FoodRow] = []
+    portions: list[Portion] = []
     seen: set[int] = set()
     errors: dict[str, list[RecordError]] = {}  # release → the records that could not be mapped
     for dataset in DATASETS:
@@ -47,6 +52,7 @@ def read_rows() -> list[FoodRow]:
                 incomplete += 1
                 continue
             rows.append(row)
+            portions.extend(portions_of(record, row.fdc_id))
         if bad:
             errors[dataset.release] = bad
         note = f", {duplicates} duplicate fdc_ids skipped" if duplicates else ""
@@ -59,63 +65,59 @@ def read_rows() -> list[FoodRow]:
             for e in bad:
                 print(f"  fdc_id {e.fdc_id}: {e.message}", file=sys.stderr)
         raise SystemExit(f"{sum(len(bad) for bad in errors.values())} records could not be mapped; nothing loaded")
-    return rows
-
-
-# Every constraint db/schema.sql declares, by Postgres's generated name. An existing table
-# that lacks one predates a schema change: CREATE TABLE IF NOT EXISTS would silently keep it.
-EXPECTED_CONSTRAINTS = frozenset(
-    {
-        "foods_pkey",
-        "foods_data_type_check",
-        "foods_calories_per_100g_check",
-        "foods_protein_per_100g_check",
-        "foods_carbs_per_100g_check",
-        "foods_fat_per_100g_check",
-    }
-)
-
-
-# Postgres 17 keeps NOT NULL out of pg_constraint, so these are checked on the columns.
-NOT_NULL_COLUMNS = frozenset(FoodRow.columns()) - {"brand_name"}
+    return rows, portions
 
 
 class SchemaOutOfDate(RuntimeError):
-    """The existing foods table does not match db/schema.sql."""
+    """The database is not at the head of the Alembic migrations."""
 
 
-def ensure_schema(cur: psycopg.Cursor) -> None:
-    cur.execute(SCHEMA.read_text())
-    cur.execute("SELECT conname FROM pg_constraint WHERE conrelid = 'foods'::regclass")
-    missing = EXPECTED_CONSTRAINTS - {name for (name,) in cur.fetchall()}
-    cur.execute("SELECT attname FROM pg_attribute WHERE attrelid = 'foods'::regclass AND attnum > 0 AND attnotnull")
-    missing |= {f"{column} NOT NULL" for column in NOT_NULL_COLUMNS - {name for (name,) in cur.fetchall()}}
-    if missing:
+def require_head(cur: psycopg.Cursor) -> None:
+    """Raise SchemaOutOfDate unless the connection's schema is migrated to the current head.
+
+    The version table is looked up in current_schema() (the first schema of the search_path), where
+    migrations/env.py keeps it; a version table further down the path belongs to another schema's tables.
+    """
+    head = ScriptDirectory.from_config(alembic_config()).get_current_head()
+    cur.execute("SELECT current_schema(), to_regclass(format('%I.alembic_version', current_schema())) IS NOT NULL")
+    schema, migrated = cur.fetchone()
+    versions: set[str] = set()
+    if migrated:
+        cur.execute(sql.SQL("SELECT version_num FROM {}").format(sql.Identifier(schema, "alembic_version")))
+        versions = {version for (version,) in cur.fetchall()}
+    if versions != {head}:
+        found = ", ".join(sorted(versions)) or "not migrated"
         raise SchemaOutOfDate(
-            f"the foods table predates db/schema.sql (missing {', '.join(sorted(missing))}); "
-            "run DROP TABLE foods and load again"
+            f"schema {schema!r} is at {found}, the migrations are at {head}; run `uv run alembic upgrade head`"
         )
 
 
-def load(rows: list[FoodRow], url: str) -> Counter[str]:
-    columns = ", ".join(FoodRow.columns())
+def load(rows: list[FoodRow], portions: list[Portion], url: str) -> tuple[Counter[str], int]:
+    """Replace the contents of both tables in one transaction. Returns foods per data_type and the portion count."""
     with psycopg.connect(url) as conn, conn.cursor() as cur:
-        ensure_schema(cur)
-        cur.execute("TRUNCATE foods")
-        with cur.copy(f"COPY foods ({columns}) FROM STDIN") as copy:
+        require_head(cur)
+        cur.execute("TRUNCATE food_portions, foods RESTART IDENTITY")  # one statement: portions reference foods
+        with cur.copy(f"COPY foods ({', '.join(FoodRow.columns())}) FROM STDIN") as copy:
             for row in rows:
                 copy.write_row(row.values())
+        with cur.copy(f"COPY food_portions ({', '.join(Portion.columns())}) FROM STDIN") as copy:
+            for portion in portions:
+                copy.write_row(portion.values())
         cur.execute("SELECT data_type, count(*) FROM foods GROUP BY data_type ORDER BY data_type")
-        return Counter({data_type: n for data_type, n in cur.fetchall()})
+        counts = Counter({data_type: n for data_type, n in cur.fetchall()})
+        cur.execute("SELECT count(*) FROM food_portions")
+        return counts, cur.fetchone()[0]
 
 
 def main() -> int:
     url = database_url()
-    rows = read_rows()
-    counts = load(rows, url)
+    rows, portions = read_rows()
+    counts, portion_count = load(rows, portions, url)
     for data_type, n in counts.items():
         print(f"  {data_type}: {n}")
     print(f"✓ foods: {sum(counts.values())} rows")
+    without = len(rows) - len({portion.fdc_id for portion in portions})
+    print(f"✓ food_portions: {portion_count} rows ({without} foods with none)")
     return 0
 
 

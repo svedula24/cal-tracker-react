@@ -1,8 +1,8 @@
-"""The pure query-building half of food search (kalo/api/search.py): no database."""
+"""The pure query-building half of food search (app/services/foods.py): no database."""
 
 import pytest
 
-from kalo.api.search import like_prefix, normalize, params, tsquery
+from app.services.foods import MIN_FULL_SEARCH, PREFIX_SQL, SEARCH_SQL, like_prefix, normalize, params, sql_for, tsquery
 
 
 @pytest.mark.parametrize(
@@ -52,8 +52,34 @@ def test_like_prefix_escapes_wildcards_and_appends_percent(q, want):
     assert like_prefix(q) == want
 
 
+def binds(sql):
+    """The names of the statement's bind parameters."""
+    return set(sql.compile().params)
+
+
 def test_params_has_every_placeholder_the_query_uses():
-    got = params("chicken bre", 20)
-    assert set(got) == {"q", "prefix", "tsq", "limit"}
+    got = params("chicken bre", 20, 40)
+    assert set(got) == {"q", "prefix", "tsq", "limit", "offset"} == binds(SEARCH_SQL)
     assert got["limit"] == 20
+    assert got["offset"] == 40
     assert got["tsq"] == "chicken & bre:*"
+
+
+def test_prefix_query_uses_a_subset_of_the_parameters():
+    assert binds(PREFIX_SQL) == {"q", "prefix", "limit", "offset"}
+
+
+def test_short_queries_take_the_prefix_only_statement():
+    assert MIN_FULL_SEARCH == 3
+    assert sql_for("br") is PREFIX_SQL
+    assert sql_for("bre") is SEARCH_SQL
+
+
+@pytest.mark.parametrize("sql", [SEARCH_SQL, PREFIX_SQL])
+def test_statements_keep_the_index_expressions_and_page(sql):
+    # The planner only uses the GIN indexes when the WHERE clause repeats their expressions exactly.
+    assert "lower(description) LIKE :prefix" in sql.text
+    assert sql.text.rstrip().endswith("LIMIT :limit OFFSET :offset")
+    if sql is SEARCH_SQL:
+        assert "to_tsvector('english', description) @@" in sql.text
+        assert ":q <% lower(description)" in sql.text  # one %, which SQLAlchemy doubles for psycopg

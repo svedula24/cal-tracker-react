@@ -21,9 +21,48 @@ def record(fdc_id=1, data_type="SR Legacy", description="Banana, raw", nutrients
 
 
 def test_sr_legacy_record_maps_every_column():
-    row = to_row(record(nutrients=[(1008, 89, "KCAL"), (1003, 1.09, "G"), (1005, 22.84, "G"), (1004, 0.33, "G")]))
-    assert row == FoodRow(1, "Banana, raw", "SR Legacy", None, 89.0, 1.09, 22.84, 0.33)
-    assert row.values() == (1, "Banana, raw", "SR Legacy", None, 89.0, 1.09, 22.84, 0.33)
+    macros = [(1008, 89, "KCAL"), (1003, 1.09, "G"), (1005, 22.84, "G"), (1004, 0.33, "G")]
+    row = to_row(record(nutrients=[*macros, (1079, 2.6, "G"), (2000, 12.23, "G"), (1093, 1, "MG")]))
+    assert row == FoodRow(1, "Banana, raw", "SR Legacy", None, 89.0, 1.09, 22.84, 0.33, 2.6, 12.23, 1.0)
+    assert row.values() == (1, "Banana, raw", "SR Legacy", None, 89.0, 1.09, 22.84, 0.33, 2.6, 12.23, 1.0)
+    assert FoodRow.columns() == (
+        "fdc_id",
+        "description",
+        "data_type",
+        "brand_name",
+        "calories_per_100g",
+        "protein_per_100g",
+        "carbs_per_100g",
+        "fat_per_100g",
+        "fiber_per_100g",
+        "sugar_per_100g",
+        "sodium_mg_per_100g",
+    )
+
+
+def test_sugar_prefers_2000_and_falls_back_to_1063():
+    assert to_row(record(nutrients=[(1063, 15.8, "G"), (2000, 12.2, "G")])).sugar_per_100g == 12.2
+    assert to_row(record(data_type="Foundation", nutrients=[(1063, 15.8, "g")])).sugar_per_100g == 15.8
+
+
+def test_fiber_sugar_and_sodium_are_optional_and_never_negative():
+    macros = [(1008, 89, "KCAL"), (1003, 1.09, "G"), (1005, 22.84, "G"), (1004, 0.33, "G")]
+    row = to_row(record(nutrients=macros))
+    assert (row.fiber_per_100g, row.sugar_per_100g, row.sodium_mg_per_100g) == (None, None, None)
+    assert row.complete  # only calories, protein, carbs and fat are required
+    row = to_row(record(nutrients=[(1079, -0.1, "G"), (2000, -2, "G"), (1093, -5, "MG")]))
+    assert (row.fiber_per_100g, row.sugar_per_100g, row.sodium_mg_per_100g) == (0.0, 0.0, 0.0)
+    row = to_row(record(nutrients=[(1079, 0, "G"), (1093, 0, "mg")]))
+    assert (row.fiber_per_100g, row.sugar_per_100g, row.sodium_mg_per_100g) == (0.0, None, 0.0)  # a reported 0 stays 0
+
+
+def test_sodium_or_fiber_in_the_wrong_unit_fails_loudly():
+    with pytest.raises(UnitMismatch, match="nutrient 1093 is in 'G', expected 'MG'"):
+        to_row(record(nutrients=[(1093, 0.001, "G")]))
+    with pytest.raises(UnitMismatch, match="nutrient 1079 is in 'MG', expected 'G'"):
+        to_row(record(nutrients=[(1079, 2600, "MG")]))
+    # Sugar 2000 in the wrong unit is skipped when 1063 is usable.
+    assert to_row(record(nutrients=[(2000, 12200, "MG"), (1063, 12.2, "G")])).sugar_per_100g == 12.2
 
 
 def test_energy_prefers_kcal_then_atwater_specific_then_general():

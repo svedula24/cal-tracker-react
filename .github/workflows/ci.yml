@@ -65,5 +65,7 @@ jobs:
       - run: uv sync --locked
       - name: Lint
         run: uv run ruff check .
+      - name: Migrations apply to an empty database
+        run: uv run alembic upgrade head
       - name: Tests (mapping, downloads, and the database path against the Postgres service)
         run: uv run pytest

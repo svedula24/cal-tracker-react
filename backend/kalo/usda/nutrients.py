@@ -23,6 +23,9 @@ ENERGY = ((1008, "KCAL"), (2048, "KCAL"), (2047, "KCAL"), (1062, "kJ"))
 PROTEIN = ((1003, "G"),)
 CARBS = ((1005, "G"),)  # carbohydrate, by difference
 FAT = ((1004, "G"),)
+FIBER = ((1079, "G"),)  # fiber, total dietary
+SUGAR = ((2000, "G"), (1063, "G"))  # total sugars; Foundation reports 1063 (Sugars, Total) instead of 2000
+SODIUM = ((1093, "MG"),)
 
 DATA_TYPES = ("Foundation", "SR Legacy", "Survey (FNDDS)")
 
@@ -51,10 +54,13 @@ class FoodRow:
     protein_per_100g: float | None
     carbs_per_100g: float | None
     fat_per_100g: float | None
+    fiber_per_100g: float | None = None
+    sugar_per_100g: float | None = None
+    sodium_mg_per_100g: float | None = None
 
     @property
     def complete(self) -> bool:
-        """Reports calories, protein, carbs and fat: only complete rows are loaded."""
+        """Reports calories, protein, carbs and fat: only complete rows are loaded. The other three may be NULL."""
         return None not in (self.calories_per_100g, self.protein_per_100g, self.carbs_per_100g, self.fat_per_100g)
 
     @classmethod
@@ -126,4 +132,7 @@ def to_row(record: dict[str, Any], index: int | None = None) -> FoodRow:
         protein_per_100g=pick(amounts, PROTEIN, fdc_id),
         carbs_per_100g=pick(amounts, CARBS, fdc_id),
         fat_per_100g=pick(amounts, FAT, fdc_id),
+        fiber_per_100g=pick(amounts, FIBER, fdc_id),
+        sugar_per_100g=pick(amounts, SUGAR, fdc_id),
+        sodium_mg_per_100g=pick(amounts, SODIUM, fdc_id),
     )
