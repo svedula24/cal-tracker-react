@@ -185,8 +185,8 @@ That exposes the API to the whole network. The food data is public, but anyone
 on the network can also register a device (below), so use it on a network you
 trust.
 
-CORS: any origin may call the API (`Access-Control-Allow-Origin: *`) with `GET`
-or `POST` and the `Authorization` and `Content-Type` headers,
+CORS: any origin may call the API (`Access-Control-Allow-Origin: *`) with `GET`,
+`POST`, `PATCH` or `DELETE` and the `Authorization` and `Content-Type` headers,
 because the web build and the Expo web dev server call it from another origin.
 Cookies are never used (credentials are off): a user is identified only by the
 bearer token the client sends itself.
@@ -222,6 +222,62 @@ curl localhost:8000/api/v1/me -H 'Authorization: Bearer kalo_…'
 
 In the code, services write into the request's session and never commit; a route
 that writes ends with one `session.commit()` (`app/api/deps.py`).
+
+### Sync (the app)
+
+The phone is the source of truth for what the user logs. It keeps its entries on
+the device and copies them here with one endpoint, which pushes local changes and
+pulls what changed on the server:
+
+```sh
+curl -X POST localhost:8000/api/v1/sync -H 'Authorization: Bearer kalo_…' \
+  -H 'Content-Type: application/json' -d '{"cursor": null, "changes": {}}'
+# 200 {"cursor": 42, "has_more": false,
+#      "changes": {"food_logs": [...], "saved_foods": [...], "goals": [...], "daily_steps": [...]},
+#      "rejected": []}
+```
+
+- **Push:** `changes` holds rows of the four synced tables. A food log is keyed by
+  its `id` (a UUID the client makes), a saved food by `fdc_id`, a goal by
+  `effective_date`, a day's steps by `log_date`. A deletion is the key with
+  `updated_at` and `deleted_at`.
+- **The newer edit wins,** by the row's `updated_at`, which is the phone's clock.
+  A time more than 5 minutes ahead of the server's is clamped. A phone whose clock
+  is behind can still lose to an older edit made elsewhere: acceptable while one
+  person uses one phone.
+- **One bad row never fails the batch.** It is listed in `rejected` with a short
+  reason (`invalid quantity`, `not_found`, `unknown_food`, …).
+- A log whose `fdc_id` the server does not have is stored as a custom entry, not
+  lost. A log id that belongs to another user is rejected `not_found`.
+- For a row pushed here, a 0 for fiber, sugar or sodium is stored as NULL when the
+  food itself does not report that nutrient: the app cannot tell the two apart.
+- **Pull:** the user's rows with `rev` above `cursor`, at most 500 a call; call
+  again with the returned cursor while `has_more`. The rows this request wrote are
+  not sent back; a pushed row that lost to a newer copy is.
+- More than 500 rows in one request is 413, and so is any request body over 2 MB,
+  refused by its `Content-Length` before it is read. The whole request is one transaction,
+  and it locks the user's row first, so one user's changes are numbered in the
+  order they commit.
+
+### Logs, totals and recent foods (other clients)
+
+For clients other than the app, such as the planned ChatGPT integration. They
+write through the same code as sync, so a log made, edited or deleted here reaches
+the phone on its next pull. All need the bearer token; a missing, deleted or
+another user's log is 404.
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /api/v1/food-logs` | `{"fdc_id": 2709224, "quantity": 150}` logs 150 g: the name and values are copied from `foods`. Without `fdc_id` it is a custom entry and needs `name` and `values` (unit `serving` by default, or `g`). 201; the same `id` again is 200 with the stored row. An unknown `fdc_id` is 422 |
+| `GET /api/v1/food-logs?date=YYYY-MM-DD` | `{"logs": [...]}` for that local day, newest first. `date` defaults to today in the user's timezone |
+| `PATCH /api/v1/food-logs/{log_id}` | Any of `name`, `quantity`, `log_date`, `logged_at`, `values` (any subset of nutrients). Values are per 100 g or per serving, so a change of quantity scales a typed-over value |
+| `DELETE /api/v1/food-logs/{log_id}` | Soft delete. 204, repeatable |
+| `GET /api/v1/nutrition/daily?date=` | `{"date", "totals", "unknown", "goal", "steps", "log_count"}`. A nutrient a log does not report adds 0 and is counted in `unknown`. `goal` is the latest one on or before the day. An empty day is zeros |
+| `GET /api/v1/foods/recent?limit=20` | The user's distinct logged foods, most recent first, as search items plus `grams` (the last amount) and `logged_at` |
+
+A log in a response carries `values` (its own, per 100 g or per serving),
+`food_values` (the database food's when it was logged), `totals` (the generated
+columns) and `rev`.
 
 Responses of 1 kB or more are gzipped when the client accepts it: a page of 50
 foods with their portions is 18 to 36 kB of JSON and about 3 kB compressed.
@@ -321,11 +377,17 @@ app/
   api/deps.py          DbSession, CurrentUser (the user of the request's bearer token)
   api/v1/foods.py      food search and lookup, and their validation
   api/v1/devices.py    POST /devices (register), GET /me
-  schemas/             Pydantic request and response models (foods, users)
+  api/v1/sync.py       POST /sync (the app pushes and pulls)
+  api/v1/food_logs.py  food-log create, read, edit, delete
+  api/v1/nutrition.py  GET /nutrition/daily
+  schemas/             Pydantic request and response models (foods, users, logs, log_api)
   models/foods.py      SQLAlchemy Food and FoodPortion
   models/user_data.py  User, UserToken, FoodLog, UserGoal, DailySteps, SavedFood
   services/foods.py    ranked search SQL, portions_for (a page's portions), get_food, get_portions
   services/users.py    tokens (made, hashed, looked up), register_device
+  services/logs.py     how one pushed row is applied: last write wins, the food-log rules
+  services/sync.py     the push per table and the pull
+  services/log_queries.py  a day's logs and totals, the goal and steps on a date, recent foods
   db/session.py        engine, session dependency
 alembic.ini
 migrations/

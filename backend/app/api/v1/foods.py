@@ -7,9 +7,12 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from sqlalchemy.orm import Session
 
+from app.api.deps import CurrentUser
 from app.db.session import get_session
 from app.schemas.foods import FoodDetail, FoodSearchItem, FoodSearchResponse
+from app.schemas.log_api import RecentFood, RecentFoodsResponse
 from app.services import foods as food_service
+from app.services import log_queries
 
 router = APIRouter(prefix="/api/v1/foods", tags=["foods"])
 
@@ -30,6 +33,18 @@ def search(
     rows, portions = food_service.search_page(session, q, limit, offset)
     foods = [FoodSearchItem.model_validate({**row, "portions": portions[row["fdc_id"]]}) for row in rows]
     return FoodSearchResponse(foods=foods, limit=limit, offset=offset)
+
+
+# Declared before /{fdc_id}, or "recent" would be parsed as an id. The only foods route that needs a token.
+@router.get("/recent")
+def recent(
+    session: DbSession, user: CurrentUser, limit: Annotated[int, Query(ge=1, le=50)] = 20
+) -> RecentFoodsResponse:
+    """The foods this user logged last, most recent first, each once: a search item with its portions,
+    plus `grams` (the amount of the latest log) and `logged_at`. Custom entries and deleted logs do not count."""
+    rows, portions = log_queries.recent_foods(session, user.id, limit)
+    foods = [RecentFood.model_validate({**row, "portions": portions[row["fdc_id"]]}) for row in rows]
+    return RecentFoodsResponse(foods=foods)
 
 
 @router.get("/{fdc_id}")

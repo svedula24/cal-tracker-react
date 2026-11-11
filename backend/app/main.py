@@ -15,14 +15,21 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.orm import sessionmaker
 
-from app.api.limits import SlidingWindow
+from app.api.limits import BodyLimit, SlidingWindow
 from app.api.v1.devices import router as devices_router
+from app.api.v1.food_logs import router as food_logs_router
 from app.api.v1.foods import router as foods_router
+from app.api.v1.nutrition import router as nutrition_router
+from app.api.v1.sync import router as sync_router
 from app.db.session import make_engine
 from kalo.db import database_url, require_head
 
 # A household or office shares one address; an app registers once per install.
 REGISTRATIONS_PER_HOUR = 20
+
+# The largest request body accepted. The biggest legitimate one is a sync push of 500 rows, about
+# 300 kB; without a limit the whole body is read and parsed before the 500-row check can refuse it.
+MAX_BODY_BYTES = 2 * 1024 * 1024
 
 
 def create_app(url: str | None = None) -> FastAPI:
@@ -47,8 +54,14 @@ def create_app(url: str | None = None) -> FastAPI:
     app = FastAPI(title="Kalo", lifespan=lifespan)
     app.include_router(foods_router)
     app.include_router(devices_router)
+    app.include_router(sync_router)
+    app.include_router(food_logs_router)
+    app.include_router(nutrition_router)
     # Registration needs no token, so one address may only register this often (POST /api/v1/devices).
     app.state.registrations = SlidingWindow(REGISTRATIONS_PER_HOUR, per_seconds=3600)
+    # Refused by its declared size, before any of it is read. Added before the CORS middleware, which
+    # therefore wraps it: the 413 is readable cross-origin.
+    app.add_middleware(BodyLimit, max_bytes=MAX_BODY_BYTES)
     # Any origin may call the API (the web build and the Expo web dev server call it cross-origin).
     # What makes "*" safe is that credentials stay off: there are no cookies, and a user is known only
     # by the bearer token the app itself puts in the Authorization header, which another site's page
@@ -57,7 +70,7 @@ def create_app(url: str | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_methods=["GET", "POST"],  # a route that needs another method adds it here
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],  # a route that needs another method adds it here
         allow_headers=["Authorization", "Content-Type"],
     )
     # A page of 50 foods with their portions is 18 to 36 kB of JSON and gzips to about 3 kB (measured
