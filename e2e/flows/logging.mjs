@@ -284,6 +284,11 @@ export const flows = [
       await page.getByLabel('Protein', { exact: true }).fill('abc');
       await page.getByLabel('Grams').click();
       await expectValue(page, 'Protein', '0.7');
+      // Retyping the shown value is not an edit: the exact 0.74 stays, so 1000 g still shows 7.4.
+      await page.getByLabel('Protein', { exact: true }).fill('0.7');
+      await page.getByLabel('Grams').fill('1000');
+      await expectValue(page, 'Protein', '7.4');
+      await page.getByLabel('Grams').fill('100');
       await page.getByLabel('Protein', { exact: true }).fill('5');
       await page.getByLabel('Calories', { exact: true }).fill('150');
       await page.getByLabel('Grams').fill('200');

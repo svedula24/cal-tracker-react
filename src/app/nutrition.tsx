@@ -1,7 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { Apple, ArrowLeft, Bookmark, Candy, ChevronDown, ChevronRight, Droplet, Drumstick, Ellipsis, Flame, Pencil, Soup, Wheat } from 'lucide-react-native';
 import { useMemo, useRef, useState } from 'react';
-import { ScrollView, type ScrollViewInstance, Text, TextInput, useWindowDimensions, View } from 'react-native';
+import { Platform, ScrollView, type ScrollViewInstance, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Press } from '@/components/Press';
@@ -166,6 +166,7 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
               // USDA names can be long ("Bagels, plain, enriched, with calcium…"): smaller and wrapping.
               style={{ fontSize: name.length > 20 ? 24 : 30, lineHeight: name.length > 20 ? 30 : 36, outlineStyle: 'none' } as object}
             />
+            {/* Saves the database food: a value typed on a card below belongs to this entry only. */}
             {base ? (
               <Press
                 accessibilityRole="button"
@@ -338,7 +339,9 @@ function ValueField({ label, value, onEdit, big = false }: { label: string; valu
   const shown = draft ?? fmt(value);
   const invalid = draft !== null && parseValue(draft) === null;
   // The small cards centre "29g": the field is as wide as its text, so the unit sits against it.
-  const width = big ? undefined : 4 + [...shown].reduce((w, ch) => w + (ch === '.' || ch === ',' ? 6 : 12.5), 0);
+  // A native field sizes to its text (at any system font size); a web <input> does not, so it gets an estimate.
+  const estimate = 4 + [...shown].reduce((w, ch) => w + (ch === '.' || ch === ',' ? 6 : 12.5), 0);
+  const width = big || Platform.OS !== 'web' ? undefined : estimate;
   return (
     <TextInput
       accessibilityLabel={label}
@@ -347,7 +350,8 @@ function ValueField({ label, value, onEdit, big = false }: { label: string; valu
       onChangeText={(t) => {
         setDraft(t);
         const n = parseValue(t);
-        if (n !== null) onEdit(n);
+        // Retyping what the card already shows ("0.7" for 0.74) is not an edit: the exact value stays.
+        if (n !== null && fmt(n) !== fmt(value)) onEdit(n);
       }}
       onBlur={() => setDraft(null)}
       keyboardType="decimal-pad"
@@ -359,6 +363,7 @@ function ValueField({ label, value, onEdit, big = false }: { label: string; valu
           lineHeight: big ? 34 : 26,
           height: big ? 34 : 26,
           width,
+          minWidth: big ? undefined : 14,
           padding: 0,
           textAlign: big ? 'left' : 'right',
           outlineStyle: 'none',
