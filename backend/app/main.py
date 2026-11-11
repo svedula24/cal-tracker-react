@@ -17,7 +17,10 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.limits import SlidingWindow
 from app.api.v1.devices import router as devices_router
+from app.api.v1.food_logs import router as food_logs_router
 from app.api.v1.foods import router as foods_router
+from app.api.v1.nutrition import router as nutrition_router
+from app.api.v1.sync import router as sync_router
 from app.db.session import make_engine
 from kalo.db import database_url, require_head
 
@@ -47,6 +50,9 @@ def create_app(url: str | None = None) -> FastAPI:
     app = FastAPI(title="Kalo", lifespan=lifespan)
     app.include_router(foods_router)
     app.include_router(devices_router)
+    app.include_router(sync_router)
+    app.include_router(food_logs_router)
+    app.include_router(nutrition_router)
     # Registration needs no token, so one address may only register this often (POST /api/v1/devices).
     app.state.registrations = SlidingWindow(REGISTRATIONS_PER_HOUR, per_seconds=3600)
     # Any origin may call the API (the web build and the Expo web dev server call it cross-origin).
@@ -57,7 +63,7 @@ def create_app(url: str | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],
-        allow_methods=["GET", "POST"],  # a route that needs another method adds it here
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],  # a route that needs another method adds it here
         allow_headers=["Authorization", "Content-Type"],
     )
     # A page of 50 foods with their portions is 18 to 36 kB of JSON and gzips to about 3 kB (measured
