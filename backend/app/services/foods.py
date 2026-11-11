@@ -3,6 +3,8 @@
 One search query, ranked in tiers: the exact description, then descriptions that start with the
 query, then full-text matches (every word, the last as a prefix), then misspellings (trigram word
 similarity). The WHERE clause uses the exact expressions of the indexes in the baseline migration.
+Search skips retired foods (dropped by a later USDA release, kept for the logs that reference them);
+lookup by id still returns them, with their portions.
 The order is total (it ends in fdc_id), so limit/offset pages are stable.
 
 A page's portions come from one more query, by the page's ids (portions_for): joining them into the
@@ -32,9 +34,10 @@ COLUMNS = """fdc_id, description, data_type, brand_name,
 SEARCH_SQL = text(f"""
 SELECT {COLUMNS}
 FROM foods
-WHERE lower(description) LIKE :prefix
-   OR to_tsvector('english', description) @@ to_tsquery('english', CAST(:tsq AS text))
-   OR :q <% lower(description)
+WHERE (lower(description) LIKE :prefix
+    OR to_tsvector('english', description) @@ to_tsquery('english', CAST(:tsq AS text))
+    OR :q <% lower(description))
+  AND retired_at IS NULL
 ORDER BY
     CASE
         WHEN lower(description) = :q THEN 0
@@ -56,6 +59,7 @@ PREFIX_SQL = text(f"""
 SELECT {COLUMNS}
 FROM foods
 WHERE lower(description) LIKE :prefix
+  AND retired_at IS NULL
 ORDER BY lower(description) = :q DESC, length(description), fdc_id
 LIMIT :limit OFFSET :offset
 """)
@@ -121,7 +125,7 @@ def search_page(
 
 
 def get_food(session: Session, fdc_id: int) -> Food | None:
-    """One food with every nutrient column, or None."""
+    """One food with every nutrient column, or None. A retired food is still found: logs reference it."""
     return session.get(Food, fdc_id)
 
 

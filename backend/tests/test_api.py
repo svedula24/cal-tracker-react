@@ -368,10 +368,26 @@ def test_preflight_allows_get_from_any_origin(client):
     assert "access-control-allow-credentials" not in r.headers
 
 
-def test_preflight_refuses_a_write(client):
-    r = client.options("/api/v1/foods/search", headers={**ORIGIN, "Access-Control-Request-Method": "POST"})
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_preflight_allows_the_methods_the_api_uses(client, method):
+    r = client.options("/api/v1/foods/search", headers={**ORIGIN, "Access-Control-Request-Method": method})
+    assert r.status_code == 200
+    assert method in r.headers["access-control-allow-methods"]
+    assert "access-control-allow-credentials" not in r.headers
+
+
+@pytest.mark.parametrize("method", ["PUT", "PATCH", "DELETE"])
+def test_preflight_refuses_a_method_the_api_does_not_use(client, method):
+    r = client.options("/api/v1/foods/search", headers={**ORIGIN, "Access-Control-Request-Method": method})
     assert r.status_code == 400
-    assert "POST" not in r.headers.get("access-control-allow-methods", "")
+    assert method not in r.headers.get("access-control-allow-methods", "")
+
+
+def test_preflight_refuses_a_header_the_api_does_not_use(client):
+    asks = {"Access-Control-Request-Method": "GET", "Access-Control-Request-Headers": "X-User-Id"}
+    r = client.options("/api/v1/foods/search", headers={**ORIGIN, **asks})
+    assert r.status_code == 400
+    assert "x-user-id" not in r.headers.get("access-control-allow-headers", "").lower()
 
 
 def test_a_503_is_readable_cross_origin(client, monkeypatch):
