@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from 'react';
-import Animated, { runOnJS, type SharedValue, useAnimatedReaction, useAnimatedStyle } from 'react-native-reanimated';
+import Animated, { type SharedValue, useAnimatedReaction, useAnimatedStyle } from 'react-native-reanimated';
+import { scheduleOnRN } from 'react-native-worklets';
 
 /**
  * The slot for a ReanimatedSwipeable action (`renderRightActions`). The action
@@ -16,7 +17,7 @@ export function SwipeAction({ translation, width, children }: { translation: Sha
   useAnimatedReaction(
     () => translation.value < 0,
     (now, before) => {
-      if (now !== before) runOnJS(setTouchable)(now);
+      if (now !== before) scheduleOnRN(setTouchable, now);
     },
   );
   // Plain styles, not classes: on native NativeWind drops classes it has to merge with a Reanimated style.

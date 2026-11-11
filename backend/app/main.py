@@ -28,6 +28,7 @@ def create_app(url: str | None = None) -> FastAPI:
         try:
             # Blocks startup until Postgres answers, so a bad URL fails fast; and refuses a database that
             # is not migrated (SchemaOutOfDate), which would otherwise answer every request with a 500.
+            # require_head takes a psycopg cursor, so this reaches the driver connection under the engine.
             with engine.connect() as conn, conn.connection.cursor() as cur:
                 require_head(cur)
             app.state.engine = engine
