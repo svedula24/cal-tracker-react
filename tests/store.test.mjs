@@ -15,7 +15,12 @@ mock.module('@react-native-async-storage/async-storage', {
   },
 });
 globalThis.window = {}; // the store hydrates only where `window` exists
-const { Collection } = await import('../src/lib/store.ts');
+const { Collection, makeId } = await import('../src/lib/store.ts');
+
+test('makeId returns a UUID v4 (the server keys logs by client-made UUIDs)', () => {
+  assert.match(makeId(), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  assert.notEqual(makeId(), makeId());
+});
 
 const hydrated = (c) =>
   new Promise((resolve) => {

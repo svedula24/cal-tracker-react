@@ -1,7 +1,7 @@
 // App data on top of the on-device store (src/lib/store.ts). UI only: nothing
 // here talks to a server. First launch is seeded so Home matches the reference
 // screenshots exactly; anything the user logs adds on top.
-import { makeId, useCollection } from '@/lib/store';
+import { getCollection, makeId, useCollection } from '@/lib/store';
 import {
   addDays,
   dailyScore,
@@ -14,6 +14,7 @@ import {
 } from '@/lib/nutrition';
 import type { Food, Portion } from '@/data/foods';
 import { defaultServing, scale } from '@/lib/measure';
+import { migrateEntries } from '@/lib/migrateEntries';
 import { migrateSavedFoods, type SavedFood } from '@/lib/savedFoods';
 import { PAST_DAY_FOODS, SAVED_FOODS } from '@/lib/seedFoods';
 
@@ -35,6 +36,9 @@ export type Entry = {
   foodId?: string;
   foodName?: string; // the database name, even after the entry is renamed
   photo?: string;
+  // Demo data created at first launch: never synced or shown under "Recent".
+  // Cleared by any edit (the entry is then the user's); never set by `add`.
+  seed?: boolean;
 };
 export type DayLog = { id: string; steps: number; rollover: number }; // id = date
 
@@ -70,12 +74,12 @@ const todaySeed: [string, number, number, Nutrients][] = [
 
 function seedEntries(): Entry[] {
   const out: Entry[] = todaySeed.map(([name, h, m, nutrients]) => ({
-    id: makeId(), date: today, time: at(now, h, m), name, servings: 1, nutrients,
+    id: makeId(), date: today, time: at(now, h, m), name, servings: 1, nutrients, seed: true,
   }));
   for (let back = 1; back <= 5; back++) {
     const d = addDays(now, -back);
     for (const [name, h, m, food] of PAST_DAY_FOODS) {
-      out.push({ ...newEntry(food, defaultServing(food), back % 2 ? 1.5 : 1.25, dayKey(d)), time: at(d, h, m), name });
+      out.push({ ...newEntry(food, defaultServing(food), back % 2 ? 1.5 : 1.25, dayKey(d)), time: at(d, h, m), name, seed: true });
     }
   }
   return out;
@@ -100,7 +104,12 @@ export const STREAK_DAYS = 16;
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
 const entriesSeed = seedEntries();
-export const useEntries = () => useCollection<Entry>('entries', entriesSeed);
+// Stored entries are upgraded once at load (UUID ids, the `seed` flag); see migrateEntries.
+const entriesStore = () => getCollection<Entry>('entries', entriesSeed, migrateEntries);
+// Any edit makes a demo entry the user's. Module-level, so the function is stable.
+const updateEntry = (id: string, patch: Partial<Entry>) => entriesStore().update(id, { ...patch, seed: false });
+export const useEntries = () => ({ ...useCollection<Entry>('entries', entriesSeed, migrateEntries), update: updateEntry });
+export { migrateEntries };
 export const useDayLogs = () => useCollection<DayLog>('dayLogs', dayLogSeed);
 const savedSeed: SavedFood[] = SAVED_FOODS.map((food) => ({ id: food.id, food }));
 
