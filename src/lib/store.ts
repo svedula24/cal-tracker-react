@@ -1,6 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSyncExternalStore } from 'react';
 
+// Relative with the .ts extension so Node's test runner can import it as well.
+import { uuid } from './uuid.ts';
+
 // ────────────────────────────────────────────────────────────────────────────
 // On-device persistence for cloned apps.
 //
@@ -162,7 +165,5 @@ export function useCollection<T extends { id: string }>(key: string, seed: T[] =
   return { items, ready: store.ready, add: store.add, update: store.update, remove: store.remove };
 }
 
-/** Small id helper for locally-created records (no crypto dependency). */
-export function makeId(): string {
-  return `${Date.now().toString(36)}-${Math.round(Math.random() * 1e9).toString(36)}`;
-}
+/** Id for a locally-created record: a UUID v4 (src/lib/uuid.ts). */
+export const makeId = (): string => uuid();
