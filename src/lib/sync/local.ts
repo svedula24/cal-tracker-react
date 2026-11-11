@@ -80,6 +80,9 @@ export function createLocal(deps: {
     }
   };
 
+  // Demo ENTRIES are left out (entryToLog returns null for them). The seeded goals, day logs
+  // (steps) and saved foods are sent on purpose: the user chose to sync them now although they
+  // still hold the demo values (Architecture Decision Log, record 22).
   const all = (): { table: Table; key: string }[] => {
     const out: { table: Table; key: string }[] = [];
     for (const e of entries.items) if (entryToLog(e)) out.push({ table: 'food_logs', key: e.id });

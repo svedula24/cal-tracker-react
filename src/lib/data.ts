@@ -147,7 +147,26 @@ export const useEntries = () => ({
   remove: removeEntry,
 });
 export { migrateEntries };
-export const useDayLogs = () => useCollection<DayLog>('dayLogs', dayLogSeed);
+// A day's steps: its sync key is the date. Nothing in the app writes these yet (no step source),
+// but a screen that does must not have to remember sync, so the writers report like the others.
+const addDayLog = (log: DayLog) => {
+  dayLogsStore().add(log);
+  markDirty('daily_steps', log.id);
+};
+const updateDayLog = (id: string, patch: Partial<DayLog>) => {
+  dayLogsStore().update(id, patch);
+  markDirty('daily_steps', id);
+};
+const removeDayLog = (id: string) => {
+  dayLogsStore().remove(id);
+  markDirty('daily_steps', id, true);
+};
+export const useDayLogs = () => ({
+  ...useCollection<DayLog>('dayLogs', dayLogSeed),
+  add: addDayLog,
+  update: updateDayLog,
+  remove: removeDayLog,
+});
 
 // Only database foods (`usda:<n>`) exist on the server; its key is the number as text.
 const markSaved = (id: string, deleted: boolean) => {
@@ -169,6 +188,10 @@ export const useSavedFoods = () => ({
   remove: removeSaved,
 });
 
+// Read-only: the app has no screen to change goals, so there is no writer to report to sync
+// (the one goal row is uploaded by the first sync). When a goals screen is built, a change is a
+// NEW row dated the day it takes effect (user_goals is dated history), which the sync key
+// (GOALS_SINCE in src/lib/sync/local.ts) and this hook must then be changed for.
 export function useGoals() {
   const { items } = useCollection<Goals>('goals', goalsSeed);
   return { goals: items[0] ?? goalsSeed[0] };
