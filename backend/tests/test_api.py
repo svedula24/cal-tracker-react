@@ -10,6 +10,7 @@ import sqlalchemy.exc
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from kalo.db import SchemaOutOfDate
 from kalo.usda.load import load
 from kalo.usda.nutrients import FoodRow
 from kalo.usda.portions import Portion
@@ -368,6 +369,11 @@ def test_largest_bigint_id_is_a_404_not_an_error(client):
 @pytest.mark.parametrize("fdc_id", ["0", "-1", "banana", "1.5"])
 def test_bad_food_id_is_422(client, fdc_id):
     assert client.get(f"/api/v1/foods/{fdc_id}").status_code == 422
+
+
+def test_an_unmigrated_database_fails_at_startup(scratch_url):
+    with pytest.raises(SchemaOutOfDate, match="run `uv run alembic upgrade head`"), TestClient(create_app(scratch_url)):
+        pass
 
 
 def test_bad_database_url_fails_at_startup(migrated_url):

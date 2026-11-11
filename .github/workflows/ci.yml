@@ -27,6 +27,8 @@ jobs:
         run: npx tsc --noEmit
       - name: Unit tests
         run: npm test
+      - name: iOS bundle builds (what Expo Go loads; the web export below does not cover it)
+        run: npx expo export --platform ios --output-dir "$RUNNER_TEMP/ios-export"
       - name: Install Chromium for verify
         run: npx playwright install --with-deps chromium
       - name: Verify (web export, every route renders clean, feature flows pass)

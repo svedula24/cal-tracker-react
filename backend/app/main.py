@@ -10,13 +10,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
-from sqlalchemy import text
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.orm import sessionmaker
 
 from app.api.v1.foods import router as foods_router
 from app.db.session import make_engine
-from kalo.db import database_url
+from kalo.db import database_url, require_head
 
 
 def create_app(url: str | None = None) -> FastAPI:
@@ -27,8 +26,10 @@ def create_app(url: str | None = None) -> FastAPI:
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         engine = make_engine(url)
         try:
-            with engine.connect() as conn:  # blocks startup until Postgres answers, so a bad URL fails fast
-                conn.execute(text("SELECT 1"))
+            # Blocks startup until Postgres answers, so a bad URL fails fast; and refuses a database that
+            # is not migrated (SchemaOutOfDate), which would otherwise answer every request with a 500.
+            with engine.connect() as conn, conn.connection.cursor() as cur:
+                require_head(cur)
             app.state.engine = engine
             app.state.sessionmaker = sessionmaker(engine, expire_on_commit=False)
             yield

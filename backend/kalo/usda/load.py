@@ -15,10 +15,8 @@ import time
 from collections import Counter
 
 import psycopg
-from alembic.script import ScriptDirectory
-from psycopg import sql
 
-from ..db import alembic_config, database_url
+from ..db import database_url, require_head
 from .datasets import DATASETS, records
 from .nutrients import FoodRow, RecordError, to_row
 from .portions import Portion, portions_of
@@ -66,30 +64,6 @@ def read_rows() -> tuple[list[FoodRow], list[Portion]]:
                 print(f"  fdc_id {e.fdc_id}: {e.message}", file=sys.stderr)
         raise SystemExit(f"{sum(len(bad) for bad in errors.values())} records could not be mapped; nothing loaded")
     return rows, portions
-
-
-class SchemaOutOfDate(RuntimeError):
-    """The database is not at the head of the Alembic migrations."""
-
-
-def require_head(cur: psycopg.Cursor) -> None:
-    """Raise SchemaOutOfDate unless the connection's schema is migrated to the current head.
-
-    The version table is looked up in current_schema() (the first schema of the search_path), where
-    migrations/env.py keeps it; a version table further down the path belongs to another schema's tables.
-    """
-    head = ScriptDirectory.from_config(alembic_config()).get_current_head()
-    cur.execute("SELECT current_schema(), to_regclass(format('%I.alembic_version', current_schema())) IS NOT NULL")
-    schema, migrated = cur.fetchone()
-    versions: set[str] = set()
-    if migrated:
-        cur.execute(sql.SQL("SELECT version_num FROM {}").format(sql.Identifier(schema, "alembic_version")))
-        versions = {version for (version,) in cur.fetchall()}
-    if versions != {head}:
-        found = ", ".join(sorted(versions)) or "not migrated"
-        raise SchemaOutOfDate(
-            f"schema {schema!r} is at {found}, the migrations are at {head}; run `uv run alembic upgrade head`"
-        )
 
 
 def load(rows: list[FoodRow], portions: list[Portion], url: str) -> tuple[Counter[str], int]:
