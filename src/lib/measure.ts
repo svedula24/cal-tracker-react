@@ -45,20 +45,36 @@ export const times = (n: Nutrients, quantity: number): Nutrients =>
   Object.fromEntries(NUTRIENT_KEYS.map((k) => [k, n[k] * quantity])) as Nutrients;
 
 /**
- * A typed quantity: digits with one "." or "," (a comma is a decimal point,
- * "1,5", unless it groups thousands, "1,000"), positive, kept to 2 decimals.
- * No upper bound, except that the value must print back (qtyText) as plain
- * digits the field accepts again; from 1e21 JS prints an exponent. Null when
- * invalid, so a typo can't become a day's total.
+ * A typed number: digits with one "." or "," (a comma is a decimal point,
+ * "1,5", unless it groups thousands, "1,000"), not negative, kept to 2
+ * decimals. No upper bound, except that the value must print back (qtyText) as
+ * plain digits the field accepts again; from 1e21 JS prints an exponent. Null
+ * when invalid, so a typo can't become a day's total.
  */
-export function parseQty(text: string): number | null {
+export function parseValue(text: string): number | null {
   const t = text.trim();
   if (!/^[\d.,]+$/.test(t)) return null;
   const normalized = /^\d{1,3}(,\d{3})+$/.test(t) ? t.replace(/,/g, '') : t.replace(',', '.');
   if (!/^\d*\.?\d+$/.test(normalized) && !/^\d+\.$/.test(normalized)) return null;
-  const n = Math.round(Number(normalized) * 100) / 100; // round first: "0.004" is 0, not a quantity
-  return n > 0 && Number.isFinite(n) && !String(n).includes('e') ? n : null;
+  const n = Math.round(Number(normalized) * 100) / 100; // round first: "0.004" is 0
+  return Number.isFinite(n) && !String(n).includes('e') ? n : null;
 }
+
+/** A typed quantity (grams, servings): a typed number above 0. */
+export function parseQty(text: string): number | null {
+  const n = parseValue(text);
+  return n !== null && n > 0 ? n : null;
+}
+
+/**
+ * A per-unit nutrient set after the user types `shown` for one nutrient while
+ * the screen shows `quantity` units: the nutrient becomes shown / quantity per
+ * unit, so the card reads back what was typed and still scales with the amount.
+ */
+export const withValue = (perUnit: Nutrients, key: keyof Nutrients, shown: number, quantity: number): Nutrients => ({
+  ...perUnit,
+  [key]: shown / quantity,
+});
 
 /** The quantity as shown in the field: "1", "1.5", "0.33". */
 export const qtyText = (n: number): string => String(Math.round(n * 100) / 100);

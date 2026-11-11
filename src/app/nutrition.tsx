@@ -8,7 +8,7 @@ import { Press } from '@/components/Press';
 import { cardShadow, goBack } from '@/components/Screen';
 import type { Food } from '@/data/foods';
 import { type Entry, newEntry, useEntries, useSavedFoods } from '@/lib/data';
-import { defaultServing, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, qtyText, scale, times } from '@/lib/measure';
+import { defaultServing, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, parseValue, qtyText, scale, times, withValue } from '@/lib/measure';
 import { formatTime, type Nutrients, zero } from '@/lib/nutrition';
 import { parseFood } from '@/lib/savedFoods';
 import { useSelectedDay } from '@/lib/selectedDay';
@@ -31,7 +31,8 @@ const MICROS = [
  * The Nutrition screen: open from a food (adding it to the day) or from a
  * logged entry (editing it). Type the amount in grams; nutrients are
  * per100g × grams / 100. A hand-written entry (no per-100 g data) keeps a
- * servings field instead.
+ * servings field instead. Every nutrient value can be typed over: the entry
+ * keeps the typed value for this amount and scales it if the amount changes.
  */
 export default function Nutrition() {
   const { id, food: foodParam } = useLocalSearchParams<{ id?: string; food?: string }>();
@@ -80,9 +81,15 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
   const [page, setPage] = useState(0);
 
   // Per one unit (1 g, or one serving of a hand-written entry): what the day's
-  // totals multiply by `servings`. The cards show the typed amount.
-  const perUnit: Nutrients = base ? scale(base.per100g, 1) : (entry?.nutrients ?? zero());
+  // totals multiply by `servings`. The cards show the typed amount. State, because
+  // a value typed into a card replaces the food's own for this entry.
+  const [perUnit, setPerUnit] = useState<Nutrients>(() => (base ? scale(base.per100g, 1) : (entry?.nutrients ?? zero())));
+  const [edited, setEdited] = useState(false);
   const nutrients = times(perUnit, qty);
+  const edit = (key: keyof Nutrients) => (shown: number) => {
+    setPerUnit((n) => withValue(n, key, shown, qty));
+    setEdited(true);
+  };
   const serving = base ? defaultServing(base) : null;
   const isSaved = !!base && saved.items.some((s) => s.id === base.id);
   const time = formatTime(entry?.time ?? new Date().toISOString());
@@ -99,10 +106,13 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
     if (!valid) return;
     const finalName = name.trim() || base?.name || entry?.name || 'Food';
     if (entry) {
-      entries.update(entry.id, { name: finalName, servings: qty, measure: base ? G : entry.measure, nutrients: perUnit });
+      // An edited value also replaces the entry's per-100 g copy, which is what reopening it reads.
+      const per100g = edited && base ? { per100g: times(perUnit, 100) } : {};
+      entries.update(entry.id, { name: finalName, servings: qty, measure: base ? G : entry.measure, nutrients: perUnit, ...per100g });
       goBack();
     } else if (base) {
-      entries.add({ ...newEntry(base, G, qty, day), name: finalName });
+      const food = edited ? { ...base, per100g: times(perUnit, 100) } : base;
+      entries.add({ ...newEntry(food, G, qty, day), name: finalName });
       router.dismissTo('/');
     }
   };
@@ -192,7 +202,7 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
           ) : null}
 
           <View className="mt-[24px]">
-            <NutrientCard big label="Calories" value={fmt(nutrients.calories)} unit="" icon={<Flame size={30} color={c.foreground} fill={c.foreground} />} />
+            <NutrientCard big label="Calories" value={nutrients.calories} onEdit={edit('calories')} unit="" icon={<Flame size={30} color={c.foreground} fill={c.foreground} />} />
           </View>
           <ScrollView
             ref={pager}
@@ -209,7 +219,7 @@ function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
             {[MACROS, MICROS].map((group, gi) => (
               <View key={gi} className="flex-row" style={{ width: pageWidth, gap: 10 }}>
                 {group.map(({ key, label, Icon, color, unit }) => (
-                  <NutrientCard key={key} label={label} value={fmt(nutrients[key])} unit={unit} icon={<Icon size={16} color={color} fill={color} />} />
+                  <NutrientCard key={key} label={label} value={nutrients[key]} onEdit={edit(key)} unit={unit} icon={<Icon size={16} color={color} fill={color} />} />
                 ))}
               </View>
             ))}
@@ -276,15 +286,29 @@ function RoundButton({ label, onPress, children }: { label: string; onPress: () 
   );
 }
 
-function NutrientCard({ label, value, unit, icon, big = false }: { label: string; value: string; unit: string; icon: React.ReactNode; big?: boolean }) {
+function NutrientCard({
+  label,
+  value,
+  onEdit,
+  unit,
+  icon,
+  big = false,
+}: {
+  label: string;
+  value: number;
+  onEdit: (shown: number) => void;
+  unit: string;
+  icon: React.ReactNode;
+  big?: boolean;
+}) {
   return (
     <View className={`rounded-[22px] border border-border bg-card ${big ? 'h-[80px] flex-row items-center px-5' : 'h-[62px] flex-1 justify-center px-3'}`}>
       {big ? (
         <>
           {icon}
-          <View className="ml-5">
+          <View className="ml-5 flex-1">
             <Text className="text-[14px] text-muted">{label}</Text>
-            <Text className="text-[30px] font-bold leading-[34px] text-foreground">{value}</Text>
+            <ValueField label={label} value={value} onEdit={onEdit} big />
           </View>
         </>
       ) : (
@@ -293,12 +317,53 @@ function NutrientCard({ label, value, unit, icon, big = false }: { label: string
             {icon}
             <Text className="ml-2 text-[13px] text-muted">{label}</Text>
           </View>
-          <Text className="mt-0.5 text-center text-[20px] font-bold text-foreground">
-            {value}
-            {unit}
-          </Text>
+          <View className="mt-0.5 flex-row items-center justify-center">
+            <ValueField label={label} value={value} onEdit={onEdit} />
+            <Text className="text-[20px] font-bold text-foreground">{unit}</Text>
+          </View>
         </>
       )}
     </View>
+  );
+}
+
+/**
+ * A nutrient value that can be typed over. It shows the rounded value; while
+ * focused it shows what is being typed, and each valid number is passed to
+ * `onEdit` as it is typed. An invalid draft is red, changes nothing, and is
+ * dropped on blur.
+ */
+function ValueField({ label, value, onEdit, big = false }: { label: string; value: number; onEdit: (shown: number) => void; big?: boolean }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? fmt(value);
+  const invalid = draft !== null && parseValue(draft) === null;
+  // The small cards centre "29g": the field is as wide as its text, so the unit sits against it.
+  const width = big ? undefined : 4 + [...shown].reduce((w, ch) => w + (ch === '.' || ch === ',' ? 6 : 12.5), 0);
+  return (
+    <TextInput
+      accessibilityLabel={label}
+      value={shown}
+      onFocus={() => setDraft(fmt(value))}
+      onChangeText={(t) => {
+        setDraft(t);
+        const n = parseValue(t);
+        if (n !== null) onEdit(n);
+      }}
+      onBlur={() => setDraft(null)}
+      keyboardType="decimal-pad"
+      selectTextOnFocus
+      className={`font-bold ${invalid ? 'text-bad' : 'text-foreground'}`}
+      style={
+        {
+          fontSize: big ? 30 : 20,
+          lineHeight: big ? 34 : 26,
+          height: big ? 34 : 26,
+          width,
+          padding: 0,
+          textAlign: big ? 'left' : 'right',
+          outlineStyle: 'none',
+        } as object
+      }
+    />
   );
 }
