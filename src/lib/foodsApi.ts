@@ -102,10 +102,13 @@ export async function searchFoodsApi(
 ): Promise<Food[]> {
   const { signal } = opts;
   const limit = Math.min(MAX_LIMIT, Math.max(1, Math.floor(opts.limit ?? MAX_LIMIT) || MAX_LIMIT));
-  // A longer query is cut, not sent: a 422 would read as "API unavailable" and drop the screen to the bundled list.
-  const url = `${baseUrl.replace(/\/+$/, '')}/api/v1/foods/search?q=${encodeURIComponent(q.slice(0, MAX_QUERY))}&limit=${limit}`;
   let body: unknown;
   try {
+    // A longer query is cut, not sent: a 422 would read as "API unavailable" and drop the screen to
+    // the bundled list. Cut by code point (as the API counts), so an emoji is never split in half,
+    // which encodeURIComponent would throw on.
+    const query = Array.from(q).slice(0, MAX_QUERY).join('');
+    const url = `${baseUrl.replace(/\/+$/, '')}/api/v1/foods/search?q=${encodeURIComponent(query)}&limit=${limit}`;
     // Looked up at call time, so a missing global fetch is ApiUnavailable too.
     const res = await (opts.fetch ?? fetch)(url, { signal, headers: { Accept: 'application/json' } });
     if (!res.ok) throw new ApiUnavailable(`The foods API answered ${res.status}`);

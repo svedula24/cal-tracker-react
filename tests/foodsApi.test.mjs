@@ -90,6 +90,14 @@ test('searchFoodsApi: a query over the API’s 100 characters is cut to 100, not
   assert.equal(new URL(fetch.calls[0].url).searchParams.get('q'), 'a'.repeat(100));
 });
 
+test('searchFoodsApi: the cut counts code points, so an emoji at the limit is kept whole', async () => {
+  const fetch = fakeFetch(envelope([banana]));
+  await searchFoodsApi('http://api.test', 'a'.repeat(99) + '🍌🍌', { fetch }); // "🍌" is two UTF-16 units
+  assert.equal(new URL(fetch.calls[0].url).searchParams.get('q'), 'a'.repeat(99) + '🍌');
+  // A query that cannot be encoded at all (a lone surrogate) is ApiUnavailable, not a stray URIError.
+  await unavailable(searchFoodsApi('http://api.test', '\uD83C', { fetch }));
+});
+
 test('searchFoodsApi: an error status is ApiUnavailable', async () => {
   await unavailable(searchFoodsApi('http://api.test', 'banana', { fetch: fakeFetch({ detail: 'database unavailable' }, 503) }));
   await unavailable(searchFoodsApi('http://api.test', 'banana', { fetch: fakeFetch({ detail: 'oops' }, 500) }));
