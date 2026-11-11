@@ -79,7 +79,7 @@ function NutritionForm({ entry, base, grams }: { entry?: Entry; base: Food | nul
 
   const [name, setName] = useState(entry?.name ?? base?.name ?? '');
   // For a food: grams. For a hand-written entry: servings.
-  const initial = base ? ((entry ? undefined : grams) ?? entryGrams(entry, base)) : (entry?.servings ?? 1);
+  const initial = base ? (grams ?? entryGrams(entry, base)) : (entry?.servings ?? 1);
   const [qty, setQty] = useState(initial);
   const [text, setText] = useState(qtyText(initial));
   const [more, setMore] = useState(false);
