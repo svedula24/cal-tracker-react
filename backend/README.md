@@ -119,6 +119,10 @@ Logs and saved foods reference `foods`, so a load never empties the table:
   that comes back is un-retired;
 - the portions of the loaded foods are replaced, so their ids change.
 
+A load that would retire more than 10% of the current foods is refused and
+changes nothing, because that is what a truncated download looks like. If the
+foods are meant to go, run `uv run python -m kalo.usda.load --allow-retire`.
+
 Loading the same releases again rewrites no food row (about half a second after
 the files are parsed) and takes no table lock, so the API keeps serving.
 

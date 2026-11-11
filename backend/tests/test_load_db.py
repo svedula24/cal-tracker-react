@@ -12,7 +12,7 @@ import psycopg
 import pytest
 
 from kalo.db import SchemaOutOfDate, require_head
-from kalo.usda.load import load
+from kalo.usda.load import MAX_RETIRED_SHARE, TooManyRetired, load
 from kalo.usda.nutrients import FoodRow
 from kalo.usda.portions import Portion
 
@@ -173,6 +173,31 @@ def test_loading_nothing_retires_every_food_and_deletes_nothing(migrated_url):
     assert fetch(migrated_url, "SELECT id, fdc_id FROM food_portions") == [(1, 1)]
     assert fetch(migrated_url, "SELECT count(*) FROM food_logs") == [(1,)]
     assert load([], [], migrated_url) == ({}, 0, 0)  # nothing current is left to retire
+
+
+def test_a_load_that_would_retire_too_many_foods_is_refused_and_changes_nothing(migrated_url):
+    foods = [row(i) for i in range(1, 21)]
+    load(foods, [Portion(1, "1 small", 101.0)], migrated_url)
+    state = "SELECT fdc_id, calories_per_100g, retired_at, xmin::text FROM foods ORDER BY fdc_id"
+    before = fetch(migrated_url, state)
+    # A truncated download: 3 of the 20 foods are missing (15%), and one that is present has changed.
+    partial = [row(i, calories_per_100g=999.0 if i == 1 else 89.0) for i in range(1, 18)]
+    with pytest.raises(TooManyRetired, match="would retire 3 of the 20 current ones"):
+        load(partial, [], migrated_url, max_retired_share=MAX_RETIRED_SHARE)
+    # Rolled back as a whole: nothing retired, the changed value not applied, the portion still there.
+    assert fetch(migrated_url, state) == before
+    assert fetch(migrated_url, "SELECT fdc_id FROM food_portions") == [(1,)]
+    # An empty load is the extreme case.
+    with pytest.raises(TooManyRetired):
+        load([], [], migrated_url, max_retired_share=MAX_RETIRED_SHARE)
+    # Within the share (2 of 20), and whenever the caller allows it (no share), the load goes through.
+    assert load(foods[:18], [], migrated_url, max_retired_share=MAX_RETIRED_SHARE)[2] == 2
+    assert load(foods[:5], [], migrated_url)[2] == 13
+
+
+def test_the_first_load_is_never_refused_for_its_size(migrated_url):
+    # An empty table has nothing to retire.
+    assert load([row(1)], [], migrated_url, max_retired_share=MAX_RETIRED_SHARE)[2] == 0
 
 
 def test_null_fiber_sugar_and_sodium_load_as_null(migrated_url):

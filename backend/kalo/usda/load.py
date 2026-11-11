@@ -12,6 +12,7 @@ so no food is ever deleted: one that a later release drops is kept and marked
 
 from __future__ import annotations
 
+import argparse
 import sys
 import time
 from collections import Counter
@@ -68,8 +69,21 @@ def read_rows() -> tuple[list[FoodRow], list[Portion]]:
     return rows, portions
 
 
-def load(rows: list[FoodRow], portions: list[Portion], url: str) -> tuple[Counter[str], int, int]:
+# The share of current foods one load may retire before it is refused (see TooManyRetired).
+MAX_RETIRED_SHARE = 0.1
+
+
+class TooManyRetired(RuntimeError):
+    """The load would retire an implausible share of the foods; nothing was changed."""
+
+
+def load(
+    rows: list[FoodRow], portions: list[Portion], url: str, max_retired_share: float | None = None
+) -> tuple[Counter[str], int, int]:
     """Bring both tables up to date with `rows` and `portions`, in one transaction.
+
+    With `max_retired_share`, a load that would retire more than that share of the current foods
+    raises TooManyRetired and changes nothing: a truncated download must not hide the food list.
 
     A food in the load is inserted, or updated when a value changed (or it was retired); a food not
     in the load is kept and marked retired, with its portions, because logs and bookmarks reference it.
@@ -86,6 +100,8 @@ def load(rows: list[FoodRow], portions: list[Portion], url: str) -> tuple[Counte
         require_head(cur)
         # One load at a time: a second one waits here until the first commits, then sees its result.
         cur.execute("SELECT pg_advisory_xact_lock(hashtext('kalo.usda.load'))")
+        cur.execute("SELECT count(*) FROM foods WHERE retired_at IS NULL")
+        (current_before,) = cur.fetchone()
         # Same column types as foods, so a REAL compares equal to the stored one; the key rejects a duplicate id.
         cur.execute("CREATE TEMP TABLE foods_stage (LIKE foods) ON COMMIT DROP")
         cur.execute("ALTER TABLE foods_stage ADD PRIMARY KEY (fdc_id)")
@@ -112,6 +128,13 @@ def load(rows: list[FoodRow], portions: list[Portion], url: str) -> tuple[Counte
             """
         )
         retired = cur.rowcount
+        if max_retired_share is not None and retired > current_before * max_retired_share:
+            # Raising here rolls the whole transaction back: the upsert above included.
+            raise TooManyRetired(
+                f"this load has {len(rows)} foods and would retire {retired} of the {current_before} current ones "
+                f"(more than {max_retired_share:.0%}); the download may be incomplete. Nothing was changed. "
+                "Run with --allow-retire if the foods are meant to go."
+            )
         # Portions carry no key of their own to match on, so those of the loaded foods are replaced.
         cur.execute("DELETE FROM food_portions WHERE fdc_id IN (SELECT fdc_id FROM foods_stage)")
         with cur.copy(f"COPY food_portions ({', '.join(Portion.columns())}) FROM STDIN") as copy:
@@ -126,9 +149,21 @@ def load(rows: list[FoodRow], portions: list[Portion], url: str) -> tuple[Counte
 
 
 def main() -> int:
+    parser = argparse.ArgumentParser(description="Load the USDA foods and portions into Postgres.")
+    parser.add_argument(
+        "--allow-retire",
+        action="store_true",
+        help=f"allow a load that retires more than {MAX_RETIRED_SHARE:.0%} of the current foods",
+    )
+    args = parser.parse_args()
     url = database_url()
     rows, portions = read_rows()
-    counts, portion_count, retired = load(rows, portions, url)
+    try:
+        counts, portion_count, retired = load(
+            rows, portions, url, max_retired_share=None if args.allow_retire else MAX_RETIRED_SHARE
+        )
+    except TooManyRetired as e:
+        raise SystemExit(str(e)) from None
     for data_type, n in counts.items():
         print(f"  {data_type}: {n}")
     print(f"✓ foods: {sum(counts.values())} current, {retired} retired by this load")
