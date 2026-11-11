@@ -4,6 +4,7 @@ import { ScrollView, Text, View } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
 import { Press } from '@/components/Press';
+import { SwipeAction } from '@/components/SwipeAction';
 import { FoodRow } from '@/components/logging/FoodRow';
 import { PrimaryButton } from '@/components/logging/PrimaryButton';
 import { ComingSoon, PushedScreen } from '@/components/Screen';
@@ -39,15 +40,17 @@ export default function SavedFoods() {
             friction={2}
             rightThreshold={40}
             overshootRight={false}
-            renderRightActions={() => (
-              <Press
-                accessibilityRole="button"
-                accessibilityLabel="Remove"
-                onPress={() => saved.remove(food.id)}
-                className="ml-2.5 w-[88px] items-center justify-center rounded-card bg-bad"
-              >
-                <Text className="text-[15px] font-semibold text-card">Remove</Text>
-              </Press>
+            renderRightActions={(_progress, translation) => (
+              <SwipeAction translation={translation} width={88}>
+                <Press
+                  accessibilityRole="button"
+                  accessibilityLabel="Remove"
+                  onPress={() => saved.remove(food.id)}
+                  className="flex-1 items-center justify-center rounded-card bg-bad"
+                >
+                  <Text className="text-[15px] font-semibold text-card">Remove</Text>
+                </Press>
+              </SwipeAction>
             )}
           >
             <FoodRow

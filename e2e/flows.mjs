@@ -116,9 +116,14 @@ const home = [
       const y = box.y + box.height / 2;
       await page.mouse.move(box.x + box.width - 20, y);
       await page.mouse.down();
+      // Delete sits behind the card: pressing (the card shrinks and dims) must not show it, only a swipe.
+      const deleteOpacity = () => btn(page, 'Delete Sandwich').evaluate((el) => getComputedStyle(el.parentElement).opacity);
+      await wait(250);
+      if ((await deleteOpacity()) !== '0') throw new Error('Delete is visible behind a pressed card');
       for (let i = 1; i <= 12; i++) await page.mouse.move(box.x + box.width - 20 - i * 15, y);
       await page.mouse.up();
       await wait(500);
+      if ((await deleteOpacity()) !== '1') throw new Error('Delete is not visible after the swipe');
       await btn(page, 'Delete Sandwich').click();
       await wait(300);
       await go(page, base + '/', wait);

@@ -6,6 +6,7 @@ import { Text, View } from 'react-native';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 
 import { Press } from '@/components/Press';
+import { SwipeAction } from '@/components/SwipeAction';
 import type { Entry } from '@/lib/data';
 import { formatTime } from '@/lib/nutrition';
 import { tokens } from '@/lib/tokens';
@@ -41,16 +42,18 @@ export function EntryCard({ entry, onDelete }: { entry: Entry; onDelete: () => v
         dragged.current = false;
       }}
       rightThreshold={60}
-      renderRightActions={() => (
-        <Press
-          accessibilityRole="button"
-          accessibilityLabel={`Delete ${entry.name}`}
-          onPress={onDelete}
-          className="ml-[10px] w-[84px] items-center justify-center rounded-2xl bg-bad"
-        >
-          <Trash2 size={22} color="#fff" />
-          <Text className="mt-1 text-[13px] font-semibold text-white">Delete</Text>
-        </Press>
+      renderRightActions={(_progress, translation) => (
+        <SwipeAction translation={translation} width={84}>
+          <Press
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${entry.name}`}
+            onPress={onDelete}
+            className="flex-1 items-center justify-center rounded-2xl bg-bad"
+          >
+            <Trash2 size={22} color="#fff" />
+            <Text className="mt-1 text-[13px] font-semibold text-white">Delete</Text>
+          </Press>
+        </SwipeAction>
       )}
     >
       <Press
