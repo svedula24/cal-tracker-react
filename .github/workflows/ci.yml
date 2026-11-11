@@ -33,6 +33,8 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Verify (web export, every route renders clean, feature flows pass)
         run: npm run verify
+      - name: Verify API mode (web export with the API URL set; the API is mocked, then unreachable)
+        run: npm run verify:api
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v5

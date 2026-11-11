@@ -1,19 +1,14 @@
 import { Search, X } from 'lucide-react-native';
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Text, TextInput, View } from 'react-native';
 
 import { Press } from '@/components/Press';
 import { BookmarkToggle, FoodRow } from '@/components/logging/FoodRow';
 import { PushedScreen } from '@/components/Screen';
-import { type Food, loadFoods } from '@/data/foods';
+import type { Food } from '@/data/foods';
 import { useSavedFoods } from '@/lib/data';
-import { createFoodIndex } from '@/lib/foodIndex';
 import { tokens } from '@/lib/tokens';
-
-// Built on first open (not at app start): ~13k USDA foods, searched in memory, offline.
-type Index = { search: ReturnType<typeof createFoodIndex>; count: string; source: string };
-let built: Index | null = null; // kept across opens, so the screen never re-shows the spinner
-type Load = { index: Index } | 'loading' | 'failed';
+import { useFoodSearch } from '@/lib/useFoodSearch';
 
 const Separator = () => <View className="h-2.5" />;
 
@@ -22,34 +17,13 @@ export default function FoodDatabase() {
   const saved = useSavedFoods();
   const savedIds = useMemo(() => new Set(saved.items.map((s) => s.id)), [saved.items]);
 
-  // The database loads once the screen is up. The timeout returns to the event
-  // loop first, so the heavy work (on iOS/Android the bundled JSON is evaluated
-  // synchronously) can't run before this screen's first frame is committed. A
-  // failed load shows a Retry button, never an endless spinner.
-  const [load, setLoad] = useState<Load>(() => (built ? { index: built } : 'loading'));
-  useEffect(() => {
-    if (load !== 'loading') return;
-    let cancelled = false;
-    const timer = setTimeout(() => {
-      loadFoods().then(
-        ({ foods, source }) => {
-          built ??= { search: createFoodIndex(foods), count: foods.length.toLocaleString('en-US'), source };
-          if (!cancelled) setLoad({ index: built });
-        },
-        () => !cancelled && setLoad('failed'),
-      );
-    }, 0);
-    return () => {
-      cancelled = true;
-      clearTimeout(timer);
-    };
-  }, [load]);
-  const index = typeof load === 'object' ? load.index : null;
-
-  // Typing stays responsive; the scan runs on the deferred value.
-  const q = useDeferredValue(query).trim();
-  const results = useMemo(() => (index ? index.search(q) : []), [q, index]);
-  const count = index?.count ?? '';
+  // Bundled-only build: the list loads when the screen opens and answers each
+  // keystroke; a failed load shows Retry, never an endless spinner. With an API
+  // URL the search goes to the API, falling back to the bundled list
+  // (src/lib/foodSearch.ts). `q` is the query the results are for.
+  const { results, status, source, query: q, remote, bundled, retry } = useFoodSearch(query);
+  const count = remote ? '' : (bundled?.count ?? '');
+  const offline = remote && source === 'bundled' && status !== 'failed';
 
   // Saved with a snapshot, so a later data refresh can't lose it.
   const toggleSaved = (food: Food) => (savedIds.has(food.id) ? saved.remove(food.id) : saved.add({ id: food.id, food }));
@@ -72,6 +46,11 @@ export default function FoodDatabase() {
             className="ml-2 h-full flex-1 text-[16px] text-foreground"
             style={{ outlineStyle: 'none' } as object}
           />
+          {remote && status === 'loading' ? (
+            <View className="mr-2" accessibilityLabel="Searching">
+              <ActivityIndicator size="small" color={tokens.colors.muted} />
+            </View>
+          ) : null}
           {query ? (
             <Press accessibilityRole="button" accessibilityLabel="Clear search" onPress={() => setQuery('')} hitSlop={8}>
               <X size={18} color={tokens.colors.muted} />
@@ -92,25 +71,37 @@ export default function FoodDatabase() {
           />
         )}
         ListEmptyComponent={
-          index ? (
-            <Text className="mt-10 px-6 text-center text-[15px] text-muted">
-              {q ? `No foods match "${q}"` : `Search ${count} foods from USDA FoodData Central. Works offline.`}
-            </Text>
-          ) : load === 'failed' ? (
+          status === 'failed' ? (
             <View className="mt-10 items-center px-6">
               <Text className="text-center text-[15px] text-muted">Couldn&apos;t load the food database.</Text>
-              <Press accessibilityRole="button" accessibilityLabel="Retry" onPress={() => setLoad('loading')} className="mt-3 rounded-full bg-fab px-5 py-2.5">
+              <Press accessibilityRole="button" accessibilityLabel="Retry" onPress={retry} className="mt-3 rounded-full bg-fab px-5 py-2.5">
                 <Text className="text-[15px] font-semibold text-white">Retry</Text>
               </Press>
             </View>
-          ) : (
+          ) : status !== 'loading' ? (
+            <Text className="mt-10 px-6 text-center text-[15px] text-muted">
+              {q
+                ? `No foods match "${q}"`
+                : remote
+                  ? 'Search USDA FoodData Central.'
+                  : `Search ${count} foods from USDA FoodData Central. Works offline.`}
+            </Text>
+          ) : remote ? undefined : (
+            // With an API URL the search field shows the spinner instead.
             <View className="mt-10 items-center" accessibilityLabel="Loading foods">
               <ActivityIndicator color={tokens.colors.muted} />
             </View>
           )
         }
         ListFooterComponent={
-          results.length ? <Text className="mt-4 text-center text-[11px] text-faint">Data: {index?.source}</Text> : undefined
+          results.length || offline ? (
+            <View className="mt-4">
+              {offline ? <Text className="text-center text-[11px] text-faint">Offline: searching the built-in list</Text> : null}
+              {results.length ? (
+                <Text className="text-center text-[11px] text-faint">Data: {source === 'bundled' ? bundled?.source : 'USDA FoodData Central'}</Text>
+              ) : null}
+            </View>
+          ) : undefined
         }
       />
     </PushedScreen>

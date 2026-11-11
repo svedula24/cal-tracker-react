@@ -9,10 +9,16 @@ from pydantic import BaseModel, ConfigDict
 from app.models.foods import Food, FoodPortion
 
 
-class FoodSearchItem(BaseModel):
-    """One search result: the foods row as it is stored."""
-
+class PortionOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    description: str
+    gram_weight: float
+
+
+class FoodSearchItem(BaseModel):
+    """One search result: the foods row as it is stored, and the food's portions, smallest first."""
 
     fdc_id: int
     description: str
@@ -25,6 +31,7 @@ class FoodSearchItem(BaseModel):
     fiber_per_100g: float | None
     sugar_per_100g: float | None
     sodium_mg_per_100g: float | None
+    portions: list[PortionOut]
 
 
 class FoodSearchResponse(BaseModel):
@@ -43,14 +50,6 @@ class NutrientsPer100g(BaseModel):
     fiber_g: float | None
     sugar_g: float | None
     sodium_mg: float | None
-
-
-class PortionOut(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    description: str
-    gram_weight: float
 
 
 class FoodDetail(BaseModel):

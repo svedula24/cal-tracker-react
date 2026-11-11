@@ -44,6 +44,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "verify": "expo export --platform web && node e2e/verify.mjs",
+    "verify:api": "EXPO_PUBLIC_API_URL=http://127.0.0.1:9 expo export --platform web --output-dir dist-api && node e2e/api-mode.mjs",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-test-module-mocks --test \"tests/*.test.mjs\"",
     "build:foods": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --max-old-space-size=4096 scripts/build-usda-foods.mjs"
   },

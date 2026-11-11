@@ -1,4 +1,6 @@
-"""The foods API (app/): search ranking, paging, validation, and food lookup. Needs Postgres: set DATABASE_URL.
+"""The foods API (app/): search ranking, paging, portions, validation, food lookup and CORS.
+
+Needs Postgres: set DATABASE_URL.
 
 Each test seeds a freshly migrated scratch schema (see conftest.py) and runs the app's lifespan against it.
 """
@@ -8,6 +10,7 @@ import os
 import pytest
 import sqlalchemy.exc
 from fastapi.testclient import TestClient
+from sqlalchemy import event
 
 from app.main import create_app
 from kalo.db import SchemaOutOfDate
@@ -21,6 +24,7 @@ ITEM_KEYS = {
     "fdc_id", "description", "data_type", "brand_name",
     "calories_per_100g", "protein_per_100g", "carbs_per_100g", "fat_per_100g",
     "fiber_per_100g", "sugar_per_100g", "sodium_mg_per_100g",
+    "portions",
 }  # fmt: skip
 DETAIL_KEYS = {"fdc_id", "description", "data_type", "brand_name", "nutrients_per_100g", "portions"}
 NUTRIENT_KEYS = {"calories", "protein_g", "carbs_g", "fat_g", "fiber_g", "sugar_g", "sodium_mg"}
@@ -89,6 +93,14 @@ def client(migrated_url):
         yield c
 
 
+class AnyId:
+    def __eq__(self, other):
+        return isinstance(other, int) and other > 0
+
+
+ANY_ID = AnyId()
+
+
 def search(client, q, **extra):
     r = client.get("/api/v1/foods/search", params={"q": q, **extra})
     assert r.status_code == 200, r.text
@@ -122,6 +134,10 @@ def test_search_response_is_an_envelope_of_full_rows(client):
         "fiber_per_100g": pytest.approx(2.6),
         "sugar_per_100g": pytest.approx(12.23),
         "sodium_mg_per_100g": pytest.approx(1.0),
+        "portions": [
+            {"id": ANY_ID, "description": description, "gram_weight": grams}
+            for description, grams in BANANA_PORTIONS_IN_ORDER
+        ],
     }
 
 
@@ -242,6 +258,130 @@ def test_search_keeps_unreported_nutrients_null(client):
     chicken = search(client, "chicken breast")[0]
     assert chicken["fiber_per_100g"] == 0
     assert chicken["sugar_per_100g"] == 0
+
+
+def test_search_items_carry_their_portions_ordered_by_gram_weight_then_id(client):
+    by_id = {f["fdc_id"]: f for f in search(client, "raw")}
+    portions = by_id[BANANAS_RAW]["portions"]
+    for p in portions:
+        assert set(p) == PORTION_KEYS
+    assert [(p["description"], p["gram_weight"]) for p in portions] == BANANA_PORTIONS_IN_ORDER
+    medium, sliced = portions[1], portions[2]
+    assert medium["gram_weight"] == sliced["gram_weight"]  # the tie
+    assert medium["id"] < sliced["id"]  # broken by id (load order), not by description
+    # Each food gets its own portions, not its neighbour's; 30.8 is a REAL and must come back as 30.8.
+    assert [(p["description"], p["gram_weight"]) for p in by_id[BROCCOLI]["portions"]] == [
+        ("1 spear (about 5 inches long)", 30.8),
+        ("1 cup chopped", 91.0),
+    ]
+    # A food with none has an empty list, not a missing key or null.
+    assert by_id[APPLES]["portions"] == []
+    assert by_id[CHICKEN_THIGH]["portions"] == []
+
+
+def test_search_portions_are_the_same_as_the_food_lookup_returns(client):
+    for food in search(client, "raw"):
+        assert food["portions"] == client.get(f"/api/v1/foods/{food['fdc_id']}").json()["portions"]
+
+
+def test_portions_do_not_multiply_or_shorten_the_page(client):
+    # "Bananas, raw" has five portions and the powder none: a join in the ranked query would return
+    # the banana five times (or, as an inner join, drop the powder), and LIMIT would count portions.
+    foods = search(client, "banana", limit=2)
+    assert ids(foods) == [BANANA_POWDER, BANANAS_RAW]
+    assert [len(f["portions"]) for f in foods] == [0, 5]
+    everything = ids(search(client, "raw", limit=50))
+    assert len(everything) == len(set(everything))
+    assert search(client, "raw", limit=1, offset=1)[0]["fdc_id"] == everything[1]
+
+
+@pytest.fixture
+def statements(client):
+    seen = []
+
+    def record(conn, cursor, statement, parameters, context, executemany):
+        seen.append(statement)
+
+    engine = client.app.state.engine
+    event.listen(engine, "before_cursor_execute", record)
+    yield seen
+    event.remove(engine, "before_cursor_execute", record)
+
+
+@pytest.mark.parametrize("q, limit", [("raw", 1), ("raw", 50), ("b", 50)])
+def test_a_page_costs_one_portions_query_whatever_its_size(client, statements, q, limit):
+    assert search(client, q, limit=limit)
+    portion_queries = [s for s in statements if "food_portions" in s]
+    assert len(portion_queries) == 1
+    assert len(statements) == 3  # the trigram threshold, the ranked page, its portions
+    ranked = [s for s in statements if "FROM foods" in s]
+    assert len(ranked) == 1 and "JOIN" not in ranked[0].upper()
+
+
+def test_an_empty_page_skips_the_portions_query(client, statements):
+    assert search(client, "zzzzqqq") == []
+    assert not [s for s in statements if "food_portions" in s]
+
+
+ORIGIN = {"Origin": "http://localhost:8081"}
+
+
+@pytest.mark.parametrize(
+    "path, status",
+    [
+        ("/api/v1/foods/search?q=banana", 200),
+        (f"/api/v1/foods/{BANANAS_RAW}", 200),
+        ("/api/v1/foods/999999", 404),
+        ("/api/v1/foods/search?q=", 422),  # the app must be able to read an error too
+    ],
+)
+def test_any_origin_may_read_a_get(client, path, status):
+    r = client.get(path, headers=ORIGIN)
+    assert r.status_code == status
+    assert r.headers["access-control-allow-origin"] == "*"
+    assert "access-control-allow-credentials" not in r.headers
+
+
+def test_a_page_of_results_is_gzipped_when_the_client_accepts_it(client):
+    url, params = "/api/v1/foods/search", {"q": "raw", "limit": 50}
+    plain = client.get(url, params=params, headers={"Accept-Encoding": "identity"})
+    assert "content-encoding" not in plain.headers
+    zipped = client.get(url, params=params, headers={"Accept-Encoding": "gzip"})
+    assert zipped.headers["content-encoding"] == "gzip"
+    assert zipped.json() == plain.json()  # the client library decompresses: same body
+    assert int(zipped.headers["content-length"]) < len(plain.content)
+    # A small body is not worth compressing.
+    assert "content-encoding" not in client.get("/api/v1/foods/999999", headers={"Accept-Encoding": "gzip"}).headers
+
+
+def test_a_request_without_an_origin_gets_no_cors_headers(client):
+    r = client.get("/api/v1/foods/search?q=banana")
+    assert r.status_code == 200
+    assert "access-control-allow-origin" not in r.headers
+
+
+def test_preflight_allows_get_from_any_origin(client):
+    r = client.options("/api/v1/foods/search", headers={**ORIGIN, "Access-Control-Request-Method": "GET"})
+    assert r.status_code == 200
+    assert r.headers["access-control-allow-origin"] == "*"
+    assert "GET" in r.headers["access-control-allow-methods"]
+    assert "access-control-allow-credentials" not in r.headers
+
+
+def test_preflight_refuses_a_write(client):
+    r = client.options("/api/v1/foods/search", headers={**ORIGIN, "Access-Control-Request-Method": "POST"})
+    assert r.status_code == 400
+    assert "POST" not in r.headers.get("access-control-allow-methods", "")
+
+
+def test_a_503_is_readable_cross_origin(client, monkeypatch):
+    def timed_out():
+        raise sqlalchemy.exc.TimeoutError("QueuePool limit of size 10 overflow 0 reached, connection timed out")
+
+    monkeypatch.setattr(client.app.state.engine.pool, "connect", timed_out)
+    r = client.get("/api/v1/foods/search?q=banana", headers=ORIGIN)
+    assert r.status_code == 503
+    assert r.headers["access-control-allow-origin"] == "*"
 
 
 @pytest.mark.parametrize("path", ["/api/v1/foods/search?q=banana", f"/api/v1/foods/{BANANAS_RAW}"])
