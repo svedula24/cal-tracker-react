@@ -1,7 +1,9 @@
 """Read models for the foods tables. The DDL (CHECKs, indexes) lives in the Alembic migration;
 tests/test_migrations.py checks that these columns match it."""
 
-from sqlalchemy import REAL, BigInteger, ForeignKey, Identity, Text
+from datetime import datetime
+
+from sqlalchemy import REAL, BigInteger, DateTime, ForeignKey, Identity, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -23,6 +25,8 @@ class Food(Base):
     fiber_per_100g: Mapped[float | None] = mapped_column(REAL)
     sugar_per_100g: Mapped[float | None] = mapped_column(REAL)
     sodium_mg_per_100g: Mapped[float | None] = mapped_column(REAL)
+    # Set by the loader when a later USDA release drops the food; NULL = current. Search skips retired foods.
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class FoodPortion(Base):

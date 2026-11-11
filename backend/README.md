@@ -2,15 +2,17 @@
 
 Postgres with USDA FoodData Central's generic foods and their serving portions,
 loaded by a small Python package and served by a FastAPI app (SQLAlchemy 2.0,
-schema owned by Alembic): food search and lookup by FDC id. The Expo app's Food
+schema owned by Alembic): food search and lookup by FDC id, and the tables for
+each user's data (food logs, goals, steps, saved foods). The Expo app's Food
 Database searches it when `EXPO_PUBLIC_API_URL` is set, and otherwise (or when
 the API cannot be reached) its bundled copy of the same foods
 (`src/data/usda-foods.json`).
 
 ## What's in the database
 
-Two tables, created by the Alembic migration
-(`migrations/versions/0001_foods_and_portions.py`).
+The USDA tables `foods` and `food_portions` (migration
+`migrations/versions/0001_foods_and_portions.py`), and the user-data tables
+(`0002_user_data.py`, described under "User data" below).
 
 `foods`: one row per USDA food, nutrients per 100 g.
 
@@ -26,6 +28,7 @@ Two tables, created by the Alembic migration
 | `fiber_per_100g` | 1079 (g); NULL when USDA does not report it |
 | `sugar_per_100g` | 2000 (g), else 1063; NULL when USDA reports neither |
 | `sodium_mg_per_100g` | 1093 (mg); NULL when USDA does not report it |
+| `retired_at` | NULL for a current food; set when a later load no longer contains the food (see "Reloading") |
 
 Only foods that report all four required nutrients (calories, protein, carbs,
 fat) are loaded; the loader skips the rest (51 of 13,649 in the current releases,
@@ -43,7 +46,7 @@ record, by dataset and fdc_id, before exiting. Details: `kalo/usda/nutrients.py`
 
 | Column | Source |
 | --- | --- |
-| `id` | generated (primary key); restarts at 1 on every load |
+| `id` | generated (primary key); changes on every load, so nothing may store it |
 | `fdc_id` | the food (foreign key to `foods`) |
 | `description` | the portion's label, cleaned |
 | `gram_weight` | USDA's gram weight, not rounded to the app's 1 decimal; a `REAL` (about 7 significant digits); always > 0 |
@@ -63,6 +66,26 @@ Releases: Foundation 2026-10-29, SR Legacy 2018-04 (final), FNDDS 2024-10-31
 Each download is verified against a SHA-256 pinned in `kalo/usda/datasets.py`,
 so bumping a release means updating its pin.
 
+### User data
+
+Six tables for what belongs to a user. Design and reasons: the Notion Architecture
+Decision Log, records 14 to 20. Deleting a user deletes everything of theirs; a
+food is never deleted.
+
+| Table | One row per | Notes |
+| --- | --- | --- |
+| `users` | person | Anonymous for now: `email`, `auth_provider` and `auth_subject` are NULL until sign-in exists |
+| `user_tokens` | device or integration | `token_hash` is the SHA-256 of a bearer token; the token itself is never stored. `revoked_at` turns one off |
+| `food_logs` | logged food | `fdc_id` NULL = a custom entry. `quantity` + `unit` (`g` or `serving`). `unit_*`: the entry's own values per 100 g (or per serving), where a typed-over value lives. `food_*_per_100g`: the database food's values when it was logged. `calories`, `protein_g`, … are generated (`unit_* × quantity / 100`), so a day's totals are a plain `SUM` |
+| `user_goals` | change of targets | Key `(user_id, effective_date)`: the goal for a day is the latest row on or before it |
+| `daily_steps` | user and day | Rollover is calculated, not stored |
+| `saved_foods` | bookmark | Key `(user_id, fdc_id)` |
+
+The last four are synced with the app and carry `updated_at` (the client's edit
+time; the newer edit wins), `deleted_at` (a deletion that syncs) and `rev`, set
+by a trigger from one sequence on every write: a client asks for everything of
+its user with `rev` above the last one it saw.
+
 ## Run it
 
 Needs Docker (colima on this Mac) and [uv](https://docs.astral.sh/uv/).
@@ -76,15 +99,28 @@ uv run alembic upgrade head  # create or update the schema
 uv run python -m kalo.usda.load
 ```
 
-`alembic upgrade head` creates both tables and the search indexes (`pg_trgm`, a
+`alembic upgrade head` creates every table and the search indexes (`pg_trgm`, a
 full-text and a trigram GIN index on `foods.description`). The loader does not
 create anything: it refuses to load a database that is not at the migration head
 and tells you to run the upgrade.
 
 The loader downloads the three USDA zips to `data/usda/` (cached, gitignored)
-and replaces the rows of both tables in one transaction: a few seconds, plus the
+and brings both USDA tables up to date in one transaction: a few seconds, plus the
 download the first time. It parses each JSON file in memory (peak about 1.5 GB
 for the FNDDS file); it is a one-off tool, not a service.
+
+### Reloading
+
+Logs and saved foods reference `foods`, so a load never empties the table:
+
+- a food in the load is inserted, or updated if a value changed;
+- a food that is no longer in the load is kept and marked `retired_at`, with its
+  portions. Search skips retired foods; lookup by id still returns them. A food
+  that comes back is un-retired;
+- the portions of the loaded foods are replaced, so their ids change.
+
+Loading the same releases again rewrites no food row (about half a second after
+the files are parsed) and takes no table lock, so the API keeps serving.
 
 Check:
 
@@ -119,10 +155,10 @@ uv run python -m kalo.usda.load
 
 ## API
 
-FastAPI over the two tables (`app/`), through SQLAlchemy 2.0: sync sessions on
-the psycopg 3 driver. Migrate and load the database first (above); the server
-reads it, it never writes. It refuses to start against a database that is not at
-the migration head, with the same message as the loader.
+FastAPI over these tables (`app/`), through SQLAlchemy 2.0: sync sessions on
+the psycopg 3 driver. Migrate and load the database first (above). It refuses to
+start against a database that is not at the migration head, with the same message
+as the loader.
 
 ```sh
 uv run uvicorn app.main:app --reload   # http://localhost:8000, docs at /docs
@@ -141,13 +177,39 @@ interface and the Mac's LAN address in the variable:
 uv run uvicorn app.main:app --host 0.0.0.0   # then EXPO_PUBLIC_API_URL=http://<this Mac's LAN IP>:8000
 ```
 
-That exposes the API to the whole network: it is read-only public data with no
-auth, so use it on a network you trust.
+That exposes the API to the whole network. The food data is public, but anyone
+on the network can also register a device (below), so use it on a network you
+trust.
 
-CORS: any origin may `GET` (`Access-Control-Allow-Origin: *`), because the web
-build and the Expo web dev server call the API from another origin and the data
-is public. Credentials are not allowed, and a preflight for any other method is
-refused.
+CORS: any origin may call the API (`Access-Control-Allow-Origin: *`) with `GET`,
+`POST`, `PATCH` or `DELETE` and the `Authorization` and `Content-Type` headers,
+because the web build and the Expo web dev server call it from another origin.
+Cookies are never used (credentials are off): a user is identified only by the
+bearer token the client sends itself.
+
+### Identity
+
+Users are anonymous for now: an install registers once and keeps the token.
+
+```sh
+curl -X POST localhost:8000/api/v1/devices -H 'Content-Type: application/json' \
+  -d '{"platform": "ios", "app_version": "1.0.0"}'
+# 201 {"user_id": "3f0e6c0a-…", "token": "kalo_…"}      (platform: ios | android | web; both fields optional)
+
+curl localhost:8000/api/v1/me -H 'Authorization: Bearer kalo_…'
+# 200 {"user_id": "3f0e6c0a-…", "timezone": "UTC", "created_at": "…"}
+```
+
+- The token (`kalo_` + 43 characters) is shown once, in that 201. The server keeps
+  only its SHA-256, so a lost token cannot be recovered: register again.
+- Every other user endpoint takes `Authorization: Bearer <token>` and resolves the
+  user from it. No endpoint accepts a user id.
+- A missing, malformed, unknown or revoked token is 401 with `WWW-Authenticate: Bearer`.
+- To revoke a token, set `user_tokens.revoked_at`. There is no endpoint for it yet,
+  and registration has no rate limit: both are needed before the API is public.
+
+In the code, services write into the request's session and never commit; a route
+that writes ends with one `session.commit()` (`app/api/deps.py`).
 
 Responses of 1 kB or more are gzipped when the client accepts it: a page of 50
 foods with their portions is 18 to 36 kB of JSON and about 3 kB compressed.
@@ -164,16 +226,16 @@ curl 'localhost:8000/api/v1/foods/search?q=banana&limit=2&offset=0'
    "calories_per_100g": 97.0, "protein_per_100g": 0.74, "carbs_per_100g": 22.7, "fat_per_100g": 0.28,
    "fiber_per_100g": 1.7, "sugar_per_100g": 15.8, "sodium_mg_per_100g": 0.0,
    "portions": [
-     {"id": 26368, "description": "1 slice", "gram_weight": 6.0},
-     {"id": 26371, "description": "1 linear inch", "gram_weight": 15.0},
-     {"id": 26367, "description": "1 banana", "gram_weight": 126.0},
-     {"id": 26369, "description": "1 cup", "gram_weight": 150.0},
-     {"id": 26370, "description": "1 cup, mashed", "gram_weight": 225.0}
+     {"id": 89118, "description": "1 slice", "gram_weight": 6.0},
+     {"id": 89121, "description": "1 linear inch", "gram_weight": 15.0},
+     {"id": 89117, "description": "1 banana", "gram_weight": 126.0},
+     {"id": 89119, "description": "1 cup", "gram_weight": 150.0},
+     {"id": 89120, "description": "1 cup, mashed", "gram_weight": 225.0}
    ]},
   {"fdc_id": 2705660, "description": "Banana split", "data_type": "Survey (FNDDS)", "brand_name": null,
    "calories_per_100g": 199.0, "protein_per_100g": 2.42, "carbs_per_100g": 32.6, "fat_per_100g": 6.88,
    "fiber_per_100g": 1.0, "sugar_per_100g": 24.2, "sodium_mg_per_100g": 97.0,
-   "portions": [{"id": 15231, "description": "1 banana split", "gram_weight": 490.0}]}
+   "portions": [{"id": 77981, "description": "1 banana split", "gram_weight": 490.0}]}
 ], "limit": 2, "offset": 0}
 ```
 
@@ -195,11 +257,11 @@ curl localhost:8000/api/v1/foods/2709224
  "nutrients_per_100g": {"calories": 97.0, "protein_g": 0.74, "carbs_g": 22.7, "fat_g": 0.28,
                         "fiber_g": 1.7, "sugar_g": 15.8, "sodium_mg": 0.0},
  "portions": [
-   {"id": 26368, "description": "1 slice", "gram_weight": 6.0},
-   {"id": 26371, "description": "1 linear inch", "gram_weight": 15.0},
-   {"id": 26367, "description": "1 banana", "gram_weight": 126.0},
-   {"id": 26369, "description": "1 cup", "gram_weight": 150.0},
-   {"id": 26370, "description": "1 cup, mashed", "gram_weight": 225.0}
+   {"id": 89118, "description": "1 slice", "gram_weight": 6.0},
+   {"id": 89121, "description": "1 linear inch", "gram_weight": 15.0},
+   {"id": 89117, "description": "1 banana", "gram_weight": 126.0},
+   {"id": 89119, "description": "1 cup", "gram_weight": 150.0},
+   {"id": 89120, "description": "1 cup, mashed", "gram_weight": 225.0}
  ]}
 ```
 
@@ -244,15 +306,20 @@ uv run python scripts/bench_search.py --explain
 ```
 app/
   main.py              create_app(url=None), engine lifespan, CORS, 503 handler
-  api/v1/foods.py      the two routes and their validation
-  schemas/foods.py     Pydantic response models
-  models/foods.py      SQLAlchemy Food and FoodPortion (read models)
+  api/deps.py          DbSession, CurrentUser (the user of the request's bearer token)
+  api/v1/foods.py      food search and lookup, and their validation
+  api/v1/devices.py    POST /devices (register), GET /me
+  schemas/             Pydantic request and response models (foods, users)
+  models/foods.py      SQLAlchemy Food and FoodPortion
+  models/user_data.py  User, UserToken, FoodLog, UserGoal, DailySteps, SavedFood
   services/foods.py    ranked search SQL, portions_for (a page's portions), get_food, get_portions
+  services/users.py    tokens (made, hashed, looked up), register_device
   db/session.py        engine, session dependency
 alembic.ini
 migrations/
   env.py
-  versions/            0001_foods_and_portions.py: tables, checks, indexes
+  versions/            0001_foods_and_portions.py: the USDA tables, checks, indexes
+                       0002_user_data.py: users, tokens, logs, goals, steps, saved foods
 kalo/
   db.py                database_url(): the one source of the connection URL
   usda/                the loader: datasets, nutrients, portions, load

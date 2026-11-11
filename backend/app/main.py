@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.orm import sessionmaker
 
+from app.api.v1.devices import router as devices_router
 from app.api.v1.foods import router as foods_router
 from app.db.session import make_engine
 from kalo.db import database_url, require_head
@@ -41,9 +42,18 @@ def create_app(url: str | None = None) -> FastAPI:
 
     app = FastAPI(title="Kalo", lifespan=lifespan)
     app.include_router(foods_router)
-    # Read-only public data, no cookies or auth: any origin may read it (the web build and the Expo
-    # web dev server call it cross-origin). Credentials stay off, which is what makes "*" safe.
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])
+    app.include_router(devices_router)
+    # Any origin may call the API (the web build and the Expo web dev server call it cross-origin).
+    # What makes "*" safe is that credentials stay off: there are no cookies, and a user is known only
+    # by the bearer token the app itself puts in the Authorization header, which another site's page
+    # does not have. Authorization and a JSON Content-Type are not CORS-safelisted, so they are allowed
+    # by name; any other method or header fails the preflight.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["GET", "POST", "PATCH", "DELETE"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
     # A page of 50 foods with their portions is 18 to 36 kB of JSON and gzips to about 3 kB (measured
     # on banana, rice, chicken breast): less for a phone to download. Small bodies are left alone.
     app.add_middleware(GZipMiddleware, minimum_size=1000)
