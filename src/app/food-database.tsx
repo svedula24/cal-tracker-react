@@ -110,7 +110,7 @@ export default function FoodDatabase() {
           )
         }
         ListFooterComponent={
-          results.length ? <Text className="mt-4 text-center text-[11px] text-faint">Data: {index?.source}</Text> : null
+          results.length ? <Text className="mt-4 text-center text-[11px] text-faint">Data: {index?.source}</Text> : undefined
         }
       />
     </PushedScreen>

@@ -1,6 +1,6 @@
 import { Plus } from 'lucide-react-native';
 import { useRef, useState } from 'react';
-import { ScrollView, Text, useWindowDimensions, View } from 'react-native';
+import { ScrollView, type ScrollViewInstance, Text, useWindowDimensions, View } from 'react-native';
 import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -31,7 +31,7 @@ export default function Home() {
   const today = useDay(todayKey());
   const { remove } = useEntries();
   const { width } = useWindowDimensions();
-  const pager = useRef<ScrollView>(null);
+  const pager = useRef<ScrollViewInstance>(null);
   const [page, setPage] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const insets = useSafeAreaInsets();

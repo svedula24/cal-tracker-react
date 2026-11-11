@@ -1,6 +1,6 @@
 import { cssInterop } from 'nativewind';
 import { forwardRef, useCallback } from 'react';
-import { Pressable, type PressableProps, type StyleProp, type View, type ViewStyle } from 'react-native';
+import { Pressable, type PressableProps, type StyleProp, type ViewInstance, type ViewStyle } from 'react-native';
 import Animated, { type AnimatedStyle, ReduceMotion, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
@@ -13,7 +13,7 @@ type BaseProps = PressProps & { animatedStyle: AnimatedStyle<ViewStyle> };
 // NativeWind resolves `className` into this component's `style`. The animated
 // style is kept in its own prop and composed here, because on native NativeWind
 // drops every class when it has to merge a Reanimated style object itself.
-const Base = forwardRef<View, BaseProps>(function PressBase({ animatedStyle, style, ...props }, ref) {
+const Base = forwardRef<ViewInstance, BaseProps>(function PressBase({ animatedStyle, style, ...props }, ref) {
   return <AnimatedPressable ref={ref} {...props} style={[style, animatedStyle]} />;
 });
 const StyledBase = cssInterop(Base, { className: 'style' });
