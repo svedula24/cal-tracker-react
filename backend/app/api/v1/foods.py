@@ -24,11 +24,12 @@ def search(
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
     offset: Annotated[int, Query(ge=0, le=1000)] = 0,
 ) -> FoodSearchResponse:
-    """Foods matching q, best first: exact, starts with q, every word, then misspellings."""
+    """Foods matching q, best first: exact, starts with q, every word, then misspellings. Each with its portions."""
     if not food_service.normalize(q):
         raise HTTPException(422, "q must contain text")
-    rows = food_service.search(session, q, limit, offset)
-    return FoodSearchResponse(foods=[FoodSearchItem.model_validate(row) for row in rows], limit=limit, offset=offset)
+    rows, portions = food_service.search_page(session, q, limit, offset)
+    foods = [FoodSearchItem.model_validate({**row, "portions": portions[row["fdc_id"]]}) for row in rows]
+    return FoodSearchResponse(foods=foods, limit=limit, offset=offset)
 
 
 @router.get("/{fdc_id}")

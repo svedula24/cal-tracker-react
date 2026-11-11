@@ -4,12 +4,15 @@ One search query, ranked in tiers: the exact description, then descriptions that
 query, then full-text matches (every word, the last as a prefix), then misspellings (trigram word
 similarity). The WHERE clause uses the exact expressions of the indexes in the baseline migration.
 The order is total (it ends in fdc_id), so limit/offset pages are stable.
+
+A page's portions come from one more query, by the page's ids (portions_for): joining them into the
+ranked query would multiply its rows, so LIMIT would count portions instead of foods.
 """
 
 from __future__ import annotations
 
 import re
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from typing import Any
 
 from sqlalchemy import RowMapping, TextClause, select, text
@@ -92,6 +95,29 @@ def search(session: Session, q: str, limit: int, offset: int = 0) -> Sequence[Ro
     # Both statements run in the session's one transaction, which is what makes the threshold apply.
     session.execute(SET_THRESHOLD)
     return session.execute(sql_for(q), params(q, limit, offset)).mappings().all()
+
+
+def portions_for(session: Session, fdc_ids: Iterable[int]) -> dict[int, list[FoodPortion]]:
+    """Each food's portions, smallest first, in one query. Every id asked for is a key; a food with none has []."""
+    by_food: dict[int, list[FoodPortion]] = {fdc_id: [] for fdc_id in fdc_ids}
+    if not by_food:
+        return by_food
+    stmt = (
+        select(FoodPortion)
+        .where(FoodPortion.fdc_id.in_(by_food))
+        .order_by(FoodPortion.fdc_id, FoodPortion.gram_weight, FoodPortion.id)
+    )
+    for portion in session.scalars(stmt):
+        by_food[portion.fdc_id].append(portion)
+    return by_food
+
+
+def search_page(
+    session: Session, q: str, limit: int, offset: int = 0
+) -> tuple[Sequence[RowMapping], dict[int, list[FoodPortion]]]:
+    """What the search endpoint reads: the ranked page (search) and its foods' portions (portions_for)."""
+    rows = search(session, q, limit, offset)
+    return rows, portions_for(session, [row["fdc_id"] for row in rows])
 
 
 def get_food(session: Session, fdc_id: int) -> Food | None:

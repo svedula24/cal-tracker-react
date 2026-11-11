@@ -2,8 +2,9 @@
 
 Postgres with USDA FoodData Central's generic foods and their serving portions,
 loaded by a small Python package and served by a FastAPI app (SQLAlchemy 2.0,
-schema owned by Alembic): food search and lookup by FDC id. The Expo app is not
-wired to it yet; it still searches its bundled copy of the same foods
+schema owned by Alembic): food search and lookup by FDC id. The Expo app's Food
+Database searches it when `EXPO_PUBLIC_API_URL` is set, and otherwise (or when
+the API cannot be reached) its bundled copy of the same foods
 (`src/data/usda-foods.json`).
 
 ## What's in the database
@@ -129,10 +130,29 @@ uv run uvicorn app.main:app --reload   # http://localhost:8000, docs at /docs
 
 `DATABASE_URL` overrides the database, as for the loader, and stays a plain
 `postgresql://…` URL (the app selects the driver itself);
-`app.main.create_app(url)` builds an app against any other. The Expo app is not
-wired to the API yet: it still searches `src/data/usda-foods.json`.
+`app.main.create_app(url)` builds an app against any other.
 
-Search, best first, one page at a time:
+The Expo app searches this API when it is built or started with
+`EXPO_PUBLIC_API_URL` (for example `http://localhost:8000`). By default uvicorn
+listens on localhost only; a phone on the same network needs the server on every
+interface and the Mac's LAN address in the variable:
+
+```sh
+uv run uvicorn app.main:app --host 0.0.0.0   # then EXPO_PUBLIC_API_URL=http://<this Mac's LAN IP>:8000
+```
+
+That exposes the API to the whole network: it is read-only public data with no
+auth, so use it on a network you trust.
+
+CORS: any origin may `GET` (`Access-Control-Allow-Origin: *`), because the web
+build and the Expo web dev server call the API from another origin and the data
+is public. Credentials are not allowed, and a preflight for any other method is
+refused.
+
+Responses of 1 kB or more are gzipped when the client accepts it: a page of 50
+foods with their portions is 18 to 36 kB of JSON and about 3 kB compressed.
+
+Search, best first, one page at a time, each food with its portions:
 
 ```sh
 curl 'localhost:8000/api/v1/foods/search?q=banana&limit=2&offset=0'
@@ -142,16 +162,27 @@ curl 'localhost:8000/api/v1/foods/search?q=banana&limit=2&offset=0'
 {"foods": [
   {"fdc_id": 2709224, "description": "Banana, raw", "data_type": "Survey (FNDDS)", "brand_name": null,
    "calories_per_100g": 97.0, "protein_per_100g": 0.74, "carbs_per_100g": 22.7, "fat_per_100g": 0.28,
-   "fiber_per_100g": 1.7, "sugar_per_100g": 15.8, "sodium_mg_per_100g": 0.0},
+   "fiber_per_100g": 1.7, "sugar_per_100g": 15.8, "sodium_mg_per_100g": 0.0,
+   "portions": [
+     {"id": 26368, "description": "1 slice", "gram_weight": 6.0},
+     {"id": 26371, "description": "1 linear inch", "gram_weight": 15.0},
+     {"id": 26367, "description": "1 banana", "gram_weight": 126.0},
+     {"id": 26369, "description": "1 cup", "gram_weight": 150.0},
+     {"id": 26370, "description": "1 cup, mashed", "gram_weight": 225.0}
+   ]},
   {"fdc_id": 2705660, "description": "Banana split", "data_type": "Survey (FNDDS)", "brand_name": null,
    "calories_per_100g": 199.0, "protein_per_100g": 2.42, "carbs_per_100g": 32.6, "fat_per_100g": 6.88,
-   "fiber_per_100g": 1.0, "sugar_per_100g": 24.2, "sodium_mg_per_100g": 97.0}
+   "fiber_per_100g": 1.0, "sugar_per_100g": 24.2, "sodium_mg_per_100g": 97.0,
+   "portions": [{"id": 15231, "description": "1 banana split", "gram_weight": 490.0}]}
 ], "limit": 2, "offset": 0}
 ```
 
 `limit` and `offset` echo the request. The order is total (ties end on `fdc_id`),
 so pages do not overlap: `offset=2` continues where this page ends. A page shorter
-than `limit` is the last one.
+than `limit` is the last one. A search result carries everything the food lookup
+below does (the same portions, in the same order), so a client needs no second
+request per food. The portions of a page come from one extra query for the page's
+ids, not a join, so `limit` counts foods.
 
 One food, with its portions:
 
@@ -176,8 +207,8 @@ Calories, protein, carbs and fat are always numbers, never null (the loader
 skips foods missing any of them). Fiber, sugar and sodium are null when USDA does
 not report them, in both endpoints: null means unknown, not 0. `brand_name` is
 null for every generic food. `portions` is ordered by gram weight (then `id`) and
-is `[]` for a food with none; there is no default portion, choosing one is the
-client's job. An unknown id is 404 `{"detail": "food not found"}`.
+is `[]` for a food with none, in both endpoints; there is no default portion,
+choosing one is the client's job (the app takes the one closest to 100 g). An unknown id is 404 `{"detail": "food not found"}`.
 
 Ranking (`app/services/foods.py`), case-insensitive, whitespace collapsed:
 
@@ -197,12 +228,14 @@ default 20; `offset` is 0 to 1000, default 0. Anything else is 422.
 The connection pool holds 10 connections. A request that waits more than 5
 seconds for one gets 503 with `Retry-After: 1`.
 
-Benchmark the search SQL (no HTTP) against the loaded database: p50/p95 per query
-for a fixed set of queries, against a target of p95 < 100 ms. `--explain` prints
-each query's plan, to check it uses the GIN indexes.
+Benchmark what the search endpoint reads (the ranked query and the portions
+query; SQL only, no HTTP) against the loaded database: p50/p95 per query for a
+fixed set of queries, against a target of p95 < 100 ms. `--explain` prints each
+ranked query's plan, to check it uses the GIN indexes.
 
 ```sh
 uv run python scripts/bench_search.py            # --n 200 for more runs per query
+uv run python scripts/bench_search.py --limit 50 # the page size the app asks for (default 20)
 uv run python scripts/bench_search.py --explain
 ```
 
@@ -210,11 +243,11 @@ uv run python scripts/bench_search.py --explain
 
 ```
 app/
-  main.py              create_app(url=None), engine lifespan, 503 handler
+  main.py              create_app(url=None), engine lifespan, CORS, 503 handler
   api/v1/foods.py      the two routes and their validation
   schemas/foods.py     Pydantic response models
   models/foods.py      SQLAlchemy Food and FoodPortion (read models)
-  services/foods.py    ranked search SQL, get_food, get_portions
+  services/foods.py    ranked search SQL, portions_for (a page's portions), get_food, get_portions
   db/session.py        engine, session dependency
 alembic.ini
 migrations/

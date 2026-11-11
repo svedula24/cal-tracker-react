@@ -9,6 +9,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.orm import sessionmaker
@@ -39,6 +41,12 @@ def create_app(url: str | None = None) -> FastAPI:
 
     app = FastAPI(title="Kalo", lifespan=lifespan)
     app.include_router(foods_router)
+    # Read-only public data, no cookies or auth: any origin may read it (the web build and the Expo
+    # web dev server call it cross-origin). Credentials stay off, which is what makes "*" safe.
+    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])
+    # A page of 50 foods with their portions is 18 to 36 kB of JSON and gzips to about 3 kB (measured
+    # on banana, rice, chicken breast): less for a phone to download. Small bodies are left alone.
+    app.add_middleware(GZipMiddleware, minimum_size=1000)
 
     # A request waits pool_timeout seconds for a free connection, then gets a 503 rather than a 500.
     @app.exception_handler(PoolTimeout)
