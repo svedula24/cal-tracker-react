@@ -289,6 +289,11 @@ export const flows = [
       await page.getByLabel('Grams').fill('1000');
       await expectValue(page, 'Protein', '7.4');
       await page.getByLabel('Grams').fill('100');
+      // A value that rounds to the same display is still an edit: 0.72 also shows "0.7".
+      await page.getByLabel('Protein', { exact: true }).fill('0.72');
+      await page.getByLabel('Grams').fill('1000');
+      await expectValue(page, 'Protein', '7.2');
+      await page.getByLabel('Grams').fill('100');
       await page.getByLabel('Protein', { exact: true }).fill('5');
       await page.getByLabel('Calories', { exact: true }).fill('150');
       await page.getByLabel('Grams').fill('200');

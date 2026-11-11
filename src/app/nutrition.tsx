@@ -336,22 +336,31 @@ function NutrientCard({
  */
 function ValueField({ label, value, onEdit, big = false }: { label: string; value: number; onEdit: (shown: number) => void; big?: boolean }) {
   const [draft, setDraft] = useState<string | null>(null);
+  // What the field showed, and the exact value behind it, when it took focus.
+  const atFocus = useRef({ text: '', value: 0 });
   const shown = draft ?? fmt(value);
   const invalid = draft !== null && parseValue(draft) === null;
   // The small cards centre "29g": the field is as wide as its text, so the unit sits against it.
-  // A native field sizes to its text (at any system font size); a web <input> does not, so it gets an estimate.
+  // A native field sizes to its text (at any system font size); a web <input> does not, so it gets an
+  // estimate for the 20 px bold digits used here (12.5 px a digit, 6 px a separator).
   const estimate = 4 + [...shown].reduce((w, ch) => w + (ch === '.' || ch === ',' ? 6 : 12.5), 0);
   const width = big || Platform.OS !== 'web' ? undefined : estimate;
   return (
     <TextInput
       accessibilityLabel={label}
       value={shown}
-      onFocus={() => setDraft(fmt(value))}
+      onFocus={() => {
+        atFocus.current = { text: fmt(value), value };
+        setDraft(atFocus.current.text);
+      }}
       onChangeText={(t) => {
         setDraft(t);
         const n = parseValue(t);
-        // Retyping what the card already shows ("0.7" for 0.74) is not an edit: the exact value stays.
-        if (n !== null && fmt(n) !== fmt(value)) onEdit(n);
+        if (n === null) return;
+        // Typing back exactly what the card showed at focus ("0.7" for 0.74) is not an edit: the
+        // exact value is kept, or restored if something else was typed in between.
+        if (t.trim() !== atFocus.current.text) onEdit(n);
+        else if (value !== atFocus.current.value) onEdit(atFocus.current.value);
       }}
       onBlur={() => setDraft(null)}
       keyboardType="decimal-pad"
