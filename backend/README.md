@@ -45,7 +45,7 @@ record, by dataset and fdc_id, before exiting. Details: `kalo/usda/nutrients.py`
 | `id` | generated (primary key); restarts at 1 on every load |
 | `fdc_id` | the food (foreign key to `foods`) |
 | `description` | the portion's label, cleaned |
-| `gram_weight` | USDA's gram weight, unrounded; always > 0 |
+| `gram_weight` | USDA's gram weight, not rounded to the app's 1 decimal; a `REAL` (about 7 significant digits); always > 0 |
 
 Every usable USDA portion of a loaded food is stored. Labels are built, cleaned
 and de-duplicated with the same rules as the app's mapper (`scripts/usda/map.mjs`):
@@ -98,7 +98,8 @@ docker exec kalo-db psql -U kalo -d kalo -c \
   "SELECT description, gram_weight FROM food_portions WHERE fdc_id = 2709224 ORDER BY gram_weight, id"
 ```
 
-`DATABASE_URL` overrides the connection for Alembic, the loader and the API.
+`DATABASE_URL` overrides the connection for Alembic, the loader and the API. It must
+be a URL (`postgresql://user:password@host:port/db`), not a libpq `key=value` string.
 Nothing reads `.env` on its own: copy `.env.example` to `.env` and run
 `uv run --env-file .env alembic upgrade head` (likewise for the other commands),
 or set the variable inline.
