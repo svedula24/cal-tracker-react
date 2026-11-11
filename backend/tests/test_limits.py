@@ -33,3 +33,28 @@ def test_keys_whose_events_all_aged_out_are_forgotten():
     now[0] = 61.0
     window.retry_after("d")
     assert set(window._events) == {"d"}
+
+
+def test_concurrent_calls_never_exceed_the_limit_or_fail():
+    import threading
+
+    window = SlidingWindow(limit=50, per_seconds=3600)
+    allowed, errors = [], []
+
+    def hammer(n):
+        try:
+            for i in range(200):
+                # Some shared keys (the limit must hold exactly) and many one-off keys (the table changes size).
+                allowed.append((window.retry_after("shared") is None, window.retry_after(f"{n}-{i}") is None))
+        except Exception as e:  # noqa: BLE001 - any failure here is the bug
+            errors.append(e)
+
+    threads = [threading.Thread(target=hammer, args=(n,)) for n in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == []
+    assert sum(shared for shared, _ in allowed) == 50
+    assert all(own for _, own in allowed)
+

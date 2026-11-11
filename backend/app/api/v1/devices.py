@@ -20,6 +20,9 @@ def register_device(
     """A new user and a bearer token for it. The token is shown once, here; the server stores only its hash.
 
     Needs no token, so it is limited per client address (app.state.registrations): 429 when over.
+    The address is the connection's peer. Behind a reverse proxy that is the proxy, and every client
+    would share one allowance: run uvicorn with --proxy-headers and --forwarded-allow-ips set to the
+    proxy, so the peer is the forwarded client address (see the README).
     """
     address = request.client.host if request.client else "unknown"
     wait = request.app.state.registrations.retry_after(address)

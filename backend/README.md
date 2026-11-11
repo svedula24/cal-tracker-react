@@ -206,8 +206,13 @@ curl localhost:8000/api/v1/me -H 'Authorization: Bearer kalo_…'
   user from it. No endpoint accepts a user id.
 - A missing, malformed, unknown or revoked token is 401 with `WWW-Authenticate: Bearer`.
 - Registration needs no token, so it is limited to 20 an hour per client address
-  (429 with `Retry-After` above that). The count is kept in the server process:
-  with several workers or instances, limit at the proxy as well.
+  (429 with `Retry-After` above that). Two things to set when the API is deployed:
+  - The address is the connection's peer. Behind a reverse proxy that is the
+    proxy itself, so all clients would share the 20. Start uvicorn with
+    `--proxy-headers --forwarded-allow-ips <the proxy's address>` so it uses the
+    forwarded client address.
+  - The count is kept in the server process. With several workers or instances,
+    limit at the proxy as well.
 - To revoke a token, set `user_tokens.revoked_at`. There is no endpoint for it yet.
 
 In the code, services write into the request's session and never commit; a route
