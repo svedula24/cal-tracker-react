@@ -6,7 +6,8 @@ import type { Food } from '@/data/foods';
 // Relative with the .ts extension so Node's test runner can import it as well.
 import { NUTRIENT_KEYS } from './nutrition.ts';
 
-export type SavedFood = { id: string; food: Food };
+/** `savedAt` (ISO): when it was bookmarked. Absent on bookmarks from before sync and on the demo ones. */
+export type SavedFood = { id: string; food: Food; savedAt?: string };
 
 /**
  * A food that can be shown and logged: id and name, every per-100 g nutrient a
