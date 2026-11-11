@@ -279,6 +279,37 @@ try {
   const deleted = await pushed('the deleted banana to be pushed', 'food_logs', (r) => r.id === logged.id, from);
   check(keys(deleted) === 'deleted_at,id,updated_at' && iso(deleted.deleted_at) && iso(deleted.updated_at), `deleting the entry sends a tombstone: its id, updated_at and deleted_at`, `sent: ${show(deleted)}`);
 
+  // ── Sync: demo entries. Deleting one sends nothing; editing one makes it the user's, and it is sent ──
+  await settled();
+  from = api.requests.length;
+  await btn('Edit Honey').click(); // a demo entry: the server never had it
+  await nutrition();
+  await btn('More options').click();
+  await btn('Delete entry').click();
+  await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+  await wait(3500); // longer than the 2 s push delay: proving that nothing is sent needs a wait
+  check(rows('food_logs', from).length === 0 && (await stored('sync:outbox')) === '{}', 'deleting a demo entry sends nothing to the server', `sent: ${show(rows('food_logs', from))}`);
+
+  from = api.requests.length;
+  await btn('Edit Sandwich').click(); // another demo entry, hand-written: no database food
+  await nutrition();
+  await btn('Done').click();
+  await home('Sandwich');
+  const mine = await pushed('the edited demo entry to be pushed', 'food_logs', (r) => r.name === 'Sandwich', from);
+  check(
+    keys(mine) === LOG_KEYS && mine.fdc_id === null && mine.unit === 'serving' && mine.food_values === null && mine.deleted_at === null,
+    'a demo entry the user edits becomes theirs and is sent, as a custom entry in servings', `sent: ${show(mine)}`,
+  );
+  // Removed again, so the user's entries are as they were for the checks below.
+  from = api.requests.length;
+  await btn('Edit Sandwich').click();
+  await nutrition();
+  await btn('More options').click();
+  await btn('Delete entry').click();
+  await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+  const unmine = await pushed('its deletion to be pushed', 'food_logs', (r) => r.id === mine.id, from);
+  check(unmine.deleted_at !== null, 'once it is the user\'s, deleting it sends a tombstone');
+
   // ── Sync: a reload neither registers again nor uploads everything again ──
   await settled();
   from = api.requests.length;
