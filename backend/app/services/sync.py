@@ -10,6 +10,9 @@ wins) and written together (one UPDATE and one INSERT, each an executemany), ins
 Should the database still refuse a row (a race the lookups cannot see, e.g. another user inserting
 the same id), that savepoint is rolled back and the table's rows are applied again one at a time,
 each in its own SAVEPOINT, so only the refused row is lost and it is reported in `rejected`.
+Rows pushed under `daily_steps` (an app from before daily_activity; key `log_date`) are applied as
+daily_activity rows, before those, changing only steps (the stored day_type and workout_kcal are
+kept); a pull only ever returns `daily_activity`.
 
 Pull. `rev` comes from one sequence and this user's writes are serialised by the lock, so every row
 this request wrote has a higher `rev` than every row the user had before (`before`). A page is the
@@ -27,7 +30,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -37,11 +40,11 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
 from app.models.foods import Food
-from app.models.user_data import DailySteps, FoodLog, SavedFood, User, UserGoal
+from app.models.user_data import DailyActivity, FoodLog, SavedFood, User, UserGoal
 from app.schemas.logs import (
     MAX_SYNC_ROWS,
-    DailyStepsRow,
-    DailyStepsTombstone,
+    DailyActivityRow,
+    DailyActivityTombstone,
     FoodLogRow,
     FoodLogTombstone,
     GoalRow,
@@ -57,7 +60,11 @@ from app.schemas.logs import (
 )
 from app.services.logs import LogRejected, apply_food_log, food_log_row, utc, write_row
 
-GOAL_FIELDS = ("calories", "protein_g", "carbs_g", "fat_g", "fiber_g", "sugar_g", "sodium_mg", "steps", "goal")
+GOAL_FIELDS = (
+    *("calories", "protein_g", "carbs_g", "fat_g", "fiber_g", "sugar_g", "sodium_mg", "steps", "goal"),
+    *("source", "workout_kcal", "active_rest_kcal"),
+)
+ACTIVITY_FIELDS = ("steps", "day_type", "workout_kcal")
 
 
 def _sync_fields(row: Any) -> dict[str, Any]:
@@ -73,8 +80,9 @@ def goal_row(row: UserGoal) -> GoalRow:
     return GoalRow.model_construct(effective_date=row.effective_date, **fields, **_sync_fields(row))
 
 
-def daily_steps_row(row: DailySteps) -> DailyStepsRow:
-    return DailyStepsRow.model_construct(log_date=row.log_date, steps=row.steps, **_sync_fields(row))
+def daily_activity_row(row: DailyActivity) -> DailyActivityRow:
+    fields = {name: getattr(row, name) for name in ACTIVITY_FIELDS}
+    return DailyActivityRow.model_construct(activity_date=row.activity_date, **fields, **_sync_fields(row))
 
 
 @dataclass(frozen=True)
@@ -113,15 +121,70 @@ TABLES = (
         fields=lambda row: {name: getattr(row, name) for name in GOAL_FIELDS},
     ),
     Table(
-        "daily_steps",
-        DailySteps,
-        "log_date",
-        DailyStepsRow,
-        DailyStepsTombstone,
-        daily_steps_row,
-        fields=lambda row: {"steps": row.steps},
+        "daily_activity",
+        DailyActivity,
+        "activity_date",
+        DailyActivityRow,
+        DailyActivityTombstone,
+        daily_activity_row,
+        fields=lambda row: {name: getattr(row, name) for name in ACTIVITY_FIELDS},
     ),
 )
+
+
+TABLE_BY_NAME = {table.name: table for table in TABLES}
+
+# The legacy wire name of daily_activity (an app from before it), whose rows are keyed by log_date.
+LEGACY_DAILY_STEPS, LEGACY_KEY = "daily_steps", "log_date"
+# Such an app knows only steps: its row changes them and keeps the stored day_type and workout_kcal.
+LEGACY_ACTIVITY = replace(TABLE_BY_NAME["daily_activity"], fields=lambda row: {"steps": row.steps})
+
+
+def from_legacy(raws: Iterable[RawRow]) -> list[RawRow]:
+    """Rows pushed under `daily_steps` as daily_activity rows: log_date becomes activity_date. A row
+    that has no log_date is left as it is, so it is rejected as a row without its key."""
+    rows = []
+    for raw in raws:
+        row = dict(raw)
+        if LEGACY_KEY in row:
+            row["activity_date"] = row.pop(LEGACY_KEY)
+        rows.append(row)
+    return rows
+
+
+def as_legacy(rejected: Rejected) -> Rejected:
+    """A rejection of a row pushed under `daily_steps`, in that row's own names."""
+    reason = rejected.reason.replace("activity_date", LEGACY_KEY)
+    return Rejected(table=LEGACY_DAILY_STEPS, key=rejected.key, reason=reason)
+
+
+def stored_row(session: Session, user_id: uuid.UUID, table_name: str, key: Any) -> Any | None:
+    """This user's row of `goals` or `daily_activity` with that key, deleted or not; None when there is none."""
+    model = TABLE_BY_NAME[table_name].model
+    stmt = select(model).where(model.user_id == user_id, getattr(model, TABLE_BY_NAME[table_name].key) == key)
+    return session.execute(stmt).scalar_one_or_none()
+
+
+def _write(table: Table, user_id: uuid.UUID, row: Any, stored: Any | None, now: datetime) -> tuple[Any | None, bool]:
+    """`write_row` for one validated row of `table`: its key, and its fields unless it is a tombstone."""
+    fields = table.fields(row) if row.deleted_at is None else None
+    key_columns = {"user_id": user_id, table.key: getattr(row, table.key)}
+    return write_row(table.model, stored, key_columns, fields, row.updated_at, row.deleted_at, now)
+
+
+def upsert_row(
+    session: Session, user_id: uuid.UUID, table_name: str, row: Any, stored: Any | None, now: datetime
+) -> tuple[Any, bool]:
+    """One validated row of `goals` or `daily_activity`, applied as a push applies it (`write_row`: last
+    write wins), for the REST routes. `stored` is `stored_row` for its key. Returns (stored row, applied).
+    The caller has locked the user row (`lock_user`) and commits. Flushes, so `rev` is set."""
+    table = TABLE_BY_NAME[table_name]
+    assert not table.needs_food, "food_logs and saved_foods have their own rules"
+    result, applied = _write(table, user_id, row, stored, now)
+    if result is not None:
+        session.add(result)  # a new row; nothing to do for a stored one
+    session.flush()
+    return result, applied
 
 
 def _sent_key(raw: RawRow, table: Table) -> str:
@@ -184,13 +247,9 @@ def _apply_all(
             food = foods.get(row.fdc_id) if row.deleted_at is None and row.fdc_id is not None else None
             # The app sends 0 for a nutrient it does not know: see app/services/logs.py.
             return apply_food_log(user_id, row, stored, food, now, zero_means_unknown=True)
-        fields = None
-        if row.deleted_at is None:
-            if table.needs_food and row.fdc_id not in foods:
-                raise LogRejected("unknown_food")
-            fields = table.fields(row)
-        key_columns = {"user_id": user_id, table.key: key}
-        return write_row(table.model, stored, key_columns, fields, row.updated_at, row.deleted_at, now)
+        if row.deleted_at is None and table.needs_food and row.fdc_id not in foods:
+            raise LogRejected("unknown_food")
+        return _write(table, user_id, row, stored, now)
 
     def insert_rows(new: Iterable[Any]) -> None:
         # One INSERT for all of them (an executemany), not one round trip per row. The rows never
@@ -300,9 +359,13 @@ def sync(session: Session, user: User, request: SyncRequest) -> SyncResponse:
     rejected: list[Rejected] = []
     lost: list[tuple[Table, Any, Any]] = []
     wrote = False
-    for table in TABLES:
-        pushed = push_table(session, user.id, table, getattr(request.changes, table.name), now)
-        rejected.extend(pushed.rejected)
+    # Rows pushed under the legacy name go first, as daily_activity rows; a rejection names them as sent.
+    legacy = request.changes.daily_steps
+    pushes = [(LEGACY_ACTIVITY, from_legacy(legacy), True)] if legacy else []
+    pushes += [(table, getattr(request.changes, table.name), False) for table in TABLES]
+    for table, raws, is_legacy in pushes:
+        pushed = push_table(session, user.id, table, raws, now)
+        rejected.extend([as_legacy(r) for r in pushed.rejected] if is_legacy else pushed.rejected)
         lost.extend((table, key, row) for key, row in pushed.lost.items())
         wrote = wrote or pushed.wrote
 
@@ -314,8 +377,12 @@ def sync(session: Session, user: User, request: SyncRequest) -> SyncResponse:
         new_cursor = max(cursor, highest_rev(session, user.id) if wrote else before)
 
     changes = SyncChanges()
-    in_page = {(table.name, getattr(row, table.key)) for table, row in page}
-    winners = [(table, row) for table, key, row in lost if (table.name, key) not in in_page]
+    sent = {(table.name, getattr(row, table.key)) for table, row in page}
+    winners = []
+    for table, key, row in lost:  # a day pushed under both names can lose twice: sent once
+        if (table.name, key) not in sent:
+            sent.add((table.name, key))
+            winners.append((table, row))
     for table, row in [*page, *winners]:
         getattr(changes, table.name).append(table.out(row))
     return SyncResponse(cursor=new_cursor, has_more=has_more, changes=changes, rejected=rejected)

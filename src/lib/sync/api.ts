@@ -6,11 +6,11 @@
 // Relative with the .ts extension so Node's test runner can import it as well.
 import { ApiUnavailable } from '../foodsApi.ts';
 import { SyncUnauthorized } from './types.ts';
-import type { DailyStepsRow, FoodLogRow, GoalRow, NutrientValues, SavedFoodRow, SyncChanges, SyncRequest, SyncResponse, Table } from './types.ts';
+import type { DailyActivityRow, FoodLogRow, GoalRow, NutrientValues, SavedFoodRow, SyncChanges, SyncRequest, SyncResponse, Table } from './types.ts';
 
 type FetchOpts = { fetch?: typeof fetch; signal?: AbortSignal };
 
-const TABLES: readonly Table[] = ['food_logs', 'saved_foods', 'goals', 'daily_steps'];
+const TABLES: readonly Table[] = ['food_logs', 'saved_foods', 'goals', 'daily_activity'];
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
 const isNumber = (x: unknown): x is number => typeof x === 'number' && Number.isFinite(x);
@@ -60,16 +60,24 @@ const isGoal = (x: unknown): x is GoalRow =>
   isRow(
     x,
     (r) => isDate(r.effective_date),
-    (r) => GOAL_NUMBERS.every((k) => isNumber(r[k])) && (r.goal === 'lose' || r.goal === 'maintain' || r.goal === 'gain'),
+    (r) =>
+      GOAL_NUMBERS.every((k) => isNumber(r[k])) &&
+      (r.goal === 'lose' || r.goal === 'maintain' || r.goal === 'gain') &&
+      // Newer fields: checked when present, so a server that does not send them yet is still understood.
+      (r.source === undefined || r.source === 'computed' || r.source === 'manual') &&
+      (r.workout_kcal === undefined || isNumber(r.workout_kcal)) &&
+      (r.active_rest_kcal === undefined || isNumber(r.active_rest_kcal)),
   );
 
-const isDailySteps = (x: unknown): x is DailyStepsRow => isRow(x, (r) => isDate(r.log_date), (r) => isNumber(r.steps));
+const DAY_TYPES: readonly unknown[] = ['workout', 'active_rest', 'rest'];
+const isDailyActivity = (x: unknown): x is DailyActivityRow =>
+  isRow(x, (r) => isDate(r.activity_date), (r) => isNumber(r.steps) && (r.day_type == null || DAY_TYPES.includes(r.day_type)) && (r.workout_kcal == null || isNumber(r.workout_kcal)));
 
 const ROW_CHECKS: Record<Table, (x: unknown) => boolean> = {
   food_logs: isFoodLog,
   saved_foods: isSavedFood,
   goals: isGoal,
-  daily_steps: isDailySteps,
+  daily_activity: isDailyActivity,
 };
 
 const isChanges = (x: unknown): x is SyncChanges =>

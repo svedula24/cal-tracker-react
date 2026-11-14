@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import make_engine, sqlalchemy_url
 from app.models.foods import Base, Food, FoodPortion
-from app.models.user_data import DailySteps, FoodLog, SavedFood, User, UserGoal, UserToken
+from app.models.user_data import DailyActivity, FoodLog, SavedFood, User, UserGoal, UserToken
 from kalo.db import alembic_config
 
 pytestmark = pytest.mark.skipif(not URL, reason="DATABASE_URL not set")
@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(not URL, reason="DATABASE_URL not set")
 HEAD = ScriptDirectory.from_config(alembic_config()).get_current_head()
 
 FOODS_TABLES = {"foods", "food_portions", "alembic_version"}  # what revision 0001 creates
-SYNCED_TABLES = ("food_logs", "user_goals", "daily_steps", "saved_foods")
+SYNCED_TABLES = ("food_logs", "user_goals", "daily_activity", "saved_foods")
 TABLES = FOODS_TABLES | {"users", "user_tokens", *SYNCED_TABLES}
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
 FOOD_LOGS_INDEXES = {
@@ -208,7 +208,7 @@ def test_each_scratch_schema_gets_its_own_version_table(migrated_url):
             conn.execute(f"DROP SCHEMA {second} CASCADE")
 
 
-@pytest.mark.parametrize("model", [Food, FoodPortion, User, UserToken, FoodLog, UserGoal, DailySteps, SavedFood])
+@pytest.mark.parametrize("model", [Food, FoodPortion, User, UserToken, FoodLog, UserGoal, DailyActivity, SavedFood])
 def test_models_match_the_migrated_tables(migrated_url, model):
     schema = schema_of(migrated_url)
     engine = make_engine(migrated_url)
@@ -404,8 +404,18 @@ def test_user_data_columns(migrated_url):
         "steps": "integer",
         "goal": "text",
         **synced,
+        "source": "text DEFAULT 'manual'::text",
+        "workout_kcal": "double precision DEFAULT 0",
+        "active_rest_kcal": "double precision DEFAULT 0",
     }
-    assert by_table["daily_steps"] == {"user_id": "uuid", "log_date": "date", "steps": "integer", **synced}
+    assert by_table["daily_activity"] == {
+        "user_id": "uuid",
+        "activity_date": "date",
+        "steps": "integer",
+        **synced,
+        "day_type": "text NULL",
+        "workout_kcal": "double precision NULL",
+    }
     assert by_table["saved_foods"] == {
         "user_id": "uuid",
         "fdc_id": "bigint",
@@ -463,11 +473,15 @@ def test_user_data_constraints(migrated_url):
         "user_goals_user_id_fkey": user_fk,
         "user_goals_steps_check": "CHECK ((steps >= 0))",
         "user_goals_goal_check": "CHECK ((goal = ANY (ARRAY['lose'::text, 'maintain'::text, 'gain'::text])))",
+        "user_goals_source_check": "CHECK ((source = ANY (ARRAY['computed'::text, 'manual'::text])))",
     }
-    assert by_table["daily_steps"] == {
-        "daily_steps_pkey": "PRIMARY KEY (user_id, log_date)",
-        "daily_steps_user_id_fkey": user_fk,
-        "daily_steps_steps_check": "CHECK ((steps >= 0))",
+    assert by_table["daily_activity"] == {
+        "daily_activity_pkey": "PRIMARY KEY (user_id, activity_date)",
+        "daily_activity_user_id_fkey": user_fk,
+        "daily_activity_steps_check": "CHECK ((steps >= 0))",
+        "daily_activity_day_type_check": (
+            "CHECK ((day_type = ANY (ARRAY['workout'::text, 'active_rest'::text, 'rest'::text])))"
+        ),
     }
     assert by_table["saved_foods"] == {
         "saved_foods_pkey": "PRIMARY KEY (user_id, fdc_id)",
@@ -479,7 +493,8 @@ def test_user_data_constraints(migrated_url):
     assert never_negative - {name for name in never_negative if name.startswith("foods_")} == (
         {f"food_logs_unit_{n}_check" for n in NUTRIENTS}
         | {f"food_logs_{column}_check" for column in FOOD_VALUES}
-        | {f"user_goals_{n}_check" for n in NUTRIENTS}
+        | {f"user_goals_{n}_check" for n in (*NUTRIENTS, "workout_kcal", "active_rest_kcal")}
+        | {"daily_activity_workout_kcal_check"}
     )
 
 
@@ -504,8 +519,8 @@ def test_user_data_indexes(migrated_url):
         **FOOD_LOGS_INDEXES,
         "user_goals_pkey": "UNIQUE btree (user_id, effective_date)",
         "user_goals_user_rev_idx": "btree (user_id, rev)",
-        "daily_steps_pkey": "UNIQUE btree (user_id, log_date)",
-        "daily_steps_user_rev_idx": "btree (user_id, rev)",
+        "daily_activity_pkey": "UNIQUE btree (user_id, activity_date)",
+        "daily_activity_user_rev_idx": "btree (user_id, rev)",
         "saved_foods_pkey": "UNIQUE btree (user_id, fdc_id)",
         "saved_foods_user_rev_idx": "btree (user_id, rev)",
     }
@@ -533,13 +548,15 @@ def test_rev_comes_from_one_sequence_on_every_insert_and_update(conn):
     revs = [
         insert(conn, "food_logs", "rev", **custom_log(user_id))[0],
         insert(conn, "user_goals", "rev", **goals(user_id))[0],
-        insert(conn, "daily_steps", "rev", user_id=user_id, log_date=date(2026, 11, 10), steps=4000, updated_at=NOW)[0],
+        insert(
+            conn, "daily_activity", "rev", user_id=user_id, activity_date=date(2026, 11, 10), steps=4000, updated_at=NOW
+        )[0],
         insert(conn, "saved_foods", "rev", user_id=user_id, fdc_id=fdc_id, saved_at=NOW, updated_at=NOW)[0],
     ]
     # An update takes a new number, as does a soft delete; and a rev the client sends is ignored.
     revs.append(conn.execute("UPDATE food_logs SET quantity = 3 RETURNING rev").fetchone()[0])
     revs.append(conn.execute("UPDATE user_goals SET calories = 1800 RETURNING rev").fetchone()[0])
-    revs.append(conn.execute("UPDATE daily_steps SET steps = 9000, rev = 1 RETURNING rev").fetchone()[0])
+    revs.append(conn.execute("UPDATE daily_activity SET steps = 9000, rev = 1 RETURNING rev").fetchone()[0])
     revs.append(conn.execute("UPDATE saved_foods SET deleted_at = now() RETURNING rev").fetchone()[0])
     revs.append(insert(conn, "food_logs", "rev", **custom_log(user_id, rev=1))[0])
     assert revs == list(range(revs[0], revs[0] + 9))
@@ -626,14 +643,14 @@ def test_user_goals_rejects_bad_values(conn, overrides, constraint):
 def test_one_row_per_user_and_day_or_food(conn):
     user_id = add_user(conn)
     fdc_id = add_food(conn)
-    steps = {"user_id": user_id, "log_date": date(2026, 11, 10), "steps": 0, "updated_at": NOW}
+    steps = {"user_id": user_id, "activity_date": date(2026, 11, 10), "steps": 0, "updated_at": NOW}
     saved = {"user_id": user_id, "fdc_id": fdc_id, "saved_at": NOW, "updated_at": NOW}
-    for table, values in (("user_goals", goals(user_id)), ("daily_steps", steps), ("saved_foods", saved)):
+    for table, values in (("user_goals", goals(user_id)), ("daily_activity", steps), ("saved_foods", saved)):
         insert(conn, table, **values)
         with pytest.raises(errors.UniqueViolation):
             insert(conn, table, **values)
         insert(conn, table, **values | {"user_id": add_user(conn)})  # another user's row is separate
-    assert rejected_by(conn, "daily_steps", steps | {"steps": -1}) == "daily_steps_steps_check"
+    assert rejected_by(conn, "daily_activity", steps | {"steps": -1}) == "daily_activity_steps_check"
 
 
 def test_user_tokens_stores_one_sha256_hash_per_token(conn):
@@ -679,7 +696,7 @@ def test_deleting_a_user_deletes_their_data_and_nothing_else(conn):
         insert(conn, "food_logs", **custom_log(user_id))
         insert(conn, "food_logs", **usda_log(user_id, fdc_id))
         insert(conn, "user_goals", **goals(user_id))
-        insert(conn, "daily_steps", user_id=user_id, log_date=date(2026, 11, 10), steps=1, updated_at=NOW)
+        insert(conn, "daily_activity", user_id=user_id, activity_date=date(2026, 11, 10), steps=1, updated_at=NOW)
         insert(conn, "saved_foods", user_id=user_id, fdc_id=fdc_id, saved_at=NOW, updated_at=NOW)
     conn.execute("DELETE FROM users WHERE id = %s", (user_id,))
     counts = {
@@ -690,7 +707,7 @@ def test_deleting_a_user_deletes_their_data_and_nothing_else(conn):
         "user_tokens": (1, 0),
         "food_logs": (2, 0),
         "user_goals": (1, 0),
-        "daily_steps": (1, 0),
+        "daily_activity": (1, 0),
         "saved_foods": (1, 0),
     }
     assert conn.execute("SELECT count(*) FROM foods").fetchone()[0] == 1
@@ -760,7 +777,7 @@ def test_models_write_and_read_back_what_the_database_sets(migrated_url):
                              protein_per_100g=1.1, carbs_per_100g=22.8, fat_per_100g=0.3))  # fmt: skip
             session.add(UserToken(user_id=user.id, token_hash=b"h" * 32, label="ios 1.0"))
             log = FoodLog(**usda_log(user.id, 1))
-            steps = DailySteps(user_id=user.id, log_date=date(2026, 11, 10), steps=4000, updated_at=NOW)
+            steps = DailyActivity(user_id=user.id, activity_date=date(2026, 11, 10), steps=4000, updated_at=NOW)
             session.add_all([log, steps, UserGoal(**goals(user.id))])
             session.add(SavedFood(user_id=user.id, fdc_id=1, saved_at=NOW, updated_at=NOW))
             session.flush()
@@ -778,3 +795,76 @@ def test_models_write_and_read_back_what_the_database_sets(migrated_url):
             assert session.scalars(text("SELECT token_hash FROM user_tokens")).one() == b"h" * 32
     finally:
         engine.dispose()
+
+
+# ---- Revision 0003: goal sources and day amounts; daily_steps becomes daily_activity ----
+
+
+@pytest.mark.parametrize(
+    ("table", "overrides", "constraint"),
+    [
+        ("user_goals", {"source": "guess"}, "user_goals_source_check"),
+        ("user_goals", {"workout_kcal": -1}, "user_goals_workout_kcal_check"),
+        ("user_goals", {"active_rest_kcal": -1}, "user_goals_active_rest_kcal_check"),
+        ("daily_activity", {"day_type": "active_recovery"}, "daily_activity_day_type_check"),
+        ("daily_activity", {"workout_kcal": -1}, "daily_activity_workout_kcal_check"),
+    ],
+)
+def test_0003_columns_reject_bad_values(conn, table, overrides, constraint):
+    user_id = add_user(conn)
+    day = {"user_id": user_id, "activity_date": date(2026, 11, 10), "steps": 0, "updated_at": NOW}
+    values = goals(user_id) if table == "user_goals" else day
+    assert rejected_by(conn, table, values | overrides) == constraint
+
+
+def test_0003_defaults(conn):
+    user_id = add_user(conn)
+    assert insert(conn, "user_goals", "source, workout_kcal, active_rest_kcal", **goals(user_id)) == ("manual", 0, 0)
+    day = {"user_id": user_id, "steps": 0, "updated_at": NOW}
+    assert insert(conn, "daily_activity", "day_type, workout_kcal", activity_date=date(2026, 11, 10), **day) == (
+        None,
+        None,
+    )
+    # 0 is a value.
+    insert(conn, "daily_activity", activity_date=date(2026, 11, 11), day_type="workout", workout_kcal=0, **day)
+
+
+def daily_objects(conn) -> set[str]:
+    """The names of the constraints, indexes and triggers of the daily_steps / daily_activity table."""
+    rows = conn.execute(
+        "SELECT conname FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace"
+        " WHERE n.nspname = current_schema() AND conname LIKE 'daily%'"
+        " UNION ALL SELECT indexname FROM pg_indexes WHERE schemaname = current_schema() AND indexname LIKE 'daily%'"
+        " UNION ALL SELECT t.tgname FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid"
+        " JOIN pg_namespace n ON n.oid = c.relnamespace"
+        " WHERE n.nspname = current_schema() AND NOT t.tgisinternal AND t.tgname LIKE 'daily%'"
+    ).fetchall()
+    return {name for (name,) in rows}
+
+
+def test_downgrade_to_0002_gives_daily_steps_back_with_its_rows(conn, migrated_url):
+    user_id = add_user(conn)
+    insert(conn, "user_goals", **goals(user_id, workout_kcal=300))
+    day = {"user_id": user_id, "activity_date": date(2026, 11, 10), "steps": 4000, "updated_at": NOW}
+    (rev,) = insert(conn, "daily_activity", "rev", day_type="workout", workout_kcal=250, **day)
+    old_names = {"daily_steps_pkey", "daily_steps_user_id_fkey", "daily_steps_steps_check", "daily_steps_user_rev_idx"}
+    old_names.add("daily_steps_rev")
+
+    command.downgrade(alembic_config(migrated_url), "0002")
+    assert daily_objects(conn) == old_names
+    assert conn.execute("SELECT user_id, log_date, steps, rev FROM daily_steps").fetchall() == [
+        (user_id, date(2026, 11, 10), 4000, rev)
+    ]
+    goal_columns = conn.execute(
+        "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema()"
+        " AND table_name = 'user_goals'"
+    ).fetchall()
+    assert {"source", "workout_kcal", "active_rest_kcal"}.isdisjoint(c for (c,) in goal_columns)
+
+    command.upgrade(alembic_config(migrated_url), "head")
+    new_names = {name.replace("daily_steps", "daily_activity") for name in old_names}
+    assert daily_objects(conn) == new_names | {"daily_activity_day_type_check", "daily_activity_workout_kcal_check"}
+    # The renames kept the row and its rev; the new columns start empty.
+    assert conn.execute("SELECT steps, day_type, workout_kcal, rev FROM daily_activity").fetchall() == [
+        (4000, None, None, rev)
+    ]

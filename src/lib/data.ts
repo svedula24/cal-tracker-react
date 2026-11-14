@@ -8,11 +8,17 @@ import {
   addDays,
   dailyScore,
   dayKey,
+  dayTarget,
+  type DayType,
+  FIRST_GOAL_DATE,
+  goalOn,
   type Goals,
   healthScore,
+  migrateGoals,
   type Nutrients,
   stepsToCalories,
   sum,
+  todayKey,
 } from '@/lib/nutrition';
 import type { Food, Portion } from '@/data/foods';
 import { defaultServing, scale } from '@/lib/measure';
@@ -44,7 +50,9 @@ export type Entry = {
   // Cleared by any edit (the entry is then the user's); never set by `add`.
   seed?: boolean;
 };
-export type DayLog = { id: string; steps: number; rollover: number }; // id = date
+// id = date. `dayType` absent or null: not set (nothing added). Rollover stays on the device.
+// `workoutKcal`: calories typed for the day (null = the goal's amount for the day type).
+export type DayLog = { id: string; steps: number; rollover: number; dayType?: DayType | null; workoutKcal?: number | null };
 
 // ── Seed (dated relative to first launch) ────────────────────────────────────
 const n = (calories: number, protein: number, carbs: number, fat: number, fiber: number, sugar: number, sodium: number): Nutrients => ({
@@ -89,18 +97,22 @@ function seedEntries(): Entry[] {
   return out;
 }
 
+// One goal, in force since before any log. Today's target adds the 202 kcal of today's steps:
+// 3027 + 202 + 200 rollover = the reference budget of 3429, and carbs 382.5 + 202/4 = 433 g, the
+// reference's 433 g goal (so the seeded day still scores the reference's 89).
 const goalsSeed: Goals[] = [
   {
-    id: 'goals',
-    // 3027 + 200 rollover + 202 burned = the reference budget of 3429.
-    calories: 3027, protein: 182, carbs: 433, fat: 94, fiber: 38, sugar: 113, sodium: 2300,
-    steps: 10000, goal: 'gain',
+    id: FIRST_GOAL_DATE,
+    effectiveDate: FIRST_GOAL_DATE,
+    source: 'manual',
+    calories: 3027, protein: 182, carbs: 382.5, fat: 94, fiber: 38, sugar: 113, sodium: 2300,
+    steps: 10000, goal: 'gain', workoutKcal: 0, activeRestKcal: 0,
   },
 ];
 
 const dayLogSeed: DayLog[] = [
-  { id: today, steps: 5782, rollover: 200 },
-  ...[1, 2, 3, 4, 5].map((b) => ({ id: dayKey(addDays(now, -b)), steps: 4000 + b * 950, rollover: 0 })),
+  { id: today, steps: 5782, rollover: 200, dayType: null, workoutKcal: null },
+  ...[1, 2, 3, 4, 5].map((b) => ({ id: dayKey(addDays(now, -b)), steps: 4000 + b * 950, rollover: 0, dayType: null, workoutKcal: null })),
 ];
 
 // Streak is display-only (reference shows 16 days).
@@ -118,7 +130,9 @@ const savedSeed: SavedFood[] = SAVED_FOODS.map((food) => ({ id: food.id, food })
 // Stored entries are cleaned once when the list loads (and saved), so every
 // item has a usable snapshot; see migrateSavedFoods.
 const savedStore = () => getCollection<SavedFood>('savedFoods', savedSeed, migrateSavedFoods);
-const goalsStore = () => getCollection<Goals>('goals', goalsSeed);
+// Every goal the user has had, one row per effective date. An older install's one set of goals is
+// upgraded to the row in force since FIRST_GOAL_DATE once at load (migrateGoals).
+const goalsStore = () => getCollection<Goals>('goals', goalsSeed, migrateGoals);
 const dayLogsStore = () => getCollection<DayLog>('dayLogs', dayLogSeed);
 
 /** The collections sync reads and writes (src/lib/sync/index.ts): the same instances the hooks use. */
@@ -149,25 +163,30 @@ export const useEntries = () => ({
   remove: removeEntry,
 });
 export { migrateEntries };
-// A day's steps: its sync key is the date. Nothing in the app writes these yet (no step source),
-// but a screen that does must not have to remember sync, so the writers report like the others.
+// A day's steps and day type: its sync key is the date. Home's steps card writes them (setDayLog).
 const addDayLog = (log: DayLog) => {
   dayLogsStore().add(log);
-  markDirty('daily_steps', log.id);
+  markDirty('daily_activity', log.id);
 };
 const updateDayLog = (id: string, patch: Partial<DayLog>) => {
   dayLogsStore().update(id, patch);
-  markDirty('daily_steps', id);
+  markDirty('daily_activity', id);
 };
 const removeDayLog = (id: string) => {
   dayLogsStore().remove(id);
-  markDirty('daily_steps', id, true);
+  markDirty('daily_activity', id, true);
+};
+/** Sets a day's steps and/or day type, creating the day's log if it has none. */
+export const setDayLog = (date: string, patch: Partial<Pick<DayLog, 'steps' | 'dayType' | 'workoutKcal'>>) => {
+  if (dayLogsStore().items.some((d) => d.id === date)) updateDayLog(date, patch);
+  else addDayLog({ id: date, steps: 0, rollover: 0, dayType: null, workoutKcal: null, ...patch });
 };
 export const useDayLogs = () => ({
   ...useCollection<DayLog>('dayLogs', dayLogSeed),
   add: addDayLog,
   update: updateDayLog,
   remove: removeDayLog,
+  set: setDayLog,
 });
 
 // Only database foods (`usda:<n>`) exist on the server; its key is the number as text.
@@ -190,29 +209,51 @@ export const useSavedFoods = () => ({
   remove: removeSaved,
 });
 
-// Read-only: the app has no screen to change goals, so there is no writer to report to sync
-// (the one goal row is uploaded by the first sync). When a goals screen is built, a change is a
-// NEW row dated the day it takes effect (user_goals is dated history), which the sync key
-// (GOALS_SINCE in src/lib/sync/local.ts) and this hook must then be changed for.
+// Goals are dated history (user_goals on the server): a change made today is the row dated today,
+// so every earlier day keeps the goal it had. Its sync key is that date.
+export type GoalPatch = Partial<Omit<Goals, 'id' | 'effectiveDate'>>;
+
+/** Changes the goal from today on: today's row if there is one, else a new row dated today (from the goal in force). */
+export const setGoals = (patch: GoalPatch) => {
+  const store = goalsStore();
+  const date = todayKey();
+  if (store.items.some((g) => g.id === date)) store.update(date, patch);
+  else store.add({ ...(goalOn(store.items, date) ?? goalsSeed[0]), ...patch, id: date, effectiveDate: date });
+  markDirty('goals', date);
+};
+
+/** The goal in force on `date` (the seed's if no row has begun, which only damaged data can cause). */
+const goalFor = (rows: readonly Goals[], date: string): Goals => goalOn(rows, date) ?? goalsSeed[0];
+
+const useGoalRows = () => useCollection<Goals>('goals', goalsSeed, migrateGoals).items;
+
+/** Today's goal, every goal row, and the writer. */
 export function useGoals() {
-  const { items } = useCollection<Goals>('goals', goalsSeed);
-  return { goals: items[0] ?? goalsSeed[0] };
+  const rows = useGoalRows();
+  return { goals: goalFor(rows, todayKey()), rows, ready: goalsStore().ready, set: setGoals };
 }
 
-/** Everything Home shows for one day, derived from the logs. */
+/** The goal in force on `date`. */
+export const useGoalOn = (date: string): Goals => goalFor(useGoalRows(), date);
+
+/** Everything Home shows for one day, derived from the logs and the goal in force that day. */
 export function useDay(date: string) {
-  const { goals } = useGoals();
+  const goals = useGoalOn(date);
   const entries = useEntries().items.filter((e) => e.date === date).sort((a, b) => b.time.localeCompare(a.time));
-  const log = useDayLogs().items.find((d) => d.id === date) ?? { id: date, steps: 0, rollover: 0 };
+  const log: DayLog = useDayLogs().items.find((d) => d.id === date) ?? { id: date, steps: 0, rollover: 0, dayType: null, workoutKcal: null };
 
   const totals = sum(entries);
-  const burned = stepsToCalories(log.steps);
-  const budget = dayBudget(goals.calories, log);
+  const target = dayTarget(goals, log);
+  const budget = target.calories + (log.rollover ?? 0);
+  // The steps' share of the adjustment, shown on its own on the activity page.
+  const stepsKcal = stepsToCalories(log.steps);
 
   return {
-    goals, entries, log, totals, burned, budget,
-    score: dailyScore(totals, budget, goals),
-    health: healthScore(totals, budget, goals),
+    goals, target, entries, log, totals, stepsKcal, budget,
+    // Calories added for the day's activity (steps + workout / active recovery).
+    burned: target.adjustment,
+    score: dailyScore(totals, budget, target),
+    health: healthScore(totals, budget, { ...target, goal: goals.goal }),
   };
 }
 
@@ -245,8 +286,15 @@ export function newEntry(food: Food, measure: Portion, quantity: number, date: s
   };
 }
 
-/** The calorie budget for a day: goal + rollover + calories burned from steps. */
-export function dayBudget(goalCalories: number, log: DayLog | undefined) {
-  return goalCalories + (log?.rollover ?? 0) + stepsToCalories(log?.steps ?? 0);
+/** The calorie budget for a day: the day's target under `goal` (steps and day type included) + rollover. */
+export function dayBudget(goal: Goals, log: DayLog | undefined) {
+  return dayTarget(goal, log).calories + (log?.rollover ?? 0);
+}
+
+/** For the week strip: each date's budget under the goal in force on that date. */
+export function useDayBudgets(dates: readonly string[]): Record<string, number> {
+  const rows = useGoalRows();
+  const logs = useDayLogs().items;
+  return Object.fromEntries(dates.map((d) => [d, dayBudget(goalFor(rows, d), logs.find((l) => l.id === d))]));
 }
 

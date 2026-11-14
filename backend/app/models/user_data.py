@@ -123,17 +123,27 @@ class UserGoal(Base):
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ)
     deleted_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
     rev: Mapped[int] = rev_column()
+    # Revision 0003 (so after `rev`, in the table's column order).
+    source: Mapped[str] = mapped_column(Text, server_default="manual")  # 'computed' or 'manual'
+    workout_kcal: Mapped[float] = mapped_column(Double, server_default="0")  # added on a workout day
+    active_rest_kcal: Mapped[float] = mapped_column(Double, server_default="0")  # on an active-rest day
 
 
-class DailySteps(Base):
-    __tablename__ = "daily_steps"
+class DailyActivity(Base):
+    """A user's day: steps, what kind of day it was and that day's workout calories. Revision 0003
+    renamed it from daily_steps (and log_date to activity_date)."""
+
+    __tablename__ = "daily_activity"
 
     user_id: Mapped[uuid.UUID] = user_id_column(primary_key=True)
-    log_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    activity_date: Mapped[date] = mapped_column(Date, primary_key=True)
     steps: Mapped[int] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMPTZ)
     deleted_at: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
     rev: Mapped[int] = rev_column()
+    day_type: Mapped[str | None] = mapped_column(Text)  # 'workout', 'active_rest', 'rest'; NULL = not said
+    # That day's workout calories, whatever the day type; NULL = the goal's amount (app/services/targets.py).
+    workout_kcal: Mapped[float | None] = mapped_column(Double)
 
 
 class SavedFood(Base):

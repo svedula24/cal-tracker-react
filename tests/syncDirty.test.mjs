@@ -19,8 +19,8 @@ test('writes before the engine exists are replayed in order, the latest per row;
     ['food_logs', 'a', true],
   ]);
 
-  markDirty('daily_steps', '2026-11-10');
-  assert.deepEqual(seen.at(-1), ['daily_steps', '2026-11-10', false]);
+  markDirty('daily_activity', '2026-11-10');
+  assert.deepEqual(seen.at(-1), ['daily_activity', '2026-11-10', false]);
   assert.equal(seen.length, 4, 'the queue was emptied: nothing is replayed twice');
 });
 

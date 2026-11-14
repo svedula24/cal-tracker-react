@@ -368,7 +368,7 @@ def test_preflight_allows_get_from_any_origin(client):
     assert "access-control-allow-credentials" not in r.headers
 
 
-@pytest.mark.parametrize("method", ["GET", "POST", "PATCH", "DELETE"])
+@pytest.mark.parametrize("method", ["GET", "POST", "PUT", "PATCH", "DELETE"])
 def test_preflight_allows_the_methods_the_api_uses(client, method):
     r = client.options("/api/v1/foods/search", headers={**ORIGIN, "Access-Control-Request-Method": method})
     assert r.status_code == 200
@@ -376,7 +376,7 @@ def test_preflight_allows_the_methods_the_api_uses(client, method):
     assert "access-control-allow-credentials" not in r.headers
 
 
-@pytest.mark.parametrize("method", ["PUT"])
+@pytest.mark.parametrize("method", ["PROPFIND"])
 def test_preflight_refuses_a_method_the_api_does_not_use(client, method):
     r = client.options("/api/v1/foods/search", headers={**ORIGIN, "Access-Control-Request-Method": method})
     assert r.status_code == 400

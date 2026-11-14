@@ -5,7 +5,7 @@
     "day_target: calories += adjustment_kcal; carbs_g += adjustment_kcal / 4; every other target is the goal's value unchanged. Only adjustment_kcal is rounded.",
     "remaining = target - totals for each of the seven nutrients (may be negative). Compare with a tolerance of 1e-9.",
     "suggest: BMR = 10*weight_kg + 6.25*height_cm - 5*age + (5 if male, -161 if female); calories = round(BMR * 1.2 * {lose: 0.8, maintain: 1.0, gain: 1.1}).",
-    "suggest: protein_g = round(1.8 * weight_kg); fat_g = round(0.25 * calories / 9); carbs_g = max(0, round((calories - 4*protein_g - 9*fat_g) / 4)).",
+    "suggest: protein_g = round(1.8 * weight_kg); fat_g = max(0, round(0.25 * calories / 9)); carbs_g = max(0, round((calories - 4*protein_g - 9*fat_g) / 4)); calories itself is max(0, ...). Inputs: age 10-120, height_cm 50-300, weight_kg 20-500 (out of range is invalid input, not a suggestion).",
     "round = half away from zero (JS Math.round differs on negative halves; Python round() is banker's): implement explicitly in both."
   ],
   "day_target": [
@@ -415,6 +415,22 @@
         "protein_g": 270,
         "carbs_g": 78,
         "fat_g": 51
+      }
+    },
+    {
+      "name": "lowest accepted inputs never give negative calories or fat",
+      "input": {
+        "sex": "female",
+        "age": 120,
+        "height_cm": 50,
+        "weight_kg": 20,
+        "goal": "lose"
+      },
+      "expected": {
+        "calories": 0,
+        "protein_g": 36,
+        "carbs_g": 0,
+        "fat_g": 0
       }
     }
   ]
