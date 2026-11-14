@@ -494,11 +494,19 @@ def test_the_full_flow(client, db, migrated_url):
     assert rotated["refresh_token"] != tokens["refresh_token"]
     assert rotated["access_token"] != tokens["access_token"]
     assert resolve(migrated_url, rotated["access_token"]).grant_id == grant.grant_id
+    # Presented again within 2 minutes: a client retrying after it lost the response. It gets a new
+    # pair; the pair it lost is deleted, and the connection stays.
     r = refresh(client, tokens["refresh_token"])
-    assert (r.status_code, r.json()["error"]) == (400, "invalid_grant")
-    # Reused within 2 minutes (a retry): refused, the connection stays.
-    assert resolve(migrated_url, rotated["access_token"]) is not None
-    assert refresh(client, rotated["refresh_token"]).status_code == 200
+    assert r.status_code == 200, r.text
+    retried = r.json()
+    assert retried["refresh_token"] not in (tokens["refresh_token"], rotated["refresh_token"])
+    assert resolve(migrated_url, rotated["access_token"]) is None
+    assert refresh(client, rotated["refresh_token"]).json()["error"] == "invalid_grant"
+    assert resolve(migrated_url, retried["access_token"]).grant_id == grant.grant_id
+    assert refresh(client, retried["refresh_token"]).status_code == 200
+    # A retry with the wrong client is refused and changes nothing.
+    r = refresh(client, tokens["refresh_token"], client_id="https://evil.example/client.json")
+    assert r.json()["error"] == "invalid_grant"
 
     # Nothing secret is stored in the clear.
     stored = " ".join(

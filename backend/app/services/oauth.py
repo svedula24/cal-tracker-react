@@ -380,8 +380,11 @@ def refresh(
     """Rotate a refresh token: the old one is spent, a new access and refresh token are issued for the same
     grant, with the grant's scopes. A `scope` may name the grant's scopes or fewer, but the tokens are not
     narrowed (they carry no scopes of their own: access is checked against the grant); naming one the
-    grant lacks is invalid_scope. Does not commit, except a revocation for a reused token (committed
-    before the OAuthError)."""
+    grant lacks is invalid_scope.
+
+    A spent token presented again within REUSE_GRACE is a client retrying after it lost the response:
+    the tokens that response carried (issued since) are deleted and a new pair is issued. Later, it is a
+    replay and revokes the grant. Does not commit, except that revocation (committed before the OAuthError)."""
     token_hash = hash_secret(refresh_token)
     rotated = session.execute(
         update(OAuthToken)
@@ -396,14 +399,23 @@ def refresh(
     ).scalar_one_or_none()
     if rotated is None:
         old = session.execute(
-            select(OAuthToken.grant_id, OAuthToken.rotated_at < func.now() - REUSE_GRACE).where(
+            select(OAuthToken.grant_id, OAuthToken.rotated_at, OAuthToken.rotated_at >= func.now() - REUSE_GRACE)
+            .where(
                 OAuthToken.token_hash == token_hash, OAuthToken.kind == "refresh", OAuthToken.rotated_at.is_not(None)
             )
+            .with_for_update()
         ).one_or_none()
-        if old is not None and old[1]:
-            _revoke(session, old[0])
+        if old is None:
+            raise OAuthError("invalid_grant", "unknown, expired or already used refresh token")
+        grant_id, spent_at, retry = old
+        if not retry:
+            _revoke(session, grant_id)
             session.commit()
-        raise OAuthError("invalid_grant", "unknown, expired or already used refresh token")
+            raise OAuthError("invalid_grant", "unknown, expired or already used refresh token")
+        rotated = grant_id
+        lost = delete(OAuthToken).where(OAuthToken.grant_id == grant_id, OAuthToken.created_at >= spent_at)
+    else:
+        lost = None
     grant = session.execute(
         select(OAuthGrant).where(OAuthGrant.id == rotated, OAuthGrant.revoked_at.is_(None))
     ).scalar_one_or_none()
@@ -415,6 +427,8 @@ def refresh(
         raise OAuthError("invalid_target", "resource does not match the connection")
     if scope is not None and scope.strip() and not parse_scopes(scope) <= set(grant.scopes):
         raise OAuthError("invalid_scope", "a refresh cannot add scopes")
+    if lost is not None:
+        session.execute(lost)
     return _issue(session, grant.id, grant.scopes)
 
 
