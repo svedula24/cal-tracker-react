@@ -1,5 +1,6 @@
 """The Cal AI report import (kalo/calai.py): parsing the report's text, and writing it to food_logs."""
 
+import subprocess
 import uuid
 from datetime import date
 from zoneinfo import ZoneInfo
@@ -130,11 +131,22 @@ def test_a_newer_export_adds_only_new_entries_and_deletions_stick(migrated_url, 
                                    ("Tofu, Quinoa, Broccoli, Black Olives, Banana Peppers Meal", 1)]
 
 
-def test_an_unreadable_pdf_is_a_report_error(tmp_path):
-    bad = tmp_path / "not.pdf"
-    bad.write_text("not a pdf")
-    with pytest.raises(ReportError, match="pdftotext could not read"):
-        pdf_text(str(bad))
+@pytest.mark.parametrize(
+    ("error", "message"),
+    [
+        (FileNotFoundError("pdftotext"), r"pdftotext not found \(brew install poppler\)"),
+        (subprocess.CalledProcessError(1, "pdftotext", stderr="Syntax Error: May not be a PDF file\n"),
+         r"pdftotext could not read x\.pdf: Syntax Error: May not be a PDF file$"),
+    ],
+)
+def test_pdftotext_failures_are_report_errors(monkeypatch, error, message):
+    # Faked, so the test does not depend on poppler being installed (CI has no pdftotext).
+    def run(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(ReportError, match=message):
+        pdf_text("x.pdf")
 
 
 def test_write_to_an_unknown_user_is_refused(migrated_url):
