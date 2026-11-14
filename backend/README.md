@@ -312,6 +312,7 @@ deleted or another user's log is 404. Unknown keys in a body are 422.
 | `PUT /api/v1/daily-activity/{activity_date}` | The whole day: `steps`, and optionally `day_type` and `workout_kcal` (left out = null) |
 | `POST /api/v1/goals/suggest` | `{"sex", "age", "height_cm", "weight_kg", "goal"}` to suggested `{"calories", "protein_g", "carbs_g", "fat_g"}` (Mifflin–St Jeor). Stores nothing |
 | `GET /api/v1/foods/recent?limit=20` | The user's distinct logged foods, most recent first, as search items plus `grams` (the last amount) and `logged_at` |
+| `GET /api/v1/foods/barcode/{code}` | A packaged food by barcode, from Open Food Facts: see "Barcodes" below |
 
 A log in a response carries `values` (its own, per 100 g or per serving),
 `food_values` (the database food's when it was logged), `totals` (the generated
@@ -407,6 +408,48 @@ uv run python scripts/bench_search.py --limit 50 # the page size the app asks fo
 uv run python scripts/bench_search.py --explain
 ```
 
+### Barcodes
+
+`GET /api/v1/foods/barcode/{code}` (bearer token) looks a packaged food up on
+[Open Food Facts](https://openfoodfacts.org) (OFF). The app logs it as a custom
+entry in grams: OFF products have no `fdc_id`.
+
+```sh
+curl localhost:8000/api/v1/foods/barcode/737628064502 -H 'Authorization: Bearer kalo_…'
+```
+
+```json
+{"code": "0737628064502", "name": "Thai Peanut Noodle Kit", "brand": "Simply Asia",
+ "nutrients_per_100g": {"calories": 385.0, "protein_g": 9.6, "carbs_g": 71.2, "fat_g": 7.7,
+                        "fiber_g": 1.9, "sugar_g": 13.5, "sodium_mg": 288.0},
+ "serving": {"label": "0.333 PACKAGE (52 g)", "grams": 52.0}, "source": "openfoodfacts"}
+```
+
+- The code is an EAN-8, UPC-A, EAN-13 or GTIN-14 with a valid check digit
+  (spaces ignored); anything else is 422. It is normalised so each product has
+  one spelling: UPC-A gets a leading 0, a GTIN-14's leading 0 is dropped. The
+  response's `code` is the normalised one. UPC-E (8-digit short UPC) is not expanded.
+- `brand` and `serving` may be null, and so may fiber, sugar and sodium. Sodium
+  is in mg (OFF reports grams). Calories come from kJ ÷ 4.184 when OFF has no kcal.
+  A serving is OFF's `serving_quantity` in g or ml (ml counted as grams); with no
+  unit, only when `serving_size` reads like grams ("52 g").
+- 404 `{"detail": {"reason": "not_found"}}` when OFF does not have it, or
+  `{"detail": {"reason": "incomplete", "name": …}}` when it has no name or lacks
+  one of calories, protein, carbs and fat (the same rule as the USDA foods).
+- Answers are cached for every user in `barcode_products` (migration
+  `0005_barcode_products.py`): a found product for 30 days, a miss for 1 day.
+  When OFF is down, times out or refuses, a stale cached answer is served; with
+  none it is 503 `{"detail": "product lookup unavailable"}`.
+- OFF allows 15 product reads a minute per IP, shared by every user of the
+  server, so each user may look up 60 barcodes an hour (cached ones count;
+  429 with `Retry-After` above that). Like registrations, the count is kept per
+  process.
+- `OFF_BASE_URL` and `OFF_USER_AGENT` (`app/settings.py`) set where lookups go
+  and the User-Agent OFF asks for.
+
+Product data from Open Food Facts (openfoodfacts.org), available under the Open
+Database License (ODbL).
+
 ## ChatGPT (MCP)
 
 With `PUBLIC_URL` set, the API also serves an MCP server at `/mcp` and a small OAuth 2.1
@@ -473,7 +516,7 @@ curl -X DELETE localhost:8000/api/v1/connections/<id> -H "Authorization: Bearer 
 app/
   main.py              create_app(url=None), engine lifespan, CORS, 503 handler
   api/deps.py          DbSession, CurrentUser (the user of the request's bearer token)
-  api/v1/foods.py      food search and lookup, and their validation
+  api/v1/foods.py      food search and lookup, barcode lookup, and their validation
   api/v1/devices.py    POST /devices (register), GET /me
   api/v1/sync.py       POST /sync (the app pushes and pulls)
   api/v1/food_logs.py  food-log create, read, edit, delete
@@ -482,11 +525,12 @@ app/
   api/v1/connections.py  pairing codes, ChatGPT connections (list, disconnect)
   api/oauth.py         the OAuth authorization server: discovery, sign-in page, token, register
   mcp/                 the MCP server (/mcp): server.py, tools.py, auth.py (access tokens -> user)
-  settings.py          PUBLIC_URL, KALO_SECRET, the OAuth allowlists
+  settings.py          PUBLIC_URL, KALO_SECRET, the OAuth allowlists, OFF_BASE_URL, OFF_USER_AGENT
   schemas/             Pydantic request and response models (foods, users, logs, log_api)
   models/foods.py      SQLAlchemy Food and FoodPortion
   models/user_data.py  User, UserToken, FoodLog, UserGoal, DailyActivity, SavedFood
   models/oauth.py      PairingCode, OAuthGrant, OAuthCode, OAuthToken
+  models/barcodes.py   BarcodeProduct (the Open Food Facts cache)
   services/foods.py    ranked search SQL, portions_for (a page's portions), get_food, get_portions
   services/users.py    tokens (made, hashed, looked up), register_device
   services/logs.py     how one pushed row is applied: last write wins, the food-log rules
@@ -495,6 +539,7 @@ app/
   services/log_queries.py  a day's logs and totals, the goal and activity on a date (and over a range), recent foods
   services/log_writes.py, goal_writes.py, daily.py  log and goal writes, a day's summary and history (REST and MCP)
   services/oauth.py, pairing.py  OAuth clients, codes, tokens and grants; pairing codes
+  services/barcodes.py normalize, fetch_off (Open Food Facts), lookup (the cache)
   db/session.py        engine, session dependency
 alembic.ini
 migrations/
@@ -503,6 +548,7 @@ migrations/
                        0002_user_data.py: users, tokens, logs, goals, steps, saved foods
                        0003_activity_targets.py: goal source and day amounts; daily_steps -> daily_activity
                        0004_oauth.py: pairing codes, OAuth grants, codes and tokens
+                       0005_barcode_products.py: the Open Food Facts lookup cache
 kalo/
   db.py                database_url(): the one source of the connection URL
   calai.py             import a Cal AI report PDF's food log

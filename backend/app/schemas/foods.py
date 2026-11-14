@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -41,7 +42,7 @@ class FoodSearchResponse(BaseModel):
 
 
 class NutrientsPer100g(BaseModel):
-    """Null means USDA does not report the nutrient for this food, not zero."""
+    """Null means the source (USDA or Open Food Facts) does not report the nutrient for this food, not zero."""
 
     calories: float
     protein_g: float
@@ -79,3 +80,19 @@ class FoodDetail(BaseModel):
             ),
             portions=[PortionOut.model_validate(p) for p in portions],
         )
+
+
+class BarcodeServing(BaseModel):
+    label: str
+    grams: float
+
+
+class BarcodeFood(BaseModel):
+    """A packaged food found by barcode (GET /api/v1/foods/barcode/{code}). `code` is the normalised one."""
+
+    code: str
+    name: str
+    brand: str | None
+    nutrients_per_100g: NutrientsPer100g
+    serving: BarcodeServing | None
+    source: Literal["openfoodfacts"] = "openfoodfacts"
