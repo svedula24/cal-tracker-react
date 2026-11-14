@@ -173,7 +173,9 @@ pulls on its next sync. `--tz` is the zone the report's times are in. Nothing is
 written unless every day's entries add up to the report's "Calories eaten". An entry
 is skipped when the user already has a custom log with the same day, time and name
 (deleted ones too, so a deletion sticks), so a newer all-time export adds only what
-is new. An entry renamed in the app since is imported again. Workouts, weight and
+is new. An entry renamed in the app since is imported again. In the hour repeated
+when daylight saving ends, the report doesn't say which 1:30am it was, so both get
+the first one. Workouts, weight and
 profile pages are not imported.
 
 ## API

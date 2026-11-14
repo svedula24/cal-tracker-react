@@ -125,6 +125,7 @@ def parse(lines: Iterable[str]) -> list[Day]:
         elif FOODS.match(line):
             flush()
             day.has_table = True
+            in_exercise = False  # foods after a workout table, or a header repeated after a page break
         elif EXERCISE.match(line):
             flush()
             in_exercise = True  # workouts are not imported; they run until the day's TOTAL
@@ -143,6 +144,8 @@ def parse(lines: Iterable[str]) -> list[Day]:
 
 
 def logged_at(day: Day, entry: Entry, tz: ZoneInfo) -> datetime:
+    # shortcut: in the hour repeated when DST ends, the report cannot say which 1:30am it was; both get the
+    # first. A nonexistent spring-forward time is shifted by zoneinfo. A few entries a year at most.
     return datetime.strptime(f"{day.date} {entry.time.upper()}", "%Y-%m-%d %I:%M%p").replace(tzinfo=tz)
 
 
@@ -210,6 +213,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(days)} days, {count} entries, {days[0].date} to {days[-1].date}; every day adds up")
         if args.write:
             print(f"✓ {write(days, args.user, args.tz, database_url())} new entries ({count} in the report)")
+        else:
+            print("check only, nothing written; add --write to import")
     except ReportError as e:
         raise SystemExit(f"error: {e}; nothing written") from None
     return 0

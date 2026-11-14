@@ -71,6 +71,19 @@ def test_a_date_line_without_a_table_is_not_a_day():
     assert [d.date for d in days] == [date(2026, 1, 7), date(2026, 1, 8)]
 
 
+def test_foods_after_a_workout_table_are_entries():
+    foods_header = next(line for line in REPORT.splitlines() if line.lstrip().startswith("Foods"))
+    workout = next(line for line in REPORT.splitlines() if line.lstrip().startswith("Exercise"))
+    lifting = next(line for line in REPORT.splitlines() if "Weight lifting" in line)
+    second_day = REPORT.index("January 8, 2026")
+    head, tail = REPORT[:second_day], REPORT[second_day:]
+    tail = tail.replace(foods_header, f"{workout}\n\n{lifting}\n\n{foods_header}", 1)
+
+    days = parse((head + tail).splitlines())
+
+    assert [e.name for e in days[1].entries] == ["Teriyaki Chicken", "Kit Kat"]
+
+
 def test_a_day_that_does_not_add_up_is_refused():
     with pytest.raises(ReportError, match=r"2026-01-07: entries add up to 766 kcal, the report says 767"):
         parse(REPORT.replace("Calories eaten: 766", "Calories eaten: 767").splitlines())
