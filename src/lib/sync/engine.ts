@@ -19,7 +19,7 @@ import type { SyncChanges, SyncRequest, SyncResponse, Table } from './types.ts';
 type Dirty = { updatedAt: number; deleted: boolean };
 type Sent = Dirty & { id: string };
 
-const TABLES: Table[] = ['food_logs', 'saved_foods', 'goals', 'daily_steps'];
+const TABLES: Table[] = ['food_logs', 'saved_foods', 'goals', 'daily_activity'];
 const OUTBOX = 'sync:outbox';
 const CURSOR = 'sync:cursor';
 const PRIMED = 'sync:primed';
@@ -31,7 +31,8 @@ function parseOutbox(raw: string): [string, Dirty][] | null {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const entries = Object.entries(parsed as Record<string, Dirty>);
     const ok = entries.every(([, e]) => e && Number.isFinite(e.updatedAt) && typeof e.deleted === 'boolean');
-    return ok ? entries.map(([id, e]) => [id, { updatedAt: e.updatedAt, deleted: e.deleted }]) : null;
+    // A day's activity was once the table `daily_steps` (same key): an older outbox entry is kept under the new name.
+    return ok ? entries.map(([id, e]) => [id.replace(/^daily_steps:/, 'daily_activity:'), { updatedAt: e.updatedAt, deleted: e.deleted }]) : null;
   } catch {
     return null;
   }
@@ -211,7 +212,7 @@ export function createSync(opts: {
 
     // A pulled row older than a local edit still waiting is skipped: the edit
     // is pushed next and wins on the server too.
-    const pulled: Record<Table, object[]> = { food_logs: [], saved_foods: [], goals: [], daily_steps: [] };
+    const pulled: Record<Table, object[]> = { food_logs: [], saved_foods: [], goals: [], daily_activity: [] };
     let count = 0;
     for (const table of TABLES) {
       for (const row of (res.changes?.[table] ?? []) as { updated_at: string }[]) {

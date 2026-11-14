@@ -84,7 +84,7 @@ const api = {
 const serve = (table, row) => api.rows.push({ rev: ++api.rev, table, row });
 /** Revokes the app's current token: its next sync is answered 401. */
 const revoke = () => api.revoked.add(api.tokens.at(-1));
-const TABLES = ['food_logs', 'saved_foods', 'goals', 'daily_steps'];
+const TABLES = ['food_logs', 'saved_foods', 'goals', 'daily_activity'];
 const count = (changes) => TABLES.reduce((n, t) => n + (changes?.[t]?.length ?? 0), 0);
 
 // The app's page and the API are different origins and a sync is a POST with Authorization
@@ -196,13 +196,14 @@ try {
   const goal = first.body.changes.goals?.[0];
   check(
     first.body.changes.goals?.length === 1 && goal.effective_date === '2020-01-01' && goal.calories === 3027 && goal.protein_g === 182 && goal.steps === 10000 && goal.goal === 'gain' &&
-      keys(goal) === 'calories,carbs_g,deleted_at,effective_date,fat_g,fiber_g,goal,protein_g,sodium_mg,steps,sugar_g,updated_at' && iso(goal.updated_at) && goal.deleted_at === null,
+      goal.source === 'manual' && goal.workout_kcal === 0 && goal.active_rest_kcal === 0 &&
+      keys(goal) === 'active_rest_kcal,calories,carbs_g,deleted_at,effective_date,fat_g,fiber_g,goal,protein_g,sodium_mg,source,steps,sugar_g,updated_at,workout_kcal' && iso(goal.updated_at) && goal.deleted_at === null,
     `it uploads the goals as one row in force since 2020-01-01`, `sent: ${show(first.body.changes.goals)}`,
   );
-  const steps = first.body.changes.daily_steps ?? [];
+  const steps = first.body.changes.daily_activity ?? [];
   check(
-    steps.length === 6 && steps.find((r) => r.log_date === today)?.steps === 5782 && steps.every((r) => keys(r) === 'deleted_at,log_date,steps,updated_at' && iso(r.updated_at) && r.deleted_at === null),
-    `it uploads the six day logs as steps, without the rollover`, `sent: ${show(steps)}`,
+    steps.length === 6 && steps.find((r) => r.activity_date === today)?.steps === 5782 && steps.every((r) => keys(r) === 'activity_date,day_type,deleted_at,steps,updated_at,workout_kcal' && r.day_type === null && r.workout_kcal === null && iso(r.updated_at) && r.deleted_at === null),
+    `it uploads the six day logs as daily_activity (steps, no day type or workout calories), without the rollover`, `sent: ${show(steps)}`,
   );
   const saved = first.body.changes.saved_foods ?? [];
   check(
@@ -401,7 +402,7 @@ try {
   const demo = new Set(JSON.parse(await stored('entries')).filter((e) => e.seed === true).map((e) => e.id));
   const logs = full.body.changes.food_logs ?? [];
   check(
-    full.body.cursor === null && full.body.changes.goals.length === 1 && (full.body.changes.daily_steps ?? []).length === 6 && savedIds(full.body.changes.saved_foods ?? []) === SEED_SAVED,
+    full.body.cursor === null && full.body.changes.goals.length === 1 && (full.body.changes.daily_activity ?? []).length === 6 && savedIds(full.body.changes.saved_foods ?? []) === SEED_SAVED,
     `it then uploads everything from the start: the goals, the day logs and the saved foods`, `sent: cursor ${show(full.body.cursor)}, ${show(Object.fromEntries(TABLES.map((t) => [t, full.body.changes[t]?.length ?? 0])))}`,
   );
   // The demo entries were dropped at this load (the user has entries of their own); that they are

@@ -21,13 +21,18 @@ NONE_UNKNOWN = {"fiber_g": 0, "sugar_g": 0, "sodium_mg": 0}
 GOAL = {
     "calories": 2000.0, "protein_g": 150.0, "carbs_g": 200.0, "fat_g": 65.0,
     "fiber_g": 30.0, "sugar_g": 50.0, "sodium_mg": 2300.0, "steps": 10000, "goal": "lose",
+    "source": "manual", "workout_kcal": 0.0, "active_rest_kcal": 0.0,
+}  # fmt: skip
+EMPTY_DAY = {
+    "date": DAY, "totals": ZEROS, "unknown": NONE_UNKNOWN, "goal": None, "steps": None, "activity": None,
+    "target": None, "remaining": None, "log_count": 0,
 }  # fmt: skip
 
 
 def daily(client, who, date=DAY):
     r = client.get(URL, params={"date": date}, headers=who)
     assert r.status_code == 200, r.text
-    assert set(r.json()) == {"date", "totals", "unknown", "goal", "steps", "log_count"}
+    assert set(r.json()) == set(EMPTY_DAY)
     return r.json()
 
 
@@ -38,17 +43,17 @@ def user_id(client, who):
 def add_goal(db, uid, effective_date, deleted=False, **changes):
     goal = {**GOAL, **changes}
     db.execute(
-        "INSERT INTO user_goals (user_id, effective_date, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g,"
-        " sodium_mg, steps, goal, updated_at, deleted_at)"
-        " VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), %s)",
+        f"INSERT INTO user_goals (user_id, effective_date, {', '.join(goal)}, updated_at, deleted_at)"
+        f" VALUES (%s, %s, {', '.join(['%s'] * len(goal))}, now(), %s)",
         (uid, effective_date, *goal.values(), "2026-01-01T00:00:00Z" if deleted else None),
     )
 
 
-def add_steps(db, uid, log_date, steps, deleted=False):
+def add_steps(db, uid, activity_date, steps, deleted=False, day_type=None, workout_kcal=None):
     db.execute(
-        "INSERT INTO daily_steps (user_id, log_date, steps, updated_at, deleted_at) VALUES (%s, %s, %s, now(), %s)",
-        (uid, log_date, steps, "2026-01-01T00:00:00Z" if deleted else None),
+        "INSERT INTO daily_activity (user_id, activity_date, steps, day_type, workout_kcal, updated_at, deleted_at)"
+        " VALUES (%s, %s, %s, %s, %s, now(), %s)",
+        (uid, activity_date, steps, day_type, workout_kcal, "2026-01-01T00:00:00Z" if deleted else None),
     )
 
 
@@ -60,9 +65,7 @@ def test_it_needs_a_token(client):
 
 
 def test_an_empty_day_is_zeros_not_404(client, me):
-    assert daily(client, me) == {
-        "date": DAY, "totals": ZEROS, "unknown": NONE_UNKNOWN, "goal": None, "steps": None, "log_count": 0,
-    }  # fmt: skip
+    assert daily(client, me) == EMPTY_DAY
 
 
 def test_totals_are_the_sum_of_the_days_logs(client, me):
@@ -134,9 +137,7 @@ def test_another_users_logs_goal_and_steps_are_never_counted(client, me, other, 
     create(client, other, fdc_id=CHICKEN, quantity=500, log_date=DAY)
     add_goal(db, user_id(client, other), "2026-01-01")
     add_steps(db, user_id(client, other), DAY, 9000)
-    assert daily(client, me) == {
-        "date": DAY, "totals": ZEROS, "unknown": NONE_UNKNOWN, "goal": None, "steps": None, "log_count": 0,
-    }  # fmt: skip
+    assert daily(client, me) == EMPTY_DAY
     create(client, me, fdc_id=BANANA, quantity=100, log_date=DAY)
     assert daily(client, me)["totals"]["calories"] == pytest.approx(89)
     theirs = daily(client, other)
@@ -169,6 +170,67 @@ def test_steps_are_that_days(client, me, db):
     assert daily(client, me, "2026-03-02")["steps"] == 0  # a recorded 0 is not "none"
     assert daily(client, me, "2026-03-03")["steps"] is None
     assert daily(client, me, "2026-03-04")["steps"] is None
+
+
+def test_the_activity_is_that_days(client, me, db):
+    uid = user_id(client, me)
+    add_steps(db, uid, DAY, 8421, day_type="workout", workout_kcal=0)
+    add_steps(db, uid, "2026-03-02", 100)
+    body = daily(client, me)
+    assert (body["steps"], body["activity"]) == (8421, {"steps": 8421, "day_type": "workout", "workout_kcal": 0})
+    assert daily(client, me, "2026-03-02")["activity"] == {"steps": 100, "day_type": None, "workout_kcal": None}
+    assert daily(client, me, "2026-03-03")["activity"] is None
+
+
+def test_no_goal_means_no_target_and_no_remaining(client, me, db):
+    add_steps(db, user_id(client, me), DAY, 10000, day_type="workout", workout_kcal=300)
+    create(client, me, fdc_id=BANANA, quantity=100, log_date=DAY)
+    body = daily(client, me)
+    assert (body["goal"], body["target"], body["remaining"]) == (None, None, None)
+    assert body["totals"]["calories"] == pytest.approx(89)
+
+
+def test_the_target_reacts_to_steps_and_the_day_type(client, me, db):
+    uid = user_id(client, me)
+    add_goal(db, uid, "2026-01-01", workout_kcal=300.0, active_rest_kcal=150.0)
+    create(client, me, fdc_id=CHICKEN, quantity=200, log_date=DAY)  # 330 kcal, 62.04 g protein
+    # No activity row: the goal itself.
+    base = {k: GOAL[k] for k in ZEROS}
+    body = daily(client, me)
+    assert body["target"] == {**base, "adjustment_kcal": 0}
+    assert body["remaining"]["calories"] == pytest.approx(2000 - 330)
+    # Steps and a workout: round(10000 × 0.035) + 300 = 650, a quarter of it to carbs.
+    add_steps(db, uid, DAY, 10000, day_type="workout")
+    body = daily(client, me)
+    assert body["target"] == {**base, "calories": 2650, "carbs_g": 362.5, "adjustment_kcal": 650}
+    assert body["remaining"] == {
+        "calories": pytest.approx(2650 - 330), "protein_g": pytest.approx(150 - 62.04),
+        "carbs_g": pytest.approx(362.5), "fat_g": pytest.approx(65 - 7.14), "fiber_g": pytest.approx(30),
+        "sugar_g": pytest.approx(50), "sodium_mg": pytest.approx(2300 - 148),
+    }  # fmt: skip
+    # Active rest uses the goal's other amount; the day's own workout_kcal replaces either, 0 included.
+    add_steps(db, uid, "2026-03-02", 4000, day_type="active_rest")
+    assert daily(client, me, "2026-03-02")["target"]["adjustment_kcal"] == 140 + 150
+    add_steps(db, uid, "2026-03-03", 0, day_type="workout", workout_kcal=520)
+    assert daily(client, me, "2026-03-03")["target"]["calories"] == 2520
+    add_steps(db, uid, "2026-03-04", 0, day_type="workout", workout_kcal=0)
+    assert daily(client, me, "2026-03-04")["target"]["adjustment_kcal"] == 0
+    # Going over: remaining is negative, not clamped.
+    create(client, me, fdc_id=CHICKEN, quantity=2000, log_date="2026-03-04")
+    assert daily(client, me, "2026-03-04")["remaining"]["calories"] == pytest.approx(2000 - 3300)
+
+
+def test_a_past_day_keeps_its_goal_after_a_new_one_starts(client, me, db):
+    uid = user_id(client, me)
+    add_goal(db, uid, "2026-01-01", calories=2200.0)
+    add_steps(db, uid, "2026-02-01", 0, day_type="workout", workout_kcal=100)
+    before = daily(client, me, "2026-02-01")
+    assert before["target"]["calories"] == 2300
+    # A new goal from today on (as PUT /goals or a sync would add it) leaves the earlier days alone.
+    r = client.put("/api/v1/goals/2026-03-01", json={**GOAL, "calories": 1800.0}, headers=me)
+    assert r.status_code == 200, r.text
+    assert daily(client, me, "2026-02-01") == before
+    assert daily(client, me)["target"]["calories"] == 1800
 
 
 def test_the_totals_are_one_query_over_the_logs(client, me):

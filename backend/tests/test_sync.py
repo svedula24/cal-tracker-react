@@ -39,9 +39,11 @@ BANANA_VALUES = {
 }  # fmt: skip
 EGGS = {"calories": 140, "protein_g": 12, "carbs_g": 1, "fat_g": 10, "fiber_g": 0, "sugar_g": 0.5, "sodium_mg": 140}
 T0 = "2026-11-10T19:12:00.000Z"
-EMPTY = {"food_logs": [], "saved_foods": [], "goals": [], "daily_steps": []}
-TABLE_OF = {"food_logs": "food_logs", "saved_foods": "saved_foods", "goals": "user_goals", "daily_steps": "daily_steps"}
-KEY_OF = {"food_logs": "id", "saved_foods": "fdc_id", "goals": "effective_date", "daily_steps": "log_date"}
+EMPTY = {"food_logs": [], "saved_foods": [], "goals": [], "daily_activity": []}
+TABLE_OF = {
+    "food_logs": "food_logs", "saved_foods": "saved_foods", "goals": "user_goals", "daily_activity": "daily_activity",
+}  # fmt: skip
+KEY_OF = {"food_logs": "id", "saved_foods": "fdc_id", "goals": "effective_date", "daily_activity": "activity_date"}
 
 
 @pytest.fixture
@@ -151,11 +153,20 @@ def custom_log(**over):
 def goal(**over):
     row = {"effective_date": "2026-11-01", "calories": 2000, "protein_g": 150, "carbs_g": 200, "fat_g": 70,
            "fiber_g": 30, "sugar_g": 50, "sodium_mg": 2300, "steps": 8000, "goal": "maintain",
-           "updated_at": T0, "deleted_at": None}  # fmt: skip
+           "updated_at": T0, "deleted_at": None,
+           "source": "manual", "workout_kcal": 0, "active_rest_kcal": 0}  # fmt: skip
     return {**row, **over}
 
 
 def steps(day="2026-11-10", count=5000, **over):
+    """A daily_activity row."""
+    row = {"activity_date": day, "steps": count, "updated_at": T0, "deleted_at": None, "day_type": None,
+           "workout_kcal": None}  # fmt: skip
+    return {**row, **over}
+
+
+def legacy_steps(day="2026-11-10", count=5000, **over):
+    """A day as an app from before daily_activity pushes it: under daily_steps, keyed by log_date."""
     return {"log_date": day, "steps": count, "updated_at": T0, "deleted_at": None, **over}
 
 
@@ -224,12 +235,12 @@ def test_a_malformed_envelope_is_422(client, me, db, body):
 def test_more_than_500_rows_is_413_and_nothing_is_stored(client, me, db):
     logs = [food_log() for _ in range(300)]
     days = [steps(day=f"2026-{m:02d}-{d:02d}") for m in range(1, 9) for d in range(1, 26)]  # 200
-    body = sync(client, me, status=413, food_logs=logs, daily_steps=days, goals=[goal()])
+    body = sync(client, me, status=413, food_logs=logs, daily_activity=days, goals=[goal()])
     assert "500" in body["detail"]
-    assert stored(db) == [] and stored(db, "daily_steps") == [] and stored(db, "goals") == []
+    assert stored(db) == [] and stored(db, "daily_activity") == [] and stored(db, "goals") == []
     # Exactly 500 is fine.
-    ok = sync(client, me, food_logs=logs, daily_steps=days)
-    assert ok["rejected"] == [] and len(stored(db)) == 300 and len(stored(db, "daily_steps")) == 200
+    ok = sync(client, me, food_logs=logs, daily_activity=days)
+    assert ok["rejected"] == [] and len(stored(db)) == 300 and len(stored(db, "daily_activity")) == 200
 
 
 # ---- push ----
@@ -256,7 +267,7 @@ def test_a_pushed_log_is_stored_as_sent_and_is_not_sent_back(client, me, db):
 
 def test_a_pull_returns_rows_in_the_wire_format(client, me):
     log, entry = food_log(), custom_log(logged_at="2026-11-10T08:00:00.000+05:30")
-    sync(client, me, food_logs=[log, entry], goals=[goal()], daily_steps=[steps()], saved_foods=[saved()])
+    sync(client, me, food_logs=[log, entry], goals=[goal()], daily_activity=[steps()], saved_foods=[saved()])
     got, _, _ = pull_all(client, me)
     by_id = {row["id"]: row for row in got["food_logs"]}
     assert set(by_id) == {log["id"], entry["id"]}
@@ -270,7 +281,7 @@ def test_a_pull_returns_rows_in_the_wire_format(client, me):
     assert (custom["unit"], custom["quantity"], custom["values"]) == ("serving", 2, EGGS)
     # Timestamps come back in UTC with a zone.
     assert custom["logged_at"].endswith("Z") and same_moment(custom["logged_at"], "2026-11-10T02:30:00Z")
-    (g,), (s,), (f,) = got["goals"], got["daily_steps"], got["saved_foods"]
+    (g,), (s,), (f,) = got["goals"], got["daily_activity"], got["saved_foods"]
     assert {**g, "updated_at": T0} == goal()
     assert {**s, "updated_at": T0} == steps()
     assert {**f, "updated_at": T0, "saved_at": T0} == saved()
@@ -279,10 +290,10 @@ def test_a_pull_returns_rows_in_the_wire_format(client, me):
 def test_rev_order_is_write_order_and_the_cursor_is_the_highest_rev(client, me, db):
     cursors = [
         sync(client, me, food_logs=[food_log()])["cursor"],
-        sync(client, me, daily_steps=[steps()])["cursor"],
+        sync(client, me, daily_activity=[steps()])["cursor"],
         sync(client, me, goals=[goal()])["cursor"],
         sync(client, me, saved_foods=[saved()])["cursor"],
-        sync(client, me, daily_steps=[steps(count=6000, updated_at=at(1))])["cursor"],  # an update gets a new rev
+        sync(client, me, daily_activity=[steps(count=6000, updated_at=at(1))])["cursor"],  # an update gets a new rev
         sync(client, me, food_logs=[custom_log()])["cursor"],
     ]
     assert cursors == sorted(set(cursors))
@@ -290,14 +301,14 @@ def test_rev_order_is_write_order_and_the_cursor_is_the_highest_rev(client, me, 
     by_table = {t: [r["rev"] for r in stored(db, t)] for t in TABLE_OF}
     assert by_table == {
         "food_logs": [cursors[0], cursors[5]],
-        "daily_steps": [cursors[4]],  # the update's rev, not the insert's
+        "daily_activity": [cursors[4]],  # the update's rev, not the insert's
         "goals": [cursors[2]],
         "saved_foods": [cursors[3]],
     }
     # A pull from any earlier cursor returns exactly what was written after it, oldest first.
     later = sync(client, me, cursor=cursors[2])["changes"]
-    assert [len(later[t]) for t in ("food_logs", "saved_foods", "goals", "daily_steps")] == [1, 1, 0, 1]
-    assert later["daily_steps"][0]["steps"] == 6000
+    assert [len(later[t]) for t in ("food_logs", "saved_foods", "goals", "daily_activity")] == [1, 1, 0, 1]
+    assert later["daily_activity"][0]["steps"] == 6000
 
 
 def test_the_user_row_is_locked_first_and_the_request_is_one_transaction(client, me, db, statements, monkeypatch):
@@ -311,8 +322,8 @@ def test_the_user_row_is_locked_first_and_the_request_is_one_transaction(client,
 
     monkeypatch.setattr(sync_service, "pull", broken)
     with pytest.raises(RuntimeError, match="pull failed"):
-        sync(client, me, food_logs=[food_log()], daily_steps=[steps()])
-    assert len(stored(db)) == 1 and stored(db, "daily_steps") == []
+        sync(client, me, food_logs=[food_log()], daily_activity=[steps()])
+    assert len(stored(db)) == 1 and stored(db, "daily_activity") == []
 
 
 def test_a_batch_of_400_logs_is_a_handful_of_statements(client, me, db, statements):
@@ -365,25 +376,25 @@ def test_an_equal_updated_at_is_applied(client, me, db):
 
 
 def test_last_write_wins_on_every_table(client, me, db):
-    sync(client, me, goals=[goal(updated_at=at(10))], daily_steps=[steps(updated_at=at(10))],
+    sync(client, me, goals=[goal(updated_at=at(10))], daily_activity=[steps(updated_at=at(10))],
          saved_foods=[saved(updated_at=at(10))])  # fmt: skip
     cursor = max_rev(db)
     out = sync(client, me, cursor=cursor,
                goals=[goal(calories=1500, updated_at=at(5))],
-               daily_steps=[steps(count=1, updated_at=at(5))],
+               daily_activity=[steps(count=1, updated_at=at(5))],
                saved_foods=[saved(saved_at=at(3), updated_at=at(5))])  # fmt: skip
     assert out["rejected"] == [] and out["cursor"] == cursor == max_rev(db)
     assert out["changes"]["goals"][0]["calories"] == 2000
-    assert out["changes"]["daily_steps"][0]["steps"] == 5000
+    assert out["changes"]["daily_activity"][0]["steps"] == 5000
     assert same_moment(out["changes"]["saved_foods"][0]["saved_at"], T0)
     # A newer one is applied and not sent back.
     out = sync(client, me, cursor=cursor,
                goals=[goal(calories=1500, goal="lose", updated_at=at(11))],
-               daily_steps=[steps(count=7000, updated_at=at(11))],
+               daily_activity=[steps(count=7000, updated_at=at(11))],
                saved_foods=[saved(saved_at=at(3), updated_at=at(11))])  # fmt: skip
     assert out["changes"] == EMPTY and out["cursor"] == max_rev(db) > cursor
     assert [(g["calories"], g["goal"]) for g in stored(db, "goals")] == [(1500, "lose")]
-    assert stored(db, "daily_steps")[0]["steps"] == 7000
+    assert stored(db, "daily_activity")[0]["steps"] == 7000
     assert stored(db, "saved_foods")[0]["saved_at"] == when(at(3))
 
 
@@ -391,10 +402,10 @@ def test_the_same_key_twice_in_one_request_ends_with_the_newer(client, me, db):
     log = food_log()
     out = sync(client, me,
                food_logs=[{**log, "quantity": 1, "updated_at": at(2)}, {**log, "quantity": 2, "updated_at": at(1)}],
-               daily_steps=[steps(count=1, updated_at=at(1)), steps(count=2, updated_at=at(2))])  # fmt: skip
+               daily_activity=[steps(count=1, updated_at=at(1)), steps(count=2, updated_at=at(2))])  # fmt: skip
     assert out["rejected"] == []
     assert [row["quantity"] for row in stored(db)] == [1]
-    assert [row["steps"] for row in stored(db, "daily_steps")] == [2]
+    assert [row["steps"] for row in stored(db, "daily_activity")] == [2]
     # The row that lost to the other one in the same request is not reported as a server change.
     assert out["changes"] == EMPTY
 
@@ -403,11 +414,11 @@ def test_replaying_a_request_changes_nothing(client, me, db):
     request = {
         "food_logs": [food_log(), custom_log(), food_log(fdc_id=OVERRIPE), food_log(fdc_id=UNKNOWN)],
         "goals": [goal()],
-        "daily_steps": [steps()],
+        "daily_activity": [steps()],
         "saved_foods": [saved()],
     }
     first = sync(client, me, **request)
-    tables = ("food_logs", "goals", "daily_steps", "saved_foods")
+    tables = ("food_logs", "goals", "daily_activity", "saved_foods")
     before = {t: stored(db, t) for t in tables}
     again = sync(client, me, **request)
     assert again["rejected"] == first["rejected"] == []
@@ -423,11 +434,11 @@ def test_an_updated_at_in_the_future_is_clamped_to_five_minutes_ahead(client, me
     ahead = (datetime.now(UTC) + timedelta(days=1)).isoformat()
     soon = (datetime.now(UTC) + timedelta(minutes=2)).isoformat()
     log, near = food_log(updated_at=ahead), food_log(updated_at=soon)
-    sync(client, me, food_logs=[log, near], daily_steps=[steps(updated_at=ahead)],
+    sync(client, me, food_logs=[log, near], daily_activity=[steps(updated_at=ahead)],
          goals=[goal(updated_at=ahead)], saved_foods=[saved(updated_at=ahead)])  # fmt: skip
     now = datetime.now(UTC)
     by_id = {str(row["id"]): row["updated_at"] for row in stored(db)}
-    clamped = [by_id[log["id"]]] + [stored(db, t)[0]["updated_at"] for t in ("daily_steps", "goals", "saved_foods")]
+    clamped = [by_id[log["id"]]] + [stored(db, t)[0]["updated_at"] for t in ("daily_activity", "goals", "saved_foods")]
     for value in clamped:
         assert timedelta(minutes=4) < value - now <= timedelta(minutes=5)
     assert by_id[near["id"]] == when(soon)  # within the allowance: kept as sent
@@ -447,28 +458,28 @@ def test_an_updated_at_in_the_future_is_clamped_to_five_minutes_ahead(client, me
 
 def test_a_tombstone_deletes_and_is_pulled_with_its_data(client, me, db):
     log = food_log()
-    sync(client, me, food_logs=[log], goals=[goal()], daily_steps=[steps()], saved_foods=[saved()])
+    sync(client, me, food_logs=[log], goals=[goal()], daily_activity=[steps()], saved_foods=[saved()])
     out = sync(
         client,
         me,
         cursor=max_rev(db),
         food_logs=[tombstone("id", log["id"])],
         goals=[tombstone("effective_date", "2026-11-01")],
-        daily_steps=[tombstone("log_date", "2026-11-10")],
+        daily_activity=[tombstone("activity_date", "2026-11-10")],
         saved_foods=[tombstone("fdc_id", BANANA)],
     )
     assert out["rejected"] == [] and out["changes"] == EMPTY
     (row,) = stored(db)
     assert row["deleted_at"] == row["updated_at"] == when(at(1))
     assert (row["name"], row["quantity"]) == ("Bananas, raw", 150)  # the data is kept
-    for table in ("goals", "daily_steps", "saved_foods"):
+    for table in ("goals", "daily_activity", "saved_foods"):
         assert stored(db, table)[0]["deleted_at"] == when(at(1))
     # Another device (a pull from the start) gets the deletions, with the rows' data.
     got, _, _ = pull_all(client, me)
     (pulled,) = got["food_logs"]
     assert same_moment(pulled["deleted_at"], at(1)) and pulled["values"] == BANANA_VALUES
     assert got["goals"][0]["calories"] == 2000 and same_moment(got["goals"][0]["deleted_at"], at(1))
-    assert got["daily_steps"][0]["steps"] == 5000 and got["daily_steps"][0]["deleted_at"]
+    assert got["daily_activity"][0]["steps"] == 5000 and got["daily_activity"][0]["deleted_at"]
     assert got["saved_foods"][0]["fdc_id"] == BANANA and got["saved_foods"][0]["deleted_at"]
 
 
@@ -478,7 +489,7 @@ def test_a_tombstone_for_a_row_the_server_never_had_is_ignored(client, me, db):
         me,
         food_logs=[tombstone("id", str(uuid.uuid4()))],
         goals=[tombstone("effective_date", "2026-11-01")],
-        daily_steps=[tombstone("log_date", "2026-11-10")],
+        daily_activity=[tombstone("activity_date", "2026-11-10")],
         saved_foods=[tombstone("fdc_id", BANANA), tombstone("fdc_id", UNKNOWN)],  # also for a food it does not have
     )
     assert out == {"cursor": 0, "has_more": False, "changes": EMPTY, "rejected": []}
@@ -518,14 +529,15 @@ def test_an_older_tombstone_loses_to_a_newer_live_row(client, me, db):
 
 def test_a_newer_live_row_brings_a_deleted_row_back(client, me, db):
     log = food_log()
-    sync(client, me, food_logs=[log], daily_steps=[steps()])
-    sync(client, me, food_logs=[tombstone("id", log["id"], 1)], daily_steps=[tombstone("log_date", "2026-11-10", 1)])
+    sync(client, me, food_logs=[log], daily_activity=[steps()])
+    sync(client, me, food_logs=[tombstone("id", log["id"], 1)],
+         daily_activity=[tombstone("activity_date", "2026-11-10", 1)])  # fmt: skip
     out = sync(client, me, food_logs=[{**log, "quantity": 60, "updated_at": at(2)}],
-               daily_steps=[steps(count=9000, updated_at=at(2))])  # fmt: skip
+               daily_activity=[steps(count=9000, updated_at=at(2))])  # fmt: skip
     assert out["rejected"] == []
     (row,) = stored(db)
     assert (row["deleted_at"], row["quantity"], row["updated_at"]) == (None, 60, when(at(2)))
-    assert [(s["deleted_at"], s["steps"]) for s in stored(db, "daily_steps")] == [(None, 9000)]
+    assert [(s["deleted_at"], s["steps"]) for s in stored(db, "daily_activity")] == [(None, 9000)]
 
 
 def test_a_tombstone_for_a_deleted_row_keeps_it_deleted(client, me, db):
@@ -673,11 +685,11 @@ BAD_LOGS = [
 )
 def test_a_bad_log_is_rejected_and_the_rest_of_the_batch_is_applied(client, me, db, change, reason):
     good, bad, also_good = food_log(), food_log(**change), custom_log()
-    out = sync(client, me, food_logs=[good, bad, also_good], daily_steps=[steps()])
+    out = sync(client, me, food_logs=[good, bad, also_good], daily_activity=[steps()])
     key = bad["id"] if isinstance(bad["id"], str) else ""
     assert out["rejected"] == [{"table": "food_logs", "key": key, "reason": reason}]
     assert {str(row["id"]) for row in stored(db)} == {good["id"], also_good["id"]}
-    assert len(stored(db, "daily_steps")) == 1
+    assert len(stored(db, "daily_activity")) == 1
     assert out["cursor"] == max_rev(db)
 
 
@@ -715,7 +727,7 @@ def test_bad_rows_of_the_other_tables_are_rejected_one_by_one(client, me, db):
             goal(effective_date="01/07/2026"),
             goal(effective_date="2026-01-08"),
         ],
-        daily_steps=[
+        daily_activity=[
             steps("2026-01-01", -1),
             steps("2026-01-02", "many"),
             steps("2026-01-03", 2**31),
@@ -736,14 +748,14 @@ def test_bad_rows_of_the_other_tables_are_rejected_one_by_one(client, me, db):
         {"table": "goals", "key": "2026-01-05", "reason": "invalid steps"},
         {"table": "goals", "key": "2026-01-06", "reason": "invalid fiber_g"},
         {"table": "goals", "key": "01/07/2026", "reason": "invalid effective_date"},
-        {"table": "daily_steps", "key": "2026-01-01", "reason": "invalid steps"},
-        {"table": "daily_steps", "key": "2026-01-02", "reason": "invalid steps"},
-        {"table": "daily_steps", "key": "2026-01-03", "reason": "invalid steps"},
-        {"table": "daily_steps", "key": "2026-01-04", "reason": "invalid updated_at"},
-        {"table": "daily_steps", "key": "", "reason": "invalid log_date"},
+        {"table": "daily_activity", "key": "2026-01-01", "reason": "invalid steps"},
+        {"table": "daily_activity", "key": "2026-01-02", "reason": "invalid steps"},
+        {"table": "daily_activity", "key": "2026-01-03", "reason": "invalid steps"},
+        {"table": "daily_activity", "key": "2026-01-04", "reason": "invalid updated_at"},
+        {"table": "daily_activity", "key": "", "reason": "invalid activity_date"},
     ]
     assert [str(g["effective_date"]) for g in stored(db, "goals")] == ["2026-01-08"]
-    assert [(str(s["log_date"]), s["steps"]) for s in stored(db, "daily_steps")] == [("2026-01-05", 0)]
+    assert [(str(s["activity_date"]), s["steps"]) for s in stored(db, "daily_activity")] == [("2026-01-05", 0)]
     assert [f["fdc_id"] for f in stored(db, "saved_foods")] == [OVERRIPE]
 
 
@@ -756,7 +768,7 @@ def test_a_rejection_does_not_echo_the_bad_value(client, me):
 
 def test_a_row_the_database_refuses_is_rejected_alone(client, me, db):
     # Something validation does not know about: the batch is applied again row by row, each in a savepoint.
-    db.execute("ALTER TABLE daily_steps ADD CONSTRAINT no_thirteen CHECK (steps <> 13)")
+    db.execute("ALTER TABLE daily_activity ADD CONSTRAINT no_thirteen CHECK (steps <> 13)")
     days = [
         steps("2026-11-01", 1),
         steps("2026-11-02", 13),
@@ -766,22 +778,24 @@ def test_a_row_the_database_refuses_is_rejected_alone(client, me, db):
         steps("2026-11-04", 13, updated_at=at(1)),  # refused: the day keeps the 5
     ]
     log = food_log()
-    out = sync(client, me, food_logs=[log], daily_steps=days, goals=[goal()])
+    out = sync(client, me, food_logs=[log], daily_activity=days, goals=[goal()])
     assert out["rejected"] == [
-        {"table": "daily_steps", "key": "2026-11-02", "reason": "invalid row"},
-        {"table": "daily_steps", "key": "2026-11-04", "reason": "invalid row"},
+        {"table": "daily_activity", "key": "2026-11-02", "reason": "invalid row"},
+        {"table": "daily_activity", "key": "2026-11-04", "reason": "invalid row"},
     ]
-    assert {str(s["log_date"]): s["steps"] for s in stored(db, "daily_steps")} == {
+    assert {str(s["activity_date"]): s["steps"] for s in stored(db, "daily_activity")} == {
         "2026-11-01": 1, "2026-11-03": 4, "2026-11-04": 5,
     }  # fmt: skip
     assert len(stored(db)) == 1 and len(stored(db, "goals")) == 1
     assert out["cursor"] == max_rev(db) and out["changes"] == EMPTY
     # The same for an update of a stored row: it keeps what it had.
     out = sync(
-        client, me, daily_steps=[steps("2026-11-01", 13, updated_at=at(5)), steps("2026-11-03", 30, updated_at=at(5))]
+        client,
+        me,
+        daily_activity=[steps("2026-11-01", 13, updated_at=at(5)), steps("2026-11-03", 30, updated_at=at(5))],
     )
-    assert out["rejected"] == [{"table": "daily_steps", "key": "2026-11-01", "reason": "invalid row"}]
-    assert {str(s["log_date"]): s["steps"] for s in stored(db, "daily_steps")} == {
+    assert out["rejected"] == [{"table": "daily_activity", "key": "2026-11-01", "reason": "invalid row"}]
+    assert {str(s["activity_date"]): s["steps"] for s in stored(db, "daily_activity")} == {
         "2026-11-01": 1, "2026-11-03": 30, "2026-11-04": 5,
     }  # fmt: skip
 
@@ -792,22 +806,24 @@ def test_a_row_the_database_refuses_is_rejected_alone(client, me, db):
 def test_users_never_see_each_others_rows(client, me, other, db):
     mine, theirs = food_log(name="mine"), food_log(name="theirs")
     # The same keys under both users are different rows.
-    sync(client, me, food_logs=[mine], goals=[goal(calories=1800)], daily_steps=[steps(count=1)], saved_foods=[saved()])
-    sync(client, other, food_logs=[theirs], goals=[goal(calories=2600)], daily_steps=[steps(count=2)],
+    sync(client, me, food_logs=[mine], goals=[goal(calories=1800)], daily_activity=[steps(count=1)],
+         saved_foods=[saved()])  # fmt: skip
+    sync(client, other, food_logs=[theirs], goals=[goal(calories=2600)], daily_activity=[steps(count=2)],
          saved_foods=[saved(updated_at=at(3))])  # fmt: skip
     for who, name, calories, count in ((me, "mine", 1800, 1), (other, "theirs", 2600, 2)):
         got, cursor, _ = pull_all(client, who)
         assert [row["name"] for row in got["food_logs"]] == [name]
         assert [row["calories"] for row in got["goals"]] == [calories]
-        assert [row["steps"] for row in got["daily_steps"]] == [count]
+        assert [row["steps"] for row in got["daily_activity"]] == [count]
         assert len(got["saved_foods"]) == 1
         assert sync(client, who, cursor=cursor)["changes"] == EMPTY
-    assert len(stored(db)) == len(stored(db, "goals")) == len(stored(db, "daily_steps")) == 2
+    assert len(stored(db)) == len(stored(db, "goals")) == len(stored(db, "daily_activity")) == 2
     # One user's cursor ends above the other's rows without ever returning them.
     assert sync(client, me, cursor=0)["cursor"] < sync(client, other, cursor=0)["cursor"]
     # Deleting "the same" keys as the other user deletes only one's own.
-    sync(client, me, daily_steps=[tombstone("log_date", "2026-11-10")], saved_foods=[tombstone("fdc_id", BANANA)])
-    assert [(s["steps"], s["deleted_at"] is None) for s in stored(db, "daily_steps")] == [(2, True), (1, False)]
+    sync(client, me, daily_activity=[tombstone("activity_date", "2026-11-10")],
+         saved_foods=[tombstone("fdc_id", BANANA)])  # fmt: skip
+    assert [(s["steps"], s["deleted_at"] is None) for s in stored(db, "daily_activity")] == [(2, True), (1, False)]
     assert pull_all(client, other)[0]["saved_foods"][0]["deleted_at"] is None
 
 
@@ -847,7 +863,7 @@ def test_paging_returns_every_row_exactly_once_in_rev_order(client, me, other, d
     logs = [food_log(name=f"log {i}") for i in range(1150)]
     days = [steps(day=f"2026-{m:02d}-{d:02d}") for m in range(1, 5) for d in range(1, 26)]  # 100
     for start in range(0, 1150, 250):
-        sync(client, me, food_logs=logs[start : start + 250], daily_steps=days[start // 250 * 20 :][:20])
+        sync(client, me, food_logs=logs[start : start + 250], daily_activity=days[start // 250 * 20 :][:20])
     sync(client, other, food_logs=[food_log() for _ in range(30)])
     sync(client, me, goals=[goal()], saved_foods=[saved()])
     total = 1150 + 100 + 2
@@ -889,16 +905,17 @@ def test_a_push_while_behind_does_not_skip_anything(client, me, db):
     """A device far behind pushes a row: it is paged through the older rows first and misses none."""
     older = [food_log(name=f"old {i}") for i in range(400)]
     sync(client, me, food_logs=older)
-    sync(client, me, daily_steps=[steps(day=f"2026-{m:02d}-{d:02d}") for m in range(1, 9) for d in range(1, 26)])  # 200
+    days = [steps(day=f"2026-{m:02d}-{d:02d}") for m in range(1, 9) for d in range(1, 26)]  # 200
+    sync(client, me, daily_activity=days)
     new = food_log(name="new")
     first = sync(client, me, cursor=None, food_logs=[new])
     assert first["has_more"] is True
-    assert len(first["changes"]["food_logs"]) == 400 and len(first["changes"]["daily_steps"]) == 100
+    assert len(first["changes"]["food_logs"]) == 400 and len(first["changes"]["daily_activity"]) == 100
     assert new["id"] not in [row["id"] for row in first["changes"]["food_logs"]]
     assert first["cursor"] < stored(db)[-1]["rev"]  # not past the rows it has not been sent yet
     got, cursor, calls = pull_all(client, me, first["cursor"])
     assert calls == 1 and cursor == max_rev(db)
-    assert len(got["daily_steps"]) == 100
+    assert len(got["daily_activity"]) == 100
     # Its own row comes back on the later page (the cursor could not pass over it): the same data.
     assert [row["id"] for row in got["food_logs"]] == [new["id"]]
     seen = keys_of(first["changes"]) + keys_of(got)
@@ -910,10 +927,10 @@ def test_a_push_on_the_last_page_moves_the_cursor_past_its_own_rows(client, me, 
     sync(client, me, food_logs=[old])
     sync(client, other, food_logs=[food_log()])
     new = food_log(name="new")
-    out = sync(client, me, cursor=None, food_logs=[new], daily_steps=[steps()])
+    out = sync(client, me, cursor=None, food_logs=[new], daily_activity=[steps()])
     assert [row["id"] for row in out["changes"]["food_logs"]] == [old["id"]]
-    assert out["changes"]["daily_steps"] == [] and out["has_more"] is False
-    assert out["cursor"] == stored(db, "daily_steps")[0]["rev"]
+    assert out["changes"]["daily_activity"] == [] and out["has_more"] is False
+    assert out["cursor"] == stored(db, "daily_activity")[0]["rev"]
     assert sync(client, me, cursor=out["cursor"])["changes"] == EMPTY
 
 
@@ -979,4 +996,109 @@ def test_a_body_over_the_size_limit_is_413_before_it_is_parsed(client, me, db):
     assert db.execute("SELECT count(*) FROM food_logs").fetchone() == (0,)
     # A body under the limit is handled as usual.
     assert sync(client, me)["rejected"] == []
+
+
+# ---- activity targets: goal source and day amounts, daily_activity and its legacy name ----
+
+
+def test_the_goal_and_day_fields_round_trip(client, me, other, db):
+    computed = goal(source="computed", workout_kcal=320.5, active_rest_kcal=150)
+    days = [
+        steps("2026-11-10", 9000, day_type="workout", workout_kcal=410),
+        steps("2026-11-11", 3000, day_type="active_rest", workout_kcal=0),  # 0 is a value, not "the goal's"
+        steps("2026-11-12", 0, day_type="rest"),
+    ]
+    assert sync(client, me, goals=[computed], daily_activity=days)["rejected"] == []
+    got, _, _ = pull_all(client, me)
+    assert [{**g, "updated_at": T0} for g in got["goals"]] == [computed]
+    assert [{**d, "updated_at": T0} for d in got["daily_activity"]] == days
+    assert [(s["day_type"], s["workout_kcal"]) for s in stored(db, "daily_activity")] == [
+        ("workout", 410), ("active_rest", 0), ("rest", None),
+    ]  # fmt: skip
+    assert pull_all(client, other)[0] == EMPTY
+
+
+def test_a_row_without_the_new_fields_gets_the_defaults(client, me, db):
+    old_goal = {k: v for k, v in goal().items() if k not in ("source", "workout_kcal", "active_rest_kcal")}
+    old_day = {k: v for k, v in steps().items() if k not in ("day_type", "workout_kcal")}
+    assert sync(client, me, goals=[old_goal], daily_activity=[old_day])["rejected"] == []
+    (g,) = stored(db, "goals")
+    assert (g["source"], g["workout_kcal"], g["active_rest_kcal"]) == ("manual", 0, 0)
+    (d,) = stored(db, "daily_activity")
+    assert (d["day_type"], d["workout_kcal"]) == (None, None)
+    # An edit from such an app replaces the whole row, so it resets what a newer app had set.
+    sync(client, me, goals=[goal(workout_kcal=300, updated_at=at(1))])
+    sync(client, me, goals=[{**old_goal, "updated_at": at(2)}])
+    assert stored(db, "goals")[0]["workout_kcal"] == 0
+
+
+def test_bad_values_of_the_new_fields_are_rejected(client, me, db):
+    out = sync(
+        client,
+        me,
+        goals=[goal(source="guess"), goal(effective_date="2026-11-02", workout_kcal=-1),
+               goal(effective_date="2026-11-03", active_rest_kcal="300")],
+        daily_activity=[steps("2026-11-10", day_type="active_recovery"), steps("2026-11-11", workout_kcal=-5)],
+    )  # fmt: skip
+    assert out["rejected"] == [
+        {"table": "goals", "key": "2026-11-01", "reason": "invalid source"},
+        {"table": "goals", "key": "2026-11-02", "reason": "invalid workout_kcal"},
+        {"table": "goals", "key": "2026-11-03", "reason": "invalid active_rest_kcal"},
+        {"table": "daily_activity", "key": "2026-11-10", "reason": "invalid day_type"},
+        {"table": "daily_activity", "key": "2026-11-11", "reason": "invalid workout_kcal"},
+    ]
+    assert stored(db, "goals") == [] and stored(db, "daily_activity") == []
+
+
+def test_a_day_pushed_under_the_legacy_name_is_stored_as_daily_activity(client, me, other, db):
+    out = sync(
+        client,
+        me,
+        daily_steps=[legacy_steps("2026-11-10", 4000), legacy_steps("2026-11-11", -1), {"steps": 1, "updated_at": T0}],
+    )
+    assert out["rejected"] == [
+        {"table": "daily_steps", "key": "2026-11-11", "reason": "invalid steps"},
+        {"table": "daily_steps", "key": "", "reason": "invalid log_date"},
+    ]
+    assert [(str(s["activity_date"]), s["steps"], s["day_type"]) for s in stored(db, "daily_activity")] == [
+        ("2026-11-10", 4000, None)
+    ]
+    # A pull only ever answers with daily_activity.
+    page = sync(client, other)
+    assert set(page["changes"]) == set(EMPTY)
+    got, _, _ = pull_all(client, me)
+    assert [{**d, "updated_at": T0} for d in got["daily_activity"]] == [steps("2026-11-10", 4000)]
+    # A legacy tombstone deletes it; a legacy row that loses comes back as the daily_activity winner.
+    sync(client, me, daily_activity=[steps("2026-11-12", 7000, updated_at=at(10))])
+    out = sync(client, me, daily_steps=[tombstone("log_date", "2026-11-10"), legacy_steps("2026-11-12", 1)])
+    assert out["rejected"] == []
+    by_day = {str(s["activity_date"]): s for s in stored(db, "daily_activity")}
+    assert by_day["2026-11-10"]["deleted_at"] is not None and by_day["2026-11-12"]["steps"] == 7000
+    assert [(w["activity_date"], w["steps"]) for w in out["changes"]["daily_activity"]] == [("2026-11-12", 7000)]
+
+
+def test_a_day_pushed_under_both_names_ends_with_the_newer_and_its_winner_is_sent_once(client, me, db):
+    sync(client, me, daily_activity=[steps(count=9000, updated_at=at(10))])
+    out = sync(client, me, daily_steps=[legacy_steps(count=1)], daily_activity=[steps(count=2)])
+    assert [(w["activity_date"], w["steps"]) for w in out["changes"]["daily_activity"]] == [("2026-11-10", 9000)]
+    out = sync(client, me, daily_steps=[legacy_steps(count=1, updated_at=at(11))],
+               daily_activity=[steps(count=2, updated_at=at(12))])  # fmt: skip
+    assert out["rejected"] == [] and [s["steps"] for s in stored(db, "daily_activity")] == [2]
+
+
+def test_a_legacy_row_changes_only_the_steps(client, me, db):
+    # An app from before daily_activity knows only steps: its edit keeps the day's type and kcal.
+    sync(client, me, daily_activity=[steps(count=9000, day_type="workout", workout_kcal=400)])
+    out = sync(client, me, daily_steps=[legacy_steps(count=1234, updated_at=at(5))])
+    assert out["rejected"] == []
+    (d,) = stored(db, "daily_activity")
+    assert (d["steps"], d["day_type"], d["workout_kcal"], d["updated_at"]) == (1234, "workout", 400, when(at(5)))
+    got, _, _ = pull_all(client, me)
+    assert [(d["steps"], d["day_type"], d["workout_kcal"]) for d in got["daily_activity"]] == [(1234, "workout", 400)]
+
+
+def test_legacy_rows_count_toward_the_500_row_limit(client, me, db):
+    days = [legacy_steps(f"2026-{1 + i // 28:02d}-{1 + i % 28:02d}") for i in range(300)]
+    sync(client, me, status=413, daily_steps=days, daily_activity=[steps()] * 201)
+    assert stored(db, "daily_activity") == []
 

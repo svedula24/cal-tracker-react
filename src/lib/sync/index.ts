@@ -12,7 +12,6 @@ import { loadFoods } from '@/data/foods';
 import { API_URL } from '@/lib/config';
 import { syncStores } from '@/lib/data';
 import { loadToken, saveToken } from '@/lib/identity';
-import { todayKey } from '@/lib/nutrition';
 
 import { postSync, registerDevice } from './api';
 import { attachEngine } from './dirty';
@@ -54,7 +53,6 @@ export function startSync(): void {
       ...stores,
       // The bundled database is loaded only when a pulled bookmark needs its food.
       findFood: async (id) => (await loadFoods()).foods.find((food) => food.id === id) ?? null,
-      today: todayKey,
     });
     const engine = createSync({
       ...local,

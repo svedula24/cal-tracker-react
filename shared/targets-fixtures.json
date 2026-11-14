@@ -1,0 +1,437 @@
+{
+  "_rules": [
+    "Shared by backend/tests/test_targets.py and tests/targets.test.mjs. Wire names (protein_g, ...).",
+    "day_target: adjustment_kcal = round(steps * 0.035) + day_kcal. day_kcal = the day row's workout_kcal when it is not null (a value for that day, whatever the day type); otherwise the goal's workout_kcal for a workout day, active_rest_kcal for an active_rest day, 0 for rest or no day type. activity null, or steps null, counts as 0 steps.",
+    "day_target: calories += adjustment_kcal; carbs_g += adjustment_kcal / 4; every other target is the goal's value unchanged. Only adjustment_kcal is rounded.",
+    "remaining = target - totals for each of the seven nutrients (may be negative). Compare with a tolerance of 1e-9.",
+    "suggest: BMR = 10*weight_kg + 6.25*height_cm - 5*age + (5 if male, -161 if female); calories = round(BMR * 1.2 * {lose: 0.8, maintain: 1.0, gain: 1.1}).",
+    "suggest: protein_g = round(1.8 * weight_kg); fat_g = max(0, round(0.25 * calories / 9)); carbs_g = max(0, round((calories - 4*protein_g - 9*fat_g) / 4)); calories itself is max(0, ...). Inputs: age 10-120, height_cm 50-300, weight_kg 20-500 (out of range is invalid input, not a suggestion).",
+    "round = half away from zero (JS Math.round differs on negative halves; Python round() is banker's): implement explicitly in both."
+  ],
+  "day_target": [
+    {
+      "name": "no activity row",
+      "goal": {
+        "calories": 2000,
+        "protein_g": 150,
+        "carbs_g": 200,
+        "fat_g": 70,
+        "fiber_g": 30,
+        "sugar_g": 50,
+        "sodium_mg": 2300,
+        "workout_kcal": 300,
+        "active_rest_kcal": 150
+      },
+      "activity": null,
+      "totals": null,
+      "expected": {
+        "target": {
+          "calories": 2000,
+          "protein_g": 150,
+          "carbs_g": 200,
+          "fat_g": 70,
+          "fiber_g": 30,
+          "sugar_g": 50,
+          "sodium_mg": 2300,
+          "adjustment_kcal": 0
+        },
+        "remaining": null
+      }
+    },
+    {
+      "name": "rest day, no steps",
+      "goal": {
+        "calories": 2000,
+        "protein_g": 150,
+        "carbs_g": 200,
+        "fat_g": 70,
+        "fiber_g": 30,
+        "sugar_g": 50,
+        "sodium_mg": 2300,
+        "workout_kcal": 300,
+        "active_rest_kcal": 150
+      },
+      "activity": {
+        "steps": 0,
+        "day_type": "rest",
+        "workout_kcal": null
+      },
+      "totals": null,
+      "expected": {
+        "target": {
+          "calories": 2000,
+          "protein_g": 150,
+          "carbs_g": 200,
+          "fat_g": 70,
+          "fiber_g": 30,
+          "sugar_g": 50,
+          "sodium_mg": 2300,
+          "adjustment_kcal": 0
+        },
+        "remaining": null
+      }
+    },
+    {
+      "name": "workout day with 10000 steps",
+      "goal": {
+        "calories": 2000,
+        "protein_g": 150,
+        "carbs_g": 200,
+        "fat_g": 70,
+        "fiber_g": 30,
+        "sugar_g": 50,
+        "sodium_mg": 2300,
+        "workout_kcal": 300,
+        "active_rest_kcal": 150
+      },
+      "activity": {
+        "steps": 10000,
+        "day_type": "workout",
+        "workout_kcal": null
+      },
+      "totals": null,
+      "expected": {
+        "target": {
+          "calories": 2650,
+          "protein_g": 150,
+          "carbs_g": 362.5,
+          "fat_g": 70,
+          "fiber_g": 30,
+          "sugar_g": 50,
+          "sodium_mg": 2300,
+          "adjustment_kcal": 650
+        },
+        "remaining": null
+      }
+    },
+    {
+      "name": "active rest with 4000 steps",
+      "goal": {
+        "calories": 2000,
+        "protein_g": 150,
+        "carbs_g": 200,
+        "fat_g": 70,
+        "fiber_g": 30,
+        "sugar_g": 50,
+        "sodium_mg": 2300,
+        "workout_kcal": 300,
+        "active_rest_kcal": 150
+      },
+      "activity": {
+        "steps": 4000,
+        "day_type": "active_rest",
+        "workout_kcal": null
+      },
+      "totals": null,
+      "expected": {
+        "target": {
+          "calories": 2290,
+          "protein_g": 150,
+          "carbs_g": 272.5,
+          "fat_g": 70,
+          "fiber_g": 30,
+          "sugar_g": 50,
+          "sodium_mg": 2300,
+          "adjustment_kcal": 290
+        },
+        "remaining": null
+      }
+    },
+    {
+      "name": "steps only, no day type; step calories are rounded",
+      "goal": {
+        "calories": 2000,
+        "protein_g": 150,
+        "carbs_g": 200,
+        "fat_g": 70,
+        "fiber_g": 30,
+        "sugar_g": 50,
+        "sodium_mg": 2300,
+        "workout_kcal": 300,
+        "active_rest_kcal": 150
+      },
+      "activity": {
+        "steps": 1234,
+        "day_type": null,
+        "workout_kcal": null
+      },
+      "totals": null,
+      "expected": {
+        "target": {
+          "calories": 2043,
+          "protein_g": 150,
+          "carbs_g": 210.75,
+          "fat_g": 70,
+          "fiber_g": 30,
+          "sugar_g": 50,
+          "sodium_mg": 2300,
+          "adjustment_kcal": 43
+        },
+        "remaining": null
+      }
+    },
+    {
+      "name": "workout day amounts default to 0",
+      "goal": {
+        "calories": 1800,
+        "protein_g": 120,
+        "carbs_g": 180,
+        "fat_g": 60,
+        "fiber_g": 25,
+        "sugar_g": 40,
+        "sodium_mg": 2000,
+        "workout_kcal": 0,
+        "active_rest_kcal": 0
+      },
+      "activity": {
+        "steps": 0,
+        "day_type": "workout",
+        "workout_kcal": null
+      },
+      "totals": null,
+      "expected": {
+        "target": {
+          "calories": 1800,
+          "protein_g": 120,
+          "carbs_g": 180,
+          "fat_g": 60,
+          "fiber_g": 25,
+          "sugar_g": 40,
+          "sodium_mg": 2000,
+          "adjustment_kcal": 0
+        },
+        "remaining": null
+      }
+    },
+    {
+      "name": "remaining, including going over",
+      "goal": {
+        "calories": 2000,
+        "protein_g": 150,
+        "carbs_g": 200,
+        "fat_g": 70,
+        "fiber_g": 30,
+        "sugar_g": 50,
+        "sodium_mg": 2300,
+        "workout_kcal": 300,
+        "active_rest_kcal": 150
+      },
+      "activity": {
+        "steps": 10000,
+        "day_type": "workout",
+        "workout_kcal": null
+      },
+      "totals": {
+        "calories": 1500,
+        "protein_g": 160,
+        "carbs_g": 180.5,
+        "fat_g": 55,
+        "fiber_g": 12,
+        "sugar_g": 60,
+        "sodium_mg": 2500
+      },
+      "expected": {
+        "target": {
+          "calories": 2650,
+          "protein_g": 150,
+          "carbs_g": 362.5,
+          "fat_g": 70,
+          "fiber_g": 30,
+          "sugar_g": 50,
+          "sodium_mg": 2300,
+          "adjustment_kcal": 650
+        },
+        "remaining": {
+          "calories": 1150,
+          "protein_g": -10,
+          "carbs_g": 182,
+          "fat_g": 15,
+          "fiber_g": 18,
+          "sugar_g": -10,
+          "sodium_mg": -200
+        }
+      }
+    },
+    {
+      "name": "a day workout_kcal replaces the goal amount",
+      "goal": {
+        "calories": 2000,
+        "protein_g": 150,
+        "carbs_g": 200,
+        "fat_g": 70,
+        "fiber_g": 30,
+        "sugar_g": 50,
+        "sodium_mg": 2300,
+        "workout_kcal": 300,
+        "active_rest_kcal": 150
+      },
+      "activity": {
+        "steps": 10000,
+        "day_type": "workout",
+        "workout_kcal": 520
+      },
+      "totals": null,
+      "expected": {
+        "target": {
+          "calories": 2870,
+          "protein_g": 150,
+          "carbs_g": 417.5,
+          "fat_g": 70,
+          "fiber_g": 30,
+          "sugar_g": 50,
+          "sodium_mg": 2300,
+          "adjustment_kcal": 870
+        },
+        "remaining": null
+      }
+    },
+    {
+      "name": "a day workout_kcal of 0 is a value, not missing",
+      "goal": {
+        "calories": 2000,
+        "protein_g": 150,
+        "carbs_g": 200,
+        "fat_g": 70,
+        "fiber_g": 30,
+        "sugar_g": 50,
+        "sodium_mg": 2300,
+        "workout_kcal": 300,
+        "active_rest_kcal": 150
+      },
+      "activity": {
+        "steps": 0,
+        "day_type": "workout",
+        "workout_kcal": 0
+      },
+      "totals": null,
+      "expected": {
+        "target": {
+          "calories": 2000,
+          "protein_g": 150,
+          "carbs_g": 200,
+          "fat_g": 70,
+          "fiber_g": 30,
+          "sugar_g": 50,
+          "sodium_mg": 2300,
+          "adjustment_kcal": 0
+        },
+        "remaining": null
+      }
+    },
+    {
+      "name": "a day workout_kcal counts even with no day type",
+      "goal": {
+        "calories": 2000,
+        "protein_g": 150,
+        "carbs_g": 200,
+        "fat_g": 70,
+        "fiber_g": 30,
+        "sugar_g": 50,
+        "sodium_mg": 2300,
+        "workout_kcal": 300,
+        "active_rest_kcal": 150
+      },
+      "activity": {
+        "steps": null,
+        "day_type": null,
+        "workout_kcal": 200
+      },
+      "totals": null,
+      "expected": {
+        "target": {
+          "calories": 2200,
+          "protein_g": 150,
+          "carbs_g": 250,
+          "fat_g": 70,
+          "fiber_g": 30,
+          "sugar_g": 50,
+          "sodium_mg": 2300,
+          "adjustment_kcal": 200
+        },
+        "remaining": null
+      }
+    }
+  ],
+  "suggest": [
+    {
+      "name": "male, maintain",
+      "input": {
+        "sex": "male",
+        "age": 30,
+        "height_cm": 180,
+        "weight_kg": 80,
+        "goal": "maintain"
+      },
+      "expected": {
+        "calories": 2136,
+        "protein_g": 144,
+        "carbs_g": 257,
+        "fat_g": 59
+      }
+    },
+    {
+      "name": "female, lose",
+      "input": {
+        "sex": "female",
+        "age": 25,
+        "height_cm": 165,
+        "weight_kg": 60,
+        "goal": "lose"
+      },
+      "expected": {
+        "calories": 1291,
+        "protein_g": 108,
+        "carbs_g": 134,
+        "fat_g": 36
+      }
+    },
+    {
+      "name": "male, gain",
+      "input": {
+        "sex": "male",
+        "age": 40,
+        "height_cm": 175,
+        "weight_kg": 70,
+        "goal": "gain"
+      },
+      "expected": {
+        "calories": 2110,
+        "protein_g": 126,
+        "carbs_g": 269,
+        "fat_g": 59
+      }
+    },
+    {
+      "name": "carbs of exactly 77.5 round up (half away from zero, not banker's)",
+      "input": {
+        "sex": "female",
+        "age": 70,
+        "height_cm": 150,
+        "weight_kg": 150,
+        "goal": "lose"
+      },
+      "expected": {
+        "calories": 1849,
+        "protein_g": 270,
+        "carbs_g": 78,
+        "fat_g": 51
+      }
+    },
+    {
+      "name": "lowest accepted inputs never give negative calories or fat",
+      "input": {
+        "sex": "female",
+        "age": 120,
+        "height_cm": 50,
+        "weight_kg": 20,
+        "goal": "lose"
+      },
+      "expected": {
+        "calories": 0,
+        "protein_g": 36,
+        "carbs_g": 0,
+        "fat_g": 0
+      }
+    }
+  ]
+}

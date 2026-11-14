@@ -10,6 +10,7 @@ import { BOTTOM_SPACE, Fab, fabBottom } from '@/components/Fab';
 import { EntryCard } from '@/components/home/EntryCard';
 import {
   BurnedCard,
+  DayTypeCard,
   CalorieCard,
   Dots,
   HealthScoreCard,
@@ -19,8 +20,8 @@ import {
   StreakPill,
 } from '@/components/home/HomeCards';
 import { WeekStrip } from '@/components/home/WeekStrip';
-import { useDay, useEntries } from '@/lib/data';
-import { todayKey } from '@/lib/nutrition';
+import { setDayLog, useDay, useEntries } from '@/lib/data';
+import { dayKcal, todayKey } from '@/lib/nutrition';
 import { useSelectedDay } from '@/lib/selectedDay';
 
 const PAGES = 3;
@@ -30,6 +31,10 @@ export default function Home() {
   const d = useDay(day);
   const today = useDay(todayKey());
   const { remove } = useEntries();
+  // The day type's share of the activity calories, and what the goal alone would add for it.
+  const typeKcal = d.burned - d.stepsKcal;
+  const goalTypeKcal = dayKcal(d.goals, { dayType: d.log.dayType });
+  const typeLabel = d.log.dayType === 'active_rest' ? 'Active rest' : 'Workout';
   const { width } = useWindowDimensions();
   const pager = useRef<ScrollViewInstance>(null);
   const [page, setPage] = useState(0);
@@ -84,18 +89,31 @@ export default function Home() {
                 burned={d.burned}
               />
               <View className="mt-[10px]">
-                <NutrientRow keys={['protein', 'carbs', 'fat']} totals={d.totals} goals={d.goals} />
+                <NutrientRow keys={['protein', 'carbs', 'fat']} totals={d.totals} goals={d.target} />
               </View>
             </View>
             <View style={{ width }} className="px-[24px]">
-              <NutrientRow keys={['fiber', 'sugar', 'sodium']} totals={d.totals} goals={d.goals} />
+              <NutrientRow keys={['fiber', 'sugar', 'sodium']} totals={d.totals} goals={d.target} />
               <HealthScoreCard value={d.health.value} text={d.health.text} />
             </View>
             <View style={{ width }} className="px-[24px]">
               <View className="flex-row" style={{ gap: 10 }}>
-                <StepsCard steps={d.log.steps} goal={d.goals.steps} />
-                <BurnedCard total={d.burned} />
+                <StepsCard key={day} steps={d.log.steps} goal={d.goals.steps} onSteps={(steps) => setDayLog(day, { steps })} />
+                <BurnedCard
+                  total={d.burned}
+                  steps={d.stepsKcal}
+                  day={typeKcal !== 0 || d.log.workoutKcal != null ? { label: typeLabel, kcal: typeKcal } : null}
+                />
               </View>
+              <DayTypeCard
+                key={day}
+                dayType={d.log.dayType ?? null}
+                workoutKcal={d.log.workoutKcal ?? null}
+                goalKcal={goalTypeKcal}
+                // Rest adds nothing, so it also clears the day's typed workout calories.
+                onDayType={(dayType) => setDayLog(day, dayType === 'rest' ? { dayType, workoutKcal: null } : { dayType })}
+                onWorkoutKcal={(workoutKcal) => setDayLog(day, { workoutKcal })}
+              />
             </View>
           </ScrollView>
 

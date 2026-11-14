@@ -15,7 +15,7 @@ from sqlalchemy import RowMapping, select, text
 from sqlalchemy.orm import Session
 
 from app.models.foods import FoodPortion
-from app.models.user_data import DailySteps, FoodLog, User, UserGoal
+from app.models.user_data import DailyActivity, FoodLog, User, UserGoal
 from app.services import foods as food_service
 
 
@@ -76,12 +76,13 @@ def goal_on(session: Session, user_id: uuid.UUID, day: date) -> UserGoal | None:
     return session.scalars(stmt).first()
 
 
-def steps_on(session: Session, user_id: uuid.UUID, day: date) -> int | None:
-    """The steps recorded for `day`, or None when there are none (or they were deleted)."""
-    stmt = select(DailySteps.steps).where(
-        DailySteps.user_id == user_id, DailySteps.log_date == day, DailySteps.deleted_at.is_(None)
+def activity_on(session: Session, user_id: uuid.UUID, day: date) -> RowMapping | None:
+    """The `steps`, `day_type` and `workout_kcal` recorded for `day`, or None when there is no row
+    (or it was deleted)."""
+    stmt = select(DailyActivity.steps, DailyActivity.day_type, DailyActivity.workout_kcal).where(
+        DailyActivity.user_id == user_id, DailyActivity.activity_date == day, DailyActivity.deleted_at.is_(None)
     )
-    return session.scalars(stmt).first()
+    return session.execute(stmt).mappings().first()
 
 
 # Each USDA food the user has logged, once, at its latest log (food_logs_user_recent_idx gives the

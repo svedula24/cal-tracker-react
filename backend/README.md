@@ -77,14 +77,21 @@ food is never deleted.
 | `users` | person | Anonymous for now: `email`, `auth_provider` and `auth_subject` are NULL until sign-in exists |
 | `user_tokens` | device or integration | `token_hash` is the SHA-256 of a bearer token; the token itself is never stored. `revoked_at` turns one off |
 | `food_logs` | logged food | `fdc_id` NULL = a custom entry. `quantity` + `unit` (`g` or `serving`). `unit_*`: the entry's own values per 100 g (or per serving), where a typed-over value lives. `food_*_per_100g`: the database food's values when it was logged. `calories`, `protein_g`, … are generated (`unit_* × quantity / 100`), so a day's totals are a plain `SUM` |
-| `user_goals` | change of targets | Key `(user_id, effective_date)`: the goal for a day is the latest row on or before it |
-| `daily_steps` | user and day | Rollover is calculated, not stored |
+| `user_goals` | change of targets | Key `(user_id, effective_date)`: the goal for a day is the latest row on or before it. The baseline targets, `source` (`computed` from a suggestion, or `manual`), and what a `workout_kcal` / `active_rest_kcal` day adds (default 0) |
+| `daily_activity` | user and day | Key `(user_id, activity_date)`. `steps`, `day_type` (`workout`, `active_rest`, `rest` or NULL) and `workout_kcal` (that day's own amount; NULL = the goal's). Called `daily_steps` (key `log_date`) before revision 0003. Rollover is calculated, not stored |
 | `saved_foods` | bookmark | Key `(user_id, fdc_id)` |
 
 The last four are synced with the app and carry `updated_at` (the client's edit
 time; the newer edit wins), `deleted_at` (a deletion that syncs) and `rev`, set
 by a trigger from one sequence on every write: a client asks for everything of
 its user with `rev` above the last one it saw.
+
+A day's target is never stored: it is worked out when it is read
+(`app/services/targets.py`), from the goal in force and the day's activity.
+`adjustment_kcal` = round(steps × 0.035) + the day's `workout_kcal` if set, else
+the goal's `workout_kcal` on a workout day or `active_rest_kcal` on an active-rest
+day, else 0. It is added to calories, and a quarter of it to carbs. The rules and
+their test cases are shared with the app in `shared/targets-fixtures.json`.
 
 ## Run it
 
@@ -157,6 +164,27 @@ uv run alembic upgrade head
 uv run python -m kalo.usda.load
 ```
 
+### Importing a Cal AI export
+
+`kalo/calai.py` imports the food log from a Cal AI "Summary Report" PDF into
+`food_logs`, under one user. It needs `pdftotext` (`brew install poppler`).
+
+```sh
+uv run python -m kalo.calai report.pdf --user <users.id> --tz America/Los_Angeles           # check only
+uv run python -m kalo.calai report.pdf --user <users.id> --tz America/Los_Angeles --write   # import
+```
+
+Each entry becomes a custom log of 1 serving with the report's values (the report
+has no amounts and no USDA link), which the app shows as a hand-written entry and
+pulls on its next sync. `--tz` is the zone the report's times are in. Nothing is
+written unless every day's entries add up to the report's "Calories eaten". An entry
+is skipped when the user already has a custom log with the same day, time and name
+(deleted ones too, so a deletion sticks), so a newer all-time export adds only what
+is new. An entry renamed in the app since is imported again. In the hour repeated
+when daylight saving ends, the report doesn't say which 1:30am it was, so both get
+the first one. Workouts, weight and
+profile pages are not imported.
+
 ## API
 
 FastAPI over these tables (`app/`), through SQLAlchemy 2.0: sync sessions on
@@ -186,7 +214,7 @@ on the network can also register a device (below), so use it on a network you
 trust.
 
 CORS: any origin may call the API (`Access-Control-Allow-Origin: *`) with `GET`,
-`POST`, `PATCH` or `DELETE` and the `Authorization` and `Content-Type` headers,
+`POST`, `PUT`, `PATCH` or `DELETE` and the `Authorization` and `Content-Type` headers,
 because the web build and the Expo web dev server call it from another origin.
 Cookies are never used (credentials are off): a user is identified only by the
 bearer token the client sends itself.
@@ -233,14 +261,20 @@ pulls what changed on the server:
 curl -X POST localhost:8000/api/v1/sync -H 'Authorization: Bearer kalo_…' \
   -H 'Content-Type: application/json' -d '{"cursor": null, "changes": {}}'
 # 200 {"cursor": 42, "has_more": false,
-#      "changes": {"food_logs": [...], "saved_foods": [...], "goals": [...], "daily_steps": [...]},
+#      "changes": {"food_logs": [...], "saved_foods": [...], "goals": [...], "daily_activity": [...]},
 #      "rejected": []}
 ```
 
 - **Push:** `changes` holds rows of the four synced tables. A food log is keyed by
   its `id` (a UUID the client makes), a saved food by `fdc_id`, a goal by
-  `effective_date`, a day's steps by `log_date`. A deletion is the key with
-  `updated_at` and `deleted_at`.
+  `effective_date`, a day by `activity_date`. A deletion is the key with
+  `updated_at` and `deleted_at`. A field added later (a goal's `source`,
+  `workout_kcal`, `active_rest_kcal`; a day's `day_type`, `workout_kcal`) may be
+  left out and gets its default, so an older app still syncs; a row replaces the
+  whole stored row, so such an app's edit resets them.
+- An app from before `daily_activity` pushes its days as `daily_steps` keyed by
+  `log_date`: they are still accepted (a rejection names them as sent), but a pull
+  only ever returns `daily_activity`.
 - **The newer edit wins,** by the row's `updated_at`, which is the phone's clock.
   A time more than 5 minutes ahead of the server's is clamped. A phone whose clock
   is behind can still lose to an older edit made elsewhere: acceptable while one
@@ -259,12 +293,12 @@ curl -X POST localhost:8000/api/v1/sync -H 'Authorization: Bearer kalo_…' \
   and it locks the user's row first, so one user's changes are numbered in the
   order they commit.
 
-### Logs, totals and recent foods (other clients)
+### Logs, totals, goals and recent foods (other clients)
 
 For clients other than the app, such as the planned ChatGPT integration. They
-write through the same code as sync, so a log made, edited or deleted here reaches
-the phone on its next pull. All need the bearer token; a missing, deleted or
-another user's log is 404.
+write through the same code as sync, so a log, goal or day made, edited or deleted
+here reaches the phone on its next pull. All need the bearer token; a missing,
+deleted or another user's log is 404. Unknown keys in a body are 422.
 
 | Endpoint | What it does |
 | --- | --- |
@@ -272,7 +306,11 @@ another user's log is 404.
 | `GET /api/v1/food-logs?date=YYYY-MM-DD` | `{"logs": [...]}` for that local day, newest first. `date` defaults to today in the user's timezone |
 | `PATCH /api/v1/food-logs/{log_id}` | Any of `name`, `quantity`, `log_date`, `logged_at`, `values` (any subset of nutrients). Values are per 100 g or per serving, so a change of quantity scales a typed-over value |
 | `DELETE /api/v1/food-logs/{log_id}` | Soft delete. 204, repeatable |
-| `GET /api/v1/nutrition/daily?date=` | `{"date", "totals", "unknown", "goal", "steps", "log_count"}`. A nutrient a log does not report adds 0 and is counted in `unknown`. `goal` is the latest one on or before the day. An empty day is zeros |
+| `GET /api/v1/nutrition/daily?date=` | `{"date", "totals", "unknown", "goal", "steps", "activity", "target", "remaining", "log_count"}`. A nutrient a log does not report adds 0 and is counted in `unknown`. `goal` is the latest one on or before the day. `activity` is the day's `{steps, day_type, workout_kcal}` (`steps` repeats its steps, for older clients). `target` is the goal adjusted for the activity, with `adjustment_kcal`; `remaining` is target − totals (negative when over). Both are null with no goal. An empty day is zeros |
+| `GET /api/v1/goals?day=` | The goal in force that day (default today); 404 when there is none |
+| `PUT /api/v1/goals/{effective_date}` | The whole goal from that day on: the seven targets, `steps`, `goal`, and optionally `source`, `workout_kcal`, `active_rest_kcal` (left out = `manual`, 0, 0) |
+| `PUT /api/v1/daily-activity/{activity_date}` | The whole day: `steps`, and optionally `day_type` and `workout_kcal` (left out = null) |
+| `POST /api/v1/goals/suggest` | `{"sex", "age", "height_cm", "weight_kg", "goal"}` to suggested `{"calories", "protein_g", "carbs_g", "fat_g"}` (Mifflin–St Jeor). Stores nothing |
 | `GET /api/v1/foods/recent?limit=20` | The user's distinct logged foods, most recent first, as search items plus `grams` (the last amount) and `logged_at` |
 
 A log in a response carries `values` (its own, per 100 g or per serving),
@@ -380,22 +418,26 @@ app/
   api/v1/sync.py       POST /sync (the app pushes and pulls)
   api/v1/food_logs.py  food-log create, read, edit, delete
   api/v1/nutrition.py  GET /nutrition/daily
+  api/v1/goals.py      GET /goals, PUT /goals/{date}, POST /goals/suggest, PUT /daily-activity/{date}
   schemas/             Pydantic request and response models (foods, users, logs, log_api)
   models/foods.py      SQLAlchemy Food and FoodPortion
-  models/user_data.py  User, UserToken, FoodLog, UserGoal, DailySteps, SavedFood
+  models/user_data.py  User, UserToken, FoodLog, UserGoal, DailyActivity, SavedFood
   services/foods.py    ranked search SQL, portions_for (a page's portions), get_food, get_portions
   services/users.py    tokens (made, hashed, looked up), register_device
   services/logs.py     how one pushed row is applied: last write wins, the food-log rules
-  services/sync.py     the push per table and the pull
-  services/log_queries.py  a day's logs and totals, the goal and steps on a date, recent foods
+  services/sync.py     the push per table and the pull; upsert_row for the REST goal and day routes
+  services/targets.py  a day's target and what remains, suggested goals (pure)
+  services/log_queries.py  a day's logs and totals, the goal and activity on a date, recent foods
   db/session.py        engine, session dependency
 alembic.ini
 migrations/
   env.py
   versions/            0001_foods_and_portions.py: the USDA tables, checks, indexes
                        0002_user_data.py: users, tokens, logs, goals, steps, saved foods
+                       0003_activity_targets.py: goal source and day amounts; daily_steps -> daily_activity
 kalo/
   db.py                database_url(): the one source of the connection URL
+  calai.py             import a Cal AI report PDF's food log
   usda/                the loader: datasets, nutrients, portions, load
 scripts/
   bench_search.py      search benchmark

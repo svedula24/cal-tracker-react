@@ -28,7 +28,7 @@ const deferred = () => {
 // { k: the key, v: a value }. On the wire: plus updated_at and deleted_at.
 const row = (k, v, at) => ({ k, v, updated_at: iso(at), deleted_at: null });
 const gone = (k, at) => ({ k, updated_at: iso(at), deleted_at: iso(at) });
-const none = () => ({ food_logs: [], saved_foods: [], goals: [], daily_steps: [] });
+const none = () => ({ food_logs: [], saved_foods: [], goals: [], daily_activity: [] });
 const dirty = (updatedAt, deleted = false) => ({ updatedAt, deleted });
 const PRIMED = { 'sync:primed': '1' };
 
@@ -153,10 +153,10 @@ test('markDirty: one push, pushDelayMs after the last call; the row is read then
 test('pushDelayMs is configurable; a deleted key is sent as tombstone() with deleted_at = updated_at', async () => {
   const t = setup({ rows: { 'saved_foods:171705': 1 }, pushDelayMs: 50 });
   t.sync.markDirty('saved_foods', '171705', true);
-  t.sync.markDirty('daily_steps', '2026-11-10', true); // no local row: a tombstone needs none
+  t.sync.markDirty('daily_activity', '2026-11-10', true); // no local row: a tombstone needs none
   await t.tick(50);
   assert.deepEqual(t.bodies(), [
-    { cursor: null, changes: { saved_foods: [gone('171705', T0)], daily_steps: [gone('2026-11-10', T0)] } },
+    { cursor: null, changes: { saved_foods: [gone('171705', T0)], daily_activity: [gone('2026-11-10', T0)] } },
   ]);
 });
 
@@ -248,7 +248,7 @@ test('pull filter: a pulled row older than a pending local edit is skipped; the 
   const fresh = row('c', 'server', T0 - 5000);
   const goal = row('2026-11-01', 'server', T0);
   await t.answer({ cursor: 9, changes: { food_logs: [older, newer, same, fresh], goals: [goal] } });
-  assert.deepEqual(t.applied, [{ food_logs: [newer, same, fresh], saved_foods: [], goals: [goal], daily_steps: [] }]);
+  assert.deepEqual(t.applied, [{ food_logs: [newer, same, fresh], saved_foods: [], goals: [goal], daily_activity: [] }]);
 
   // All three local edits are still pushed (the server decides who wins).
   assert.deepEqual(t.bodies()[1], { cursor: 9, changes: { food_logs: [row('a', 1, T0 + 1000), row('b', 1, T0 + 1000), row('d', 1, T0 + 1000)] } });
@@ -612,6 +612,15 @@ test('the stored outbox and cursor are used after a restart', async () => {
   assert.deepEqual(t.bodies(), [{ cursor: 12, changes: { food_logs: [row('a', 1, T0 - 60_000)], goals: [gone('2026-11-01', T0 - 30_000)] } }]);
 });
 
+test('a stored outbox entry of the old table daily_steps is sent as daily_activity', async () => {
+  const t = setup({
+    stored: { ...PRIMED, 'sync:cursor': '3', 'sync:outbox': JSON.stringify({ 'daily_steps:2026-11-10': dirty(T0 - 1000, true) }) },
+  });
+  t.sync.kick();
+  await flush();
+  assert.deepEqual(t.bodies(), [{ cursor: 3, changes: { daily_activity: [gone('2026-11-10', T0 - 1000)] } }]);
+});
+
 test('markDirty before the stored state has loaded is merged with it: the newer updatedAt per key wins', async () => {
   const gate = deferred();
   const stored = { 'food_logs:a': dirty(T0 + 100), 'food_logs:b': dirty(T0 - 100), 'food_logs:c': dirty(T0 - 100) };
@@ -762,8 +771,8 @@ test('scenario: first run in two batches, an edit in flight, a paged pull, a fai
   assert.deepEqual(t.applied[0], { ...none(), food_logs: [r1] });
   assert.deepEqual(t.bodies()[2], { cursor: 4, changes: { goals: [row('2026-11-01', 4, T0)] } });
   const steps = row('2026-11-09', 8000, T0 - 8000);
-  await t.answer({ cursor: 6, has_more: true, changes: { daily_steps: [steps] } });
-  assert.deepEqual(t.applied[1], { ...none(), daily_steps: [steps] });
+  await t.answer({ cursor: 6, has_more: true, changes: { daily_activity: [steps] } });
+  assert.deepEqual(t.applied[1], { ...none(), daily_activity: [steps] });
   assert.deepEqual(t.bodies()[3], { cursor: 6, changes: {} });
 
   // The last page fails: nothing is lost, and the retry waits 5 s.
