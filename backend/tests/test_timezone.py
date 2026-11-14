@@ -145,6 +145,12 @@ def test_patch_me_is_allowed_cross_origin(client):
     assert "PATCH" in r.headers["access-control-allow-methods"]
 
 
+@pytest.mark.parametrize("name", ["posix/UTC", "right/America/New_York", "posixrules", "localtime", "Factory"])
+def test_host_only_aliases_are_not_zones(name):
+    assert not timezones.known_timezone(name)
+    assert timezones.known_timezone("America/New_York")
+
+
 def test_the_known_timezones_are_read_once():
     timezones._timezones.cache_clear()
     assert timezones.known_timezone("Pacific/Pago_Pago")
