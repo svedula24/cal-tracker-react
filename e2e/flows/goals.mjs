@@ -142,6 +142,17 @@ export const flows = [
     name: "goals: a change today leaves yesterday's budget and week-strip ring as they were",
     run: async (page, base, { wait }) => {
       const y = yesterday();
+      // Food eaten yesterday, the user's own: the demo entries are dropped at load once the user has
+      // entries (earlier flows logged some), so this flow brings its own.
+      await go(page, base + '/', wait);
+      await page.evaluate((date) => {
+        const entries = JSON.parse(localStorage.getItem('entries') ?? '[]');
+        entries.push({
+          id: crypto.randomUUID(), date, time: new Date(`${date}T12:30:00`).toISOString(), name: 'Lentil soup',
+          servings: 1, seed: false, nutrients: { calories: 1200, protein: 60, carbs: 150, fat: 30, fiber: 20, sugar: 10, sodium: 900 },
+        });
+        localStorage.setItem('entries', JSON.stringify(entries));
+      }, y.key);
       await go(page, base + '/', wait);
       await btn(page, y.label).click();
       await wait(400);
@@ -155,7 +166,7 @@ export const flows = [
         const log = JSON.parse(localStorage.getItem('dayLogs') ?? '[]').find((d) => d.id === key);
         return { eaten: Math.round(entries.reduce((s, e) => s + e.nutrients.calories * e.servings, 0)), steps: log?.steps ?? 0 };
       }, y.key);
-      if (eaten === 0) throw new Error('yesterday has no demo entries: this check would prove nothing');
+      if (eaten === 0) throw new Error('yesterday has no entries: this check would prove nothing');
       const calories = eaten - round(steps * 0.035);
       await editGoals(page, base, wait, { Calories: calories });
 

@@ -30,11 +30,28 @@ export function migrateEntries(items: Entry[]): Entry[] {
     const tag = typeof e.seed !== 'boolean';
     if (!reId && !tag) return e;
     changed = true;
+    const seed = tag ? !e.foodId || e.measure?.label !== 'g' : e.seed;
     return {
       ...e,
       id: reId ? uuid() : e.id,
-      seed: tag ? !e.foodId || e.measure?.label !== 'g' : e.seed,
+      seed,
+      // Only a guess: it may be a hand-written entry the user edited, so dropDemoEntries keeps it.
+      ...(tag && seed ? { seedGuessed: true } : {}),
     };
   });
   return changed ? next : items;
+}
+
+/**
+ * Demo entries are dropped once the user has any entry of their own (logged on the phone, or pulled
+ * from the server, such as an import): from then on they only add made-up food to real days. They
+ * were never sent, so there is nothing to delete on the server. Only entries the app seeded as demo
+ * are dropped, never one tagged by migrateEntries' guess (`seedGuessed`), which may be the user's.
+ * The trade-off: an install from before the flag keeps its old demo entries (the user can delete them).
+ * Runs at load, after migrateEntries, so the list is saved once. Same array when nothing changes.
+ */
+export function dropDemoEntries(items: Entry[]): Entry[] {
+  const isDemo = (e: Entry) => e.seed === true && e.seedGuessed !== true;
+  if (!items.some(isDemo) || !items.some((e) => e.seed !== true)) return items;
+  return items.filter((e) => !isDemo(e));
 }
