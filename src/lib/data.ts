@@ -1,8 +1,8 @@
 // App data on top of the on-device store (src/lib/store.ts). Every action is a
 // local write; when the app has an API URL, the write is also reported to the
 // background sync (src/lib/sync/), which copies it to the server later. First
-// launch is seeded so Home matches the reference screenshots exactly; anything
-// the user logs adds on top.
+// launch is seeded so Home matches the reference screenshots exactly, until the
+// user has entries of their own (dropDemoEntries, at the next load).
 import { getCollection, makeId, useCollection } from '@/lib/store';
 import {
   addDays,
@@ -16,7 +16,7 @@ import {
 } from '@/lib/nutrition';
 import type { Food, Portion } from '@/data/foods';
 import { defaultServing, scale } from '@/lib/measure';
-import { migrateEntries } from '@/lib/migrateEntries';
+import { dropDemoEntries, migrateEntries } from '@/lib/migrateEntries';
 import { migrateSavedFoods, type SavedFood } from '@/lib/savedFoods';
 import { PAST_DAY_FOODS, SAVED_FOODS } from '@/lib/seedFoods';
 import { markDirty } from '@/lib/sync/dirty';
@@ -112,8 +112,10 @@ export const STREAK_DAYS = 16;
 // stable. Each reports the row to sync AFTER the local write (markDirty does
 // nothing without an API URL and never throws).
 const entriesSeed = seedEntries();
-// Stored entries are upgraded once at load (UUID ids, the `seed` flag); see migrateEntries.
-const entriesStore = () => getCollection<Entry>('entries', entriesSeed, migrateEntries);
+// Stored entries are upgraded at load (UUID ids, the `seed` flag), and the demo entries dropped
+// once the user has their own; see migrateEntries.ts.
+const migrateStoredEntries = (items: Entry[]) => dropDemoEntries(migrateEntries(items));
+const entriesStore = () => getCollection<Entry>('entries', entriesSeed, migrateStoredEntries);
 const savedSeed: SavedFood[] = SAVED_FOODS.map((food) => ({ id: food.id, food }));
 // Stored entries are cleaned once when the list loads (and saved), so every
 // item has a usable snapshot; see migrateSavedFoods.
@@ -143,7 +145,7 @@ const removeEntry = (id: string) => {
   if (!demo) markDirty('food_logs', id, true);
 };
 export const useEntries = () => ({
-  ...useCollection<Entry>('entries', entriesSeed, migrateEntries),
+  ...useCollection<Entry>('entries', entriesSeed, migrateStoredEntries),
   add: addEntry,
   update: updateEntry,
   remove: removeEntry,

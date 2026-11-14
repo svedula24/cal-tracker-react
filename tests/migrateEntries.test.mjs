@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { migrateEntries } from '../src/lib/migrateEntries.ts';
+import { dropDemoEntries, migrateEntries } from '../src/lib/migrateEntries.ts';
 import { isUuid, uuid } from '../src/lib/uuid.ts';
 
 const V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -62,4 +62,22 @@ test('the input array and its entries are not mutated', () => {
   const items = [Object.freeze({ ...base, id: 'old-1' })];
   Object.freeze(items);
   assert.notEqual(migrateEntries(items), items);
+});
+
+test('demo entries are dropped once the user has an entry of their own; the rest is kept as is', () => {
+  const demo = [{ ...base, id: id(), seed: true }, { ...base, id: id(), seed: true }];
+  const mine = { ...base, id: id(), seed: false, foodId: 'usda:1', measure: G };
+  assert.deepEqual(dropDemoEntries([demo[0], mine, demo[1]]), [mine]);
+  assert.equal(dropDemoEntries([demo[0], mine, demo[1]])[0], mine);
+});
+
+test('only demo, only the user\'s, or nothing: the same array comes back (nothing rewritten)', () => {
+  const demo = [{ ...base, id: id(), seed: true }];
+  const mine = [{ ...base, id: id(), seed: false }];
+  for (const items of [demo, mine, []]) assert.equal(dropDemoEntries(items), items);
+});
+
+test('at load, an entry tagged demo by migrateEntries is dropped next to one of the user\'s', () => {
+  const loaded = dropDemoEntries(migrateEntries([{ ...base, id: 'old-1' }, { ...base, id: id(), foodId: 'usda:1', measure: G }]));
+  assert.deepEqual(loaded.map((e) => e.foodId), ['usda:1']);
 });

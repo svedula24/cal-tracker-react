@@ -404,7 +404,9 @@ try {
     full.body.cursor === null && full.body.changes.goals.length === 1 && (full.body.changes.daily_steps ?? []).length === 6 && savedIds(full.body.changes.saved_foods ?? []) === SEED_SAVED,
     `it then uploads everything from the start: the goals, the day logs and the saved foods`, `sent: cursor ${show(full.body.cursor)}, ${show(Object.fromEntries(TABLES.map((t) => [t, full.body.changes[t]?.length ?? 0])))}`,
   );
-  check(logs.length === 1 && logs[0].id === late.id && demo.size > 0 && logs.every((r) => !demo.has(r.id)), `with the user's one entry and none of the ${demo.size} demo entries`, `sent: ${logs.length} food logs`);
+  // The demo entries were dropped at this load (the user has entries of their own); that they are
+  // never sent is checked above, on the first upload and on deleting one.
+  check(logs.length === 1 && logs[0].id === late.id && demo.size === 0, `with the user's one entry; no demo entries are left to send (${demo.size})`, `sent: ${logs.length} food logs`);
   await settled();
   const afterFull = api.requests.length;
   await open('/');

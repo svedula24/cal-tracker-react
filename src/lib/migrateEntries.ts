@@ -38,3 +38,14 @@ export function migrateEntries(items: Entry[]): Entry[] {
   });
   return changed ? next : items;
 }
+
+/**
+ * Demo entries are dropped once the user has any entry of their own (logged on the phone, or pulled
+ * from the server, such as an import): from then on they only add made-up food to real days. They
+ * were never sent, so there is nothing to delete on the server. Runs at load, after migrateEntries,
+ * so the list is saved once. Returns the same array when nothing changes.
+ */
+export function dropDemoEntries(items: Entry[]): Entry[] {
+  if (!items.some((e) => e.seed === true) || !items.some((e) => e.seed !== true)) return items;
+  return items.filter((e) => e.seed !== true);
+}
