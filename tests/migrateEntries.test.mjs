@@ -77,7 +77,15 @@ test('only demo, only the user\'s, or nothing: the same array comes back (nothin
   for (const items of [demo, mine, []]) assert.equal(dropDemoEntries(items), items);
 });
 
-test('at load, an entry tagged demo by migrateEntries is dropped next to one of the user\'s', () => {
-  const loaded = dropDemoEntries(migrateEntries([{ ...base, id: 'old-1' }, { ...base, id: id(), foodId: 'usda:1', measure: G }]));
+test('at load, an entry the app seeded as demo is dropped next to one of the user\'s', () => {
+  const loaded = dropDemoEntries(migrateEntries([{ ...base, id: 'old-1', seed: true }, { ...base, id: id(), foodId: 'usda:1', measure: G }]));
   assert.deepEqual(loaded.map((e) => e.foodId), ['usda:1']);
+});
+
+test('an entry tagged demo by the guess is never dropped: it may be one the user edited before the flag', () => {
+  const editedLongAgo = { ...base, id: id(), name: 'My oatmeal' }; // hand-written, no flag: guessed demo
+  const mine = { ...base, id: id(), foodId: 'usda:1', measure: G };
+  const loaded = dropDemoEntries(migrateEntries([editedLongAgo, mine]));
+  assert.deepEqual(loaded.map((e) => [e.name, e.seed, e.seedGuessed]), [['My oatmeal', true, true], ['Honey', false, undefined]]);
+  assert.equal(dropDemoEntries(migrateEntries(loaded)), loaded, 'and stays kept at every later load');
 });

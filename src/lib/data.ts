@@ -43,6 +43,9 @@ export type Entry = {
   // Demo data created at first launch: never synced or shown under "Recent".
   // Cleared by any edit (the entry is then the user's); never set by `add`.
   seed?: boolean;
+  // `seed` was set by migrateEntries' guess (stored before the flag existed), not by the seeding:
+  // possibly the user's own edited entry, so it is never dropped as demo data.
+  seedGuessed?: boolean;
 };
 export type DayLog = { id: string; steps: number; rollover: number }; // id = date
 
