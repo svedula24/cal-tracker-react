@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 import psycopg
 import pytest
 
-from kalo.calai import ReportError, parse, write
+from kalo.calai import ReportError, parse, pdf_text, write
 
 # The shape of `pdftotext -layout` on a Cal AI report (made-up entries): a summary page, then one
 # table per day. Long names wrap above and below the numbers; page headers can fall inside a day.
@@ -62,6 +62,12 @@ def test_every_day_and_entry_is_parsed():
     # The page header between entries is not part of a name; the workout is not an entry.
     assert [e.name for e in second.entries] == ["Teriyaki Chicken", "Kit Kat"]
     assert second.entries[0].sodium_mg == 1053
+
+
+def test_a_date_line_without_a_table_is_not_a_day():
+    trailing = "\n   Body Stats\n\n                         January 13, 2026\n\n   158.5 lbs\n"
+    days = parse((REPORT.replace("   Weight History", "   January 5, 2026\n   Weight History") + trailing).splitlines())
+    assert [d.date for d in days] == [date(2026, 1, 7), date(2026, 1, 8)]
 
 
 def test_a_day_that_does_not_add_up_is_refused():
@@ -122,6 +128,13 @@ def test_a_newer_export_adds_only_new_entries_and_deletions_stick(migrated_url, 
         live = conn.execute("SELECT name, count(*) FROM food_logs WHERE deleted_at IS NULL GROUP BY name ORDER BY name")
         assert live.fetchall() == [("Cooked Quinoa", 1), ("Teriyaki Chicken", 2),
                                    ("Tofu, Quinoa, Broccoli, Black Olives, Banana Peppers Meal", 1)]
+
+
+def test_an_unreadable_pdf_is_a_report_error(tmp_path):
+    bad = tmp_path / "not.pdf"
+    bad.write_text("not a pdf")
+    with pytest.raises(ReportError, match="pdftotext could not read"):
+        pdf_text(str(bad))
 
 
 def test_write_to_an_unknown_user_is_refused(migrated_url):

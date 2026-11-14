@@ -42,8 +42,9 @@ ROW = re.compile(
 )
 TOTAL = re.compile(r"^\s*TOTAL\s+Calories eaten:\s*([\d,]+)")
 EXERCISE = re.compile(r"^\s*Exercise\s+Calories\s+Time taken")
-# The table's column header and the running page header ("<Name>'s Report", "Start: … · End: …").
-CHROME = re.compile(r"^\s*(Foods\s+Calories\b|.*'s Report\s*$|Start: \d)")
+FOODS = re.compile(r"^\s*Foods\s+Calories\b")  # a day's table header
+# The running page header ("<Name>'s Report", "Start: … · End: …").
+CHROME = re.compile(r"^\s*(.*'s Report\s*$|Start: \d)")
 
 
 class ReportError(ValueError):
@@ -68,6 +69,7 @@ class Day:
     date: date
     entries: list[Entry] = field(default_factory=list)
     total: float | None = None  # the report's "Calories eaten"
+    has_table: bool = False  # a "Foods" header followed the date: it is a day of the log, not a stray date
 
 
 def _num(s: str) -> float:
@@ -100,11 +102,17 @@ def parse(lines: Iterable[str]) -> list[Day]:
             day.entries.append(_entry(block, day.date))
             block.clear()
 
+    def close() -> None:
+        """Before the next date or the end: a day with a table needs its TOTAL; a lone date line is dropped."""
+        if day and day.total is None:
+            if day.has_table:
+                raise ReportError(f"{day.date}: no TOTAL line")
+            days.remove(day)
+
     for line in lines:
         line = line.rstrip("\n")
         if m := DAY.match(line):
-            if day and day.total is None:
-                raise ReportError(f"{day.date}: no TOTAL line")
+            close()
             day = Day(datetime.strptime(f"{m[1]} {m[2]} {m[3]}", "%B %d %Y").date())
             days.append(day)
             block.clear()
@@ -114,17 +122,19 @@ def parse(lines: Iterable[str]) -> list[Day]:
         elif m := TOTAL.match(line):
             flush()
             day.total = _num(m[1])
+        elif FOODS.match(line):
+            flush()
+            day.has_table = True
         elif EXERCISE.match(line):
             flush()
             in_exercise = True  # workouts are not imported; they run until the day's TOTAL
-        elif in_exercise:
-            continue
+        elif in_exercise or not day.has_table:
+            continue  # a workout, or text under a date that has no table (not a day of the log)
         elif not line.strip() or CHROME.match(line):
             flush()
         else:
             block.append(line)
-    if day and day.total is None:
-        raise ReportError(f"{day.date}: no TOTAL line")
+    close()
     for d in days:
         eaten = sum(e.calories for e in d.entries)
         if abs(eaten - d.total) > 0.5:
@@ -153,6 +163,8 @@ def write(days: list[Day], user_id: uuid.UUID, tz: ZoneInfo, url: str) -> int:
     """Insert every entry the user does not already have, in one transaction. Returns how many were new."""
     with psycopg.connect(url) as conn, conn.cursor() as cur:
         require_head(cur)
+        # One import per user at a time: two concurrent runs would both see no existing logs.
+        cur.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"calai:{user_id}",))
         cur.execute("SELECT 1 FROM users WHERE id = %s", (user_id,))
         if cur.fetchone() is None:
             raise ReportError(f"no user {user_id}")
@@ -174,7 +186,12 @@ def write(days: list[Day], user_id: uuid.UUID, tz: ZoneInfo, url: str) -> int:
 
 
 def pdf_text(path: str) -> list[str]:
-    done = subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True, text=True, check=True)
+    try:
+        done = subprocess.run(["pdftotext", "-layout", path, "-"], capture_output=True, text=True, check=True)
+    except FileNotFoundError:
+        raise ReportError("pdftotext not found (brew install poppler)") from None
+    except subprocess.CalledProcessError as e:
+        raise ReportError(f"pdftotext could not read {path}: {e.stderr.strip()}") from None
     return done.stdout.splitlines()
 
 
