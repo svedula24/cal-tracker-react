@@ -26,9 +26,12 @@ router = APIRouter(prefix="/api/v1/foods", tags=["foods"])
 
 DbSession = Annotated[Session, Depends(get_session)]
 
-# Per user (app.state.barcode_lookups): the server shares one Open Food Facts allowance (15 reads a
-# minute per IP) between every user, so one user cannot spend it all. Cached answers count too.
+# Per user (app.state.barcode_lookups): fairness between users. Cached answers count too.
 BARCODE_LOOKUPS_PER_HOUR = 60
+# For the whole server (app.state.off_reads): calls to Open Food Facts, which allows 15 product reads a
+# minute per IP and answers 429 above that. Only a cache miss spends one. Per process: with several
+# workers the total is this times the worker count.
+OFF_READS_PER_MINUTE = 12
 
 
 # Declared before /{fdc_id}, or "search" would be parsed as an id.
@@ -69,7 +72,7 @@ def barcode(
     422 for a code that is not an EAN-8, UPC-A, EAN-13 or GTIN-14 with a valid check digit. 404 with
     detail {"reason": "not_found"}, or {"reason": "incomplete", "name": ...} for a product without a
     name or one of calories, protein, carbs and fat. 429 over BARCODE_LOOKUPS_PER_HOUR. 503 when Open
-    Food Facts cannot answer and nothing is cached.
+    Food Facts cannot answer, or OFF_READS_PER_MINUTE is spent (with Retry-After), and nothing is cached.
     """
     normalized = barcodes.normalize(code)
     if normalized is None:
@@ -80,9 +83,15 @@ def barcode(
             429, "too many barcode lookups, try again later", headers={"Retry-After": str(math.ceil(wait))}
         )
     try:
-        product = barcodes.lookup(session, normalized, request.app.state.settings)
-    except barcodes.Unavailable:
-        raise HTTPException(503, "product lookup unavailable") from None
+        product = barcodes.lookup(
+            session,
+            normalized,
+            request.app.state.settings,
+            budget=lambda: request.app.state.off_reads.retry_after("openfoodfacts"),
+        )
+    except barcodes.Unavailable as exc:
+        headers = {"Retry-After": str(math.ceil(exc.retry_after))} if exc.retry_after is not None else None
+        raise HTTPException(503, "product lookup unavailable", headers=headers) from None
     session.commit()
     if not product.found:
         detail = {"reason": product.reason} | ({"name": product.name} if product.reason == "incomplete" else {})

@@ -401,6 +401,24 @@ def test_rate_limited_per_user(client, me, off):
 
 
 @needs_db
+def test_the_server_wide_off_budget_is_spent_only_by_cache_misses(client, me, off, db):
+    client.app.state.off_reads = SlidingWindow(1, per_seconds=60)
+    assert client.get(URL, headers=me).status_code == 200  # a miss: spends the one call
+    assert client.get(URL, headers=me).status_code == 200  # a hit: spends nothing
+    assert off.calls == [CODE]
+    # Another code needs OFF, and the budget is spent: 503 with Retry-After, OFF not called.
+    r = client.get("/api/v1/foods/barcode/4006381333931", headers=me)
+    assert r.status_code == 503 and r.json() == {"detail": "product lookup unavailable"}
+    assert 1 <= int(r.headers["Retry-After"]) <= 60
+    assert off.calls == [CODE]
+    # A stale row is served instead while the budget is spent.
+    age(db, 40)
+    r = client.get(URL, headers=me)
+    assert r.status_code == 200 and r.json() == BODY
+    assert off.calls == [CODE]
+
+
+@needs_db
 def test_the_barcode_route_is_not_taken_for_an_fdc_id(client, me, off):
     assert client.get("/api/v1/foods/barcode", headers=me).status_code == 422  # /{fdc_id} with "barcode"
     assert client.get(URL, headers=me).status_code == 200

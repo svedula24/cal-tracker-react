@@ -441,9 +441,11 @@ curl localhost:8000/api/v1/foods/barcode/737628064502 -H 'Authorization: Bearer 
   When OFF is down, times out or refuses, a stale cached answer is served; with
   none it is 503 `{"detail": "product lookup unavailable"}`.
 - OFF allows 15 product reads a minute per IP, shared by every user of the
-  server, so each user may look up 60 barcodes an hour (cached ones count;
-  429 with `Retry-After` above that). Like registrations, the count is kept per
-  process.
+  server, so the server calls OFF at most 12 times a minute (only cache misses
+  count). Over that, a lookup is served from a stale cached answer, else 503
+  with `Retry-After`. Each user may also look up 60 barcodes an hour (cached
+  ones count; 429 with `Retry-After` above that). Like registrations, both
+  counts are kept per process.
 - `OFF_BASE_URL` and `OFF_USER_AGENT` (`app/settings.py`) set where lookups go
   and the User-Agent OFF asks for.
 

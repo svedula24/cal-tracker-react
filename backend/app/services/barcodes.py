@@ -38,7 +38,12 @@ GRAMS_IN_LABEL = re.compile(r"\d\s*g\b", re.IGNORECASE)
 
 
 class Unavailable(Exception):
-    """OFF could not answer (down, timed out, rate limited, or an unreadable reply)."""
+    """OFF could not answer (down, timed out, rate limited, or an unreadable reply), or the server's own
+    budget of OFF calls is spent (`retry_after`: seconds until it has room again)."""
+
+    def __init__(self, message: str = "", retry_after: float | None = None) -> None:
+        super().__init__(message)
+        self.retry_after = retry_after
 
 
 @dataclass(frozen=True)
@@ -205,12 +210,15 @@ def lookup(
     settings: Settings,
     now: datetime | None = None,
     fetch: Callable[[str, Settings], Product] | None = None,
+    budget: Callable[[], float | None] | None = None,
 ) -> Product:
     """The product for a normalised `code`: the cached row while fresh, else OFF's answer (stored).
 
     OFF unavailable: the stale row if there is one, else Unavailable. Ends the session's read
     transaction before calling OFF, so no pooled connection is held for up to TIMEOUT; the caller must
     have nothing pending in it. Upserts (a concurrent lookup of the same code just overwrites).
+    `budget`, asked only when OFF would be called: None when a call fits, else the seconds to wait; a
+    spent budget is treated like OFF being unavailable (the stale row, else Unavailable).
     """
     now = now or datetime.now(UTC)
     row = session.get(BarcodeProduct, code)
@@ -219,6 +227,9 @@ def lookup(
     stale = None if row is None else _of_row(row)
     session.rollback()  # nothing was written: this only returns the connection to the pool
     try:
+        wait = budget() if budget is not None else None
+        if wait is not None:
+            raise Unavailable("over the server's Open Food Facts budget", retry_after=wait)
         product = (fetch or fetch_off)(code, settings)
     except Unavailable:
         if stale is None:
