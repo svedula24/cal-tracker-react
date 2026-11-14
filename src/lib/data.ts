@@ -125,7 +125,9 @@ const dayLogsStore = () => getCollection<DayLog>('dayLogs', dayLogSeed);
 export const syncStores = () => ({ entries: entriesStore(), saved: savedStore(), goals: goalsStore(), dayLogs: dayLogsStore() });
 
 const addEntry = (entry: Entry) => {
-  entriesStore().add(entry);
+  // Marked as the user's from the start: an entry without the flag is guessed at the next load
+  // (migrateEntries), and that guess takes one that is not measured in grams for demo data.
+  entriesStore().add({ ...entry, seed: false });
   markDirty('food_logs', entry.id);
 };
 // Any edit makes a demo entry the user's.

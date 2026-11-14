@@ -11,6 +11,35 @@ import { NUTRIENT_KEYS, type Nutrients } from './nutrition.ts';
 export const G: Portion = { label: 'g', grams: 1 };
 /** The serving of a food that has no USDA portions. */
 export const HUNDRED_G: Portion = { label: '100 g', grams: 100 };
+/** One avoirdupois ounce. */
+export const OZ: Portion = { label: 'oz', grams: 28.349523125 };
+
+/**
+ * The units a food's amount can be typed in: grams, ounces, then the food's own
+ * portions ("1 banana", "1 cup, sliced"), default first as the food lists them.
+ * The amount is `quantity × unit.grams`.
+ */
+export const unitsOf = (food: Food): Portion[] => [
+  G,
+  OZ,
+  ...food.portions.filter((p) => p.grams > 0 && !SAME_AS_G_OR_OZ.test(p.label.trim())),
+];
+
+// USDA lists "1 oz" as a portion of about 1,600 foods (almonds: 28.4 g): the oz chip already is one.
+const SAME_AS_G_OR_OZ = /^(1\s*)?(g|oz)$/i;
+
+/** Two units are the same when they have the same label and weight (stored entries hold copies). */
+export const sameUnit = (a: Portion, b: Portion): boolean => a.label === b.label && Math.abs(a.grams - b.grams) < 1e-6;
+
+/**
+ * The unit the Nutrition screen starts in: the one a logged entry was measured
+ * in, when the food still offers it; otherwise grams (a new food, or an entry
+ * measured in something the food no longer lists).
+ */
+export function unitOf(entry: Entry | undefined, food: Food): Portion {
+  const measure = entry?.measure;
+  return (measure && unitsOf(food).find((u) => sameUnit(u, measure))) || G;
+}
 
 /** The food's default serving: its first portion, else 100 g. */
 export const defaultServing = (food: Food): Portion => food.portions[0] ?? HUNDRED_G;

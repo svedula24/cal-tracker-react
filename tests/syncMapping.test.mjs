@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { defaultServing, editedPer100g, entryGrams, foodOfEntry, G, scale, times, withValue } from '../src/lib/measure.ts';
+import { defaultServing, editedPer100g, entryGrams, foodOfEntry, G, OZ, scale, times, withValue } from '../src/lib/measure.ts';
 import { sum } from '../src/lib/nutrition.ts';
 import { isFood } from '../src/lib/savedFoods.ts';
 import {
@@ -230,6 +230,29 @@ test('logToEntry: a log in grams is an entry measured in grams with its database
   close(totals(entry).calories, 145.5, 'calories');
 });
 
+test('logToEntry: an entry this device measures in ounces or a portion keeps that unit; the amount is the server’s', () => {
+  const at = (grams) => fromServer({ id: ID, fdc_id: 2709224, log_date: '2026-11-10', logged_at: AT, name: 'Banana, raw', food_name: 'Banana, raw', unit: 'g', quantity: grams, values: bananaValues, food_values: bananaValues });
+  // Its own row coming back (252 g = 2 bananas): unchanged, still 2 × "1 banana".
+  const twoBananas = logged(banana, 2, { measure: banana.portions[0], nutrients: scale(banana.per100g, 126) });
+  const back = logToEntry(at(252), twoBananas);
+  assert.deepEqual(back.measure, banana.portions[0]);
+  close(back.servings, 2, 'servings');
+  close(totals(back).calories, totals(twoBananas).calories, 'calories');
+  close(entryGrams(back, foodOfEntry(back)), 252, 'grams');
+  // Changed on the server (another client set 189 g): still in bananas, now 1.5 of them.
+  const changed = logToEntry(at(189), twoBananas);
+  close(changed.servings, 1.5, 'servings after a server edit');
+  close(totals(changed).calories, banana.per100g.calories * 1.89, 'calories after a server edit');
+  // Ounces, matched by value, so the OZ constant comes back.
+  const inOunces = logged(banana, 4, { measure: { ...OZ }, nutrients: scale(banana.per100g, OZ.grams) });
+  const ounces = logToEntry(at(4 * OZ.grams), inOunces);
+  assert.equal(ounces.measure, OZ);
+  close(ounces.servings, 4, 'ounces');
+  // A copy here of another food, or none: grams, as before.
+  assert.equal(logToEntry(at(252)).measure, G);
+  assert.equal(logToEntry(at(252), logged({ ...banana, id: 'usda:1' }, 2, { measure: banana.portions[0] })).measure, G);
+});
+
 test('logToEntry: NULL nutrients are 0, in the entry’s values and the food’s', () => {
   const nulls = { ...bananaValues, fiber_g: null, sugar_g: null, sodium_mg: null };
   const log = fromServer({ id: ID, fdc_id: 2709224, log_date: '2026-11-10', logged_at: AT, name: 'Banana', food_name: 'Banana, raw', unit: 'g', quantity: 100, values: nulls, food_values: nulls });
@@ -385,13 +408,16 @@ test('round trip: an entry logged from the bundled list (no `foodPer100g`)', () 
   assert.equal('foodPer100g' in logToEntry(withNulls, entry), false);
 });
 
-test('round trip: an older entry measured by a portion comes back in grams, the same amount', () => {
+test('round trip: an entry measured by a portion comes back in that portion, the same amount', () => {
   const entry = logged(banana, 1.5, { measure: banana.portions[0], nutrients: scale(banana.per100g, 126) });
   const back = roundTrip(entry);
   sameEntry(back, entry);
   sameOnHome(back, entry);
-  assert.deepEqual(back.measure, G);
-  assert.equal(back.servings, 189);
+  assert.deepEqual(back.measure, banana.portions[0]);
+  close(back.servings, 1.5, 'servings');
+  // On a device that does not have the entry, the server's grams are all there is.
+  assert.deepEqual(logToEntry(entryToLog(entry)).measure, G);
+  assert.equal(logToEntry(entryToLog(entry)).servings, 189);
 });
 
 test('round trip: a hand-written entry', () => {
