@@ -11,11 +11,11 @@ import { AppState, Platform } from 'react-native';
 
 import { loadFoods } from '@/data/foods';
 import { API_URL } from '@/lib/config';
-import { patchMe } from '@/lib/connectionsApi';
+import { patchMe, Unprocessable } from '@/lib/connectionsApi';
 import { syncStores } from '@/lib/data';
 import { ApiUnavailable } from '@/lib/foodsApi';
 import { loadToken, saveToken } from '@/lib/identity';
-import { currentTimezone } from '@/lib/timezone';
+import { currentTimezone, zoneToRecord } from '@/lib/timezone';
 
 import { postSync, registerDevice } from './api';
 import { attachEngine } from './dirty';
@@ -59,7 +59,8 @@ function register(url: string): Promise<void> {
     // account before this one. (The server stores UTC for a zone it does not know: sendTimezone() then
     // PATCHes it later, refused until the server knows it.) Done before the token is usable, so
     // sendTimezone() never pairs the new token with the old account's record.
-    await (timezone && stored === timezone ? AsyncStorage.setItem(TZ_SENT, timezone) : AsyncStorage.removeItem(TZ_SENT)).catch(() => {});
+    const record = zoneToRecord(timezone, stored);
+    await (record ? AsyncStorage.setItem(TZ_SENT, record) : AsyncStorage.removeItem(TZ_SENT)).catch(() => {});
     await saveToken(token);
   })().finally(() => {
     registering = null;
@@ -82,6 +83,8 @@ export async function deviceToken(): Promise<string> {
 }
 
 let sendingZone = false;
+// A zone the server refused (422) this session: not sent again on every return to the app.
+let refusedZone: string | null = null;
 
 /** Sends the device's timezone when it is not the one the server was last given. Never rejects. */
 async function sendTimezone(url: string): Promise<void> {
@@ -89,11 +92,18 @@ async function sendTimezone(url: string): Promise<void> {
   sendingZone = true;
   try {
     const zone = currentTimezone();
-    if (!zone || (await AsyncStorage.getItem(TZ_SENT)) === zone) return;
+    if (!zone || zone === refusedZone || (await AsyncStorage.getItem(TZ_SENT)) === zone) return;
     const token = await loadToken();
     if (!token) return; // the registration will send it
-    await patchMe(url, token, { timezone: zone }); // its own 15 s timeout
-    await AsyncStorage.setItem(TZ_SENT, zone);
+    try {
+      await patchMe(url, token, { timezone: zone }); // its own 15 s timeout
+    } catch (e) {
+      if (e instanceof Unprocessable) refusedZone = zone; // tried again at the next start
+      throw e;
+    }
+    // Recorded only for the account it was sent to: a registration may have replaced it meanwhile
+    // (after a 401), and that one has its own record.
+    if (!registering && (await loadToken()) === token) await AsyncStorage.setItem(TZ_SENT, zone);
   } catch {
     // Unreachable, a 401 (sync registers again, with the zone) or a zone the server does not know:
     // tried again at the next start or return to the app.

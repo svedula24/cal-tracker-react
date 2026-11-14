@@ -2,6 +2,15 @@
 // (backend: users.timezone). From Intl, which Hermes ships: no package. Pure, so Node tests import it.
 
 /**
+ * What to record as the zone the server has, after registering with `sent`: the zone when the server
+ * stored it (`stored`, from the 201), else null (clear the record: send it again later). A server that
+ * does not know a zone stores UTC; an older one does not report it.
+ */
+export function zoneToRecord(sent: string | null, stored: string | null): string | null {
+  return sent !== null && stored === sent ? sent : null;
+}
+
+/**
  * The device's timezone name, or null when the runtime does not say (no Intl, or an empty answer).
  * `resolve` is for tests.
  */

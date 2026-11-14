@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-  CODE_LIFETIME_MS, codeDeadline, createPairingCode, disconnect, formatCountdown, listConnections, patchMe, TooManyRequests,
+  CODE_LIFETIME_MS, codeDeadline, createPairingCode, disconnect, formatCountdown, listConnections, patchMe, TooManyRequests, Unprocessable,
 } from '../src/lib/connectionsApi.ts';
 import { ApiUnavailable } from '../src/lib/foodsApi.ts';
 import { SyncUnauthorized } from '../src/lib/sync/types.ts';
@@ -64,6 +64,13 @@ test('disconnect: DELETE /api/v1/connections/{id}; a 204 or a 404 (already gone)
   const odd = fakeFetch(null, 204);
   await disconnect('http://api.test', TOKEN, '../me?x=1', { fetch: odd });
   assert.equal(odd.calls[0].url, 'http://api.test/api/v1/connections/..%2Fme%3Fx%3D1', 'the id cannot leave its path segment');
+});
+
+test('patchMe: a zone the server does not know (422) is Unprocessable, an ApiUnavailable', async () => {
+  await assert.rejects(
+    patchMe('http://api.test', TOKEN, { timezone: 'Mars/Base' }, { fetch: fakeFetch({ detail: 'unknown timezone' }, 422) }),
+    (e) => e instanceof Unprocessable && e instanceof ApiUnavailable,
+  );
 });
 
 test('patchMe: PATCH /api/v1/me {timezone}', async () => {

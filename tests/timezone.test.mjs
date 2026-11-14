@@ -2,7 +2,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { currentTimezone } from '../src/lib/timezone.ts';
+import { currentTimezone, zoneToRecord } from '../src/lib/timezone.ts';
+
+test('zoneToRecord: the zone only when the server stored the one sent', () => {
+  assert.equal(zoneToRecord('America/Los_Angeles', 'America/Los_Angeles'), 'America/Los_Angeles');
+  assert.equal(zoneToRecord('Europe/Kyiv', 'UTC'), null); // the server did not know it
+  assert.equal(zoneToRecord('Europe/Paris', null), null); // a server that does not report it
+  assert.equal(zoneToRecord(null, 'UTC'), null); // nothing was sent
+});
 
 test('currentTimezone: the IANA name Intl reports', () => {
   assert.equal(currentTimezone(() => 'America/Los_Angeles'), 'America/Los_Angeles');

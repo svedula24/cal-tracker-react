@@ -36,6 +36,14 @@ export class TooManyRequests extends ApiUnavailable {
   }
 }
 
+/** 422: the server refused the request's content (for patchMe, a timezone it does not know). */
+export class Unprocessable extends ApiUnavailable {
+  constructor() {
+    super('The server answered 422');
+    this.name = 'Unprocessable';
+  }
+}
+
 const TIMEOUT_MS = 15_000;
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -76,6 +84,7 @@ async function call(
     });
     if (res.status === 401) throw new SyncUnauthorized();
     if (res.status === 429) throw new TooManyRequests();
+    if (res.status === 422) throw new Unprocessable();
     if (res.status === 204 || (allow404 && res.status === 404)) return null;
     if (!res.ok) throw new ApiUnavailable(`The server answered ${res.status}`);
     const body: unknown = await res.json();
@@ -125,7 +134,7 @@ export async function disconnect(baseUrl: string, token: string, connectionId: s
   await call(baseUrl, token, 'DELETE', `/api/v1/connections/${encodeURIComponent(connectionId)}`, undefined, opts, true);
 }
 
-/** PATCH /api/v1/me {timezone}: the zone the server now has. ApiUnavailable for one it does not know (422). */
+/** PATCH /api/v1/me {timezone}: the zone the server now has. Unprocessable (an ApiUnavailable) for one it does not know. */
 export async function patchMe(baseUrl: string, token: string, patch: { timezone: string }, opts: Opts = {}): Promise<{ timezone: string }> {
   const body = await call(baseUrl, token, 'PATCH', '/api/v1/me', { timezone: patch.timezone }, opts);
   if (!isObject(body) || !isText(body.timezone)) throw unexpected();
