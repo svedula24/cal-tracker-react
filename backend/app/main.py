@@ -24,6 +24,7 @@ from app.api.v1.connections import CODES_PER_HOUR
 from app.api.v1.connections import router as connections_router
 from app.api.v1.devices import router as devices_router
 from app.api.v1.food_logs import router as food_logs_router
+from app.api.v1.foods import BARCODE_LOOKUPS_PER_HOUR, OFF_READS_PER_MINUTE
 from app.api.v1.foods import router as foods_router
 from app.api.v1.goals import daily_activity_router, goals_router
 from app.api.v1.nutrition import router as nutrition_router
@@ -98,6 +99,9 @@ def create_app(url: str | None = None, settings: Settings | None = None, token_v
     app.state.pairing_codes = SlidingWindow(CODES_PER_HOUR, per_seconds=3600)
     app.state.pairing_attempts = SlidingWindow(*oauth_api.ATTEMPTS_PER_ADDRESS)
     app.state.pairing_attempts_overall = SlidingWindow(*oauth_api.ATTEMPTS_OVERALL)
+    # Barcode lookups per user: they share the server's one Open Food Facts allowance.
+    app.state.barcode_lookups = SlidingWindow(BARCODE_LOOKUPS_PER_HOUR, per_seconds=3600)
+    app.state.off_reads = SlidingWindow(OFF_READS_PER_MINUTE, per_seconds=60)
     # Refused by its declared size, before any of it is read. Added before the CORS middleware, which
     # therefore wraps it: the 413 is readable cross-origin.
     app.add_middleware(BodyLimit, max_bytes=MAX_BODY_BYTES)
