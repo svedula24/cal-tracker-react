@@ -164,6 +164,27 @@ uv run alembic upgrade head
 uv run python -m kalo.usda.load
 ```
 
+### Importing a Cal AI export
+
+`kalo/calai.py` imports the food log from a Cal AI "Summary Report" PDF into
+`food_logs`, under one user. It needs `pdftotext` (`brew install poppler`).
+
+```sh
+uv run python -m kalo.calai report.pdf --user <users.id> --tz America/Los_Angeles           # check only
+uv run python -m kalo.calai report.pdf --user <users.id> --tz America/Los_Angeles --write   # import
+```
+
+Each entry becomes a custom log of 1 serving with the report's values (the report
+has no amounts and no USDA link), which the app shows as a hand-written entry and
+pulls on its next sync. `--tz` is the zone the report's times are in. Nothing is
+written unless every day's entries add up to the report's "Calories eaten". An entry
+is skipped when the user already has a custom log with the same day, time and name
+(deleted ones too, so a deletion sticks), so a newer all-time export adds only what
+is new. An entry renamed in the app since is imported again. In the hour repeated
+when daylight saving ends, the report doesn't say which 1:30am it was, so both get
+the first one. Workouts, weight and
+profile pages are not imported.
+
 ## API
 
 FastAPI over these tables (`app/`), through SQLAlchemy 2.0: sync sessions on
@@ -416,6 +437,7 @@ migrations/
                        0003_activity_targets.py: goal source and day amounts; daily_steps -> daily_activity
 kalo/
   db.py                database_url(): the one source of the connection URL
+  calai.py             import a Cal AI report PDF's food log
   usda/                the loader: datasets, nutrients, portions, load
 scripts/
   bench_search.py      search benchmark
