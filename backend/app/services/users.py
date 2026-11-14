@@ -19,6 +19,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.user_data import User, UserToken
+from app.timezones import known_timezone
 
 TOKEN_PREFIX = "kalo_"
 # last_used_at is rewritten at most this often, so an authenticated read is normally one SELECT.
@@ -36,9 +37,18 @@ def hash_token(token: str) -> bytes:
     return hashlib.sha256(token.encode()).digest()
 
 
-def register_device(session: Session, label: str | None) -> tuple[User, str]:
-    """A new anonymous user and its first token (returned in the clear, stored hashed). Does not commit."""
-    user = User()
+def set_timezone(user: User, name: str) -> None:
+    """Sets the user's timezone (their "today" follows it). `name` is a known zone: the request schema
+    (MePatch) checked it. Does not commit."""
+    user.timezone = name
+
+
+def register_device(session: Session, label: str | None, timezone: str | None = None) -> tuple[User, str]:
+    """A new anonymous user and its first token (returned in the clear, stored hashed). Does not commit.
+
+    `timezone`: an IANA name. None or a name this server does not know is UTC.
+    """
+    user = User(timezone=timezone if timezone is not None and known_timezone(timezone) else "UTC")
     token = new_token()
     session.add(user)
     session.flush()  # inserts the user, so its generated id can go in the token row

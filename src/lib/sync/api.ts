@@ -127,24 +127,27 @@ async function postJson(url: string, headers: Record<string, string>, payload: u
 const endpoint = (baseUrl: string, path: string): string => `${baseUrl.replace(/\/+$/, '')}${path}`;
 
 /**
- * Registers this install as an anonymous user: POST `${baseUrl}/api/v1/devices`. The token is
+ * Registers this install as an anonymous user: POST `${baseUrl}/api/v1/devices`, with the device's
+ * timezone (the user's "today" on the server; null = UTC). The token is
  * shown once, here; store it (the server keeps only its hash). Rejects with ApiUnavailable when
  * the server cannot answer (including 429, the registration limit), or with the abort error.
  */
 export async function registerDevice(
   baseUrl: string,
-  info: { platform: 'ios' | 'android' | 'web'; appVersion?: string },
+  info: { platform: 'ios' | 'android' | 'web'; appVersion?: string; timezone?: string | null },
   opts: FetchOpts = {},
-): Promise<{ userId: string; token: string }> {
+): Promise<{ userId: string; token: string; timezone: string | null }> {
   let body: unknown;
   try {
-    body = await postJson(endpoint(baseUrl, '/api/v1/devices'), {}, { platform: info.platform, app_version: info.appVersion ?? null }, opts);
+    const payload = { platform: info.platform, app_version: info.appVersion ?? null, timezone: info.timezone ?? null };
+    body = await postJson(endpoint(baseUrl, '/api/v1/devices'), {}, payload, opts);
   } catch (e) {
     // This endpoint takes no token, so a 401 from it is not "register again": it is unavailable.
     throw e instanceof SyncUnauthorized ? new ApiUnavailable('The sync API answered 401') : e;
   }
   if (!isObject(body) || !isText(body.user_id) || !isText(body.token)) throw new ApiUnavailable('The sync API sent an unexpected response');
-  return { userId: body.user_id, token: body.token };
+  // The zone the server stored (the one sent, or UTC when it did not know it); null from an older server.
+  return { userId: body.user_id, token: body.token, timezone: isText(body.timezone) ? body.timezone : null };
 }
 
 /**
