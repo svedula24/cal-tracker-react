@@ -30,6 +30,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+import httpx2
 from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy.orm import Session
 
@@ -45,7 +46,7 @@ ACCESS_LIFETIME = timedelta(hours=1)
 REFRESH_LIFETIME = timedelta(days=90)
 # A refresh token presented again within this of its rotation is refused (a client retrying after a
 # lost response); later than this it is taken as stolen and the grant is revoked.
-REUSE_GRACE = timedelta(minutes=2)
+REUSE_GRACE = timedelta(seconds=30)
 # A used or expired code is kept this long, so a replay can still revoke what the code created.
 CODE_KEPT = timedelta(minutes=10)
 # last_used_at is rewritten at most this often (as for device tokens).
@@ -113,7 +114,6 @@ class Client:
 
 def _fetch_metadata(url: str) -> dict:
     """GET a client ID metadata document: 3 s timeout, no redirects, at most 64 KB. Raises on any failure."""
-    import httpx2  # only the CIMD fetch needs it; imported here, where it is used
 
     with (
         httpx2.Client(timeout=3.0, follow_redirects=False) as http,
@@ -382,9 +382,12 @@ def refresh(
     narrowed (they carry no scopes of their own: access is checked against the grant); naming one the
     grant lacks is invalid_scope.
 
-    A spent token presented again within REUSE_GRACE is a client retrying after it lost the response:
-    the tokens that response carried (issued since) are deleted and a new pair is issued. Later, it is a
-    replay and revokes the grant. Does not commit, except that revocation (committed before the OAuthError)."""
+    A spent token presented again within REUSE_GRACE, while the refresh token it was rotated into has
+    never been used, is a client retrying after it lost the response: the tokens that response carried
+    (issued since) are deleted and a new pair is issued. Anything else is a replay and revokes the grant.
+    The trade-off: a thief who replays a stolen token inside those 30 seconds, before the client next
+    refreshes, gets the pair and the client's is deleted (the client then has to reconnect). Does not
+    commit, except that revocation (committed before the OAuthError)."""
     token_hash = hash_secret(refresh_token)
     rotated = session.execute(
         update(OAuthToken)
@@ -407,8 +410,18 @@ def refresh(
         ).one_or_none()
         if old is None:
             raise OAuthError("invalid_grant", "unknown, expired or already used refresh token")
-        grant_id, spent_at, retry = old
-        if not retry:
+        grant_id, spent_at, recent = old
+        successor_used = session.execute(
+            select(OAuthToken.token_hash)
+            .where(
+                OAuthToken.grant_id == grant_id,
+                OAuthToken.kind == "refresh",
+                OAuthToken.created_at >= spent_at,
+                OAuthToken.rotated_at.is_not(None),
+            )
+            .limit(1)
+        ).first()
+        if not recent or successor_used is not None:
             _revoke(session, grant_id)
             session.commit()
             raise OAuthError("invalid_grant", "unknown, expired or already used refresh token")

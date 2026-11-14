@@ -494,8 +494,10 @@ def test_the_full_flow(client, db, migrated_url):
     assert rotated["refresh_token"] != tokens["refresh_token"]
     assert rotated["access_token"] != tokens["access_token"]
     assert resolve(migrated_url, rotated["access_token"]).grant_id == grant.grant_id
-    # Presented again within 2 minutes: a client retrying after it lost the response. It gets a new
-    # pair; the pair it lost is deleted, and the connection stays.
+    # Presented again within 30 seconds, its successor never used: a client retrying after it lost the
+    # response. It gets a new pair; the pair it lost is deleted, and the connection stays.
+    r = refresh(client, tokens["refresh_token"], client_id="https://evil.example/client.json")
+    assert r.json()["error"] == "invalid_grant"  # a retry with the wrong client is refused, changes nothing
     r = refresh(client, tokens["refresh_token"])
     assert r.status_code == 200, r.text
     retried = r.json()
@@ -504,9 +506,6 @@ def test_the_full_flow(client, db, migrated_url):
     assert refresh(client, rotated["refresh_token"]).json()["error"] == "invalid_grant"
     assert resolve(migrated_url, retried["access_token"]).grant_id == grant.grant_id
     assert refresh(client, retried["refresh_token"]).status_code == 200
-    # A retry with the wrong client is refused and changes nothing.
-    r = refresh(client, tokens["refresh_token"], client_id="https://evil.example/client.json")
-    assert r.json()["error"] == "invalid_grant"
 
     # Nothing secret is stored in the clear.
     stored = " ".join(
@@ -524,6 +523,19 @@ def test_a_refresh_token_reused_long_after_rotation_revokes_the_connection(clien
     assert r.json()["error"] == "invalid_grant"
     assert resolve(migrated_url, newer["access_token"]) is None
     assert refresh(client, newer["refresh_token"]).json()["error"] == "invalid_grant"
+    assert db.execute("SELECT revoked_at IS NOT NULL FROM oauth_grants").fetchall() == [(True,)]
+
+
+def test_a_replay_after_the_client_used_the_new_token_revokes_the_connection(client, db, migrated_url):
+    """Inside the 30 seconds, but the client already refreshed with what the first rotation gave it: it
+    did not lose that response, so the old token is in someone else's hands."""
+    tokens, _ = connect(client)
+    newer = refresh(client, tokens["refresh_token"]).json()
+    newest = refresh(client, newer["refresh_token"]).json()
+    r = refresh(client, tokens["refresh_token"])
+    assert r.json()["error"] == "invalid_grant"
+    assert resolve(migrated_url, newest["access_token"]) is None
+    assert refresh(client, newest["refresh_token"]).json()["error"] == "invalid_grant"
     assert db.execute("SELECT revoked_at IS NOT NULL FROM oauth_grants").fetchall() == [(True,)]
 
 
