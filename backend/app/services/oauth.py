@@ -112,6 +112,9 @@ class Client:
     redirect_uris: tuple[str, ...]  # what the client itself lists (its metadata document or registration)
 
 
+METADATA_MAX_BYTES = 64 * 1024
+
+
 def _fetch_metadata(url: str) -> dict:
     """GET a client ID metadata document: 3 s timeout, no redirects, at most 64 KB. Raises on any failure."""
 
@@ -120,7 +123,7 @@ def _fetch_metadata(url: str) -> dict:
         http.stream("GET", url, headers={"Accept": "application/json"}) as response,
     ):
         response.raise_for_status()
-        body = b""
+        body = bytearray()
         for chunk in response.iter_bytes():
             body += chunk
             if len(body) > METADATA_MAX_BYTES:
@@ -131,7 +134,6 @@ def _fetch_metadata(url: str) -> dict:
     return document
 
 
-METADATA_MAX_BYTES = 64 * 1024
 METADATA_TTL = 24 * 3600.0
 METADATA_RETRY = 60.0  # a failed fetch is retried after this long
 # Tests replace this (and call clear_client_cache).

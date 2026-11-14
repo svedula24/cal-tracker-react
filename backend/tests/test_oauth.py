@@ -539,6 +539,19 @@ def test_a_replay_after_the_client_used_the_new_token_revokes_the_connection(cli
     assert db.execute("SELECT revoked_at IS NOT NULL FROM oauth_grants").fetchall() == [(True,)]
 
 
+def test_a_thief_replaying_within_30_seconds_takes_the_pair_and_the_client_must_reconnect(client, db, migrated_url):
+    """The documented trade-off of the retry grace (services/oauth.py refresh): a stolen spent token,
+    replayed before the client next refreshes, is taken for a retry. The thief gets a working pair, the
+    client's pair is deleted, and the connection is not revoked: the client has to connect again."""
+    tokens, _ = connect(client)
+    clients = refresh(client, tokens["refresh_token"]).json()  # the real client rotates
+    thiefs = refresh(client, tokens["refresh_token"]).json()  # the thief replays the spent token at once
+    assert resolve(migrated_url, thiefs["access_token"]) is not None
+    assert resolve(migrated_url, clients["access_token"]) is None
+    assert refresh(client, clients["refresh_token"]).json()["error"] == "invalid_grant"
+    assert db.execute("SELECT revoked_at IS NULL FROM oauth_grants").fetchall() == [(True,)]
+
+
 def test_a_read_only_grant(client, migrated_url):
     tokens, _ = connect(client, allow_write=False)
     assert tokens["scope"] == READ
