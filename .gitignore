@@ -62,4 +62,12 @@ TOMORROW.md
 # verification harness output (generated)
 e2e/shots/
 
+# local tool state and personal data exports (this repo is public)
+.claude/settings.local.json
+.claude/worktrees/
+.vscode/database-client-config.json
+*.pdf
+*.sql
+*.dump
+
 # backend: see backend/.gitignore
