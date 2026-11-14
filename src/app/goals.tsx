@@ -1,10 +1,12 @@
-import { Sparkles } from 'lucide-react-native';
+import { router } from 'expo-router';
+import { ChevronRight, MessageSquare, Sparkles } from 'lucide-react-native';
 import { useState } from 'react';
 import { ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Press } from '@/components/Press';
 import { Card, goBack, PushedScreen } from '@/components/Screen';
+import { API_URL } from '@/lib/config';
 import { type GoalPatch, useGoals } from '@/lib/data';
 import { parseValue } from '@/lib/measure';
 import { type Goals, type GoalSource, type GoalType, inSuggestLimit, type SuggestInput, suggestInputValid, suggestTargets } from '@/lib/nutrition';
@@ -184,6 +186,20 @@ function GoalsForm({ goals }: { goals: Goals }) {
             <Text className={`text-[15px] font-semibold ${canSuggest ? 'text-foreground' : 'text-faint'}`}>Fill from suggestion</Text>
           </Press>
         </Card>
+
+        {/* ChatGPT reaches the data through the server, so without one there is nothing to connect. */}
+        {API_URL ? (
+          <Press accessibilityRole="button" accessibilityLabel="Connect ChatGPT" onPress={() => router.push('/connect-chatgpt')} scale={0.98}>
+            <Card className="flex-row items-center px-5 py-4">
+              <MessageSquare size={18} color={c.foreground} />
+              <View className="ml-3 flex-1">
+                <Text className="text-[16px] font-semibold text-foreground">Connect ChatGPT</Text>
+                <Text className="mt-[2px] text-[13px] text-muted">Read and log food from ChatGPT on the web</Text>
+              </View>
+              <ChevronRight size={20} color={c.muted} />
+            </Card>
+          </Press>
+        ) : null}
       </ScrollView>
 
       <View className="absolute inset-x-0 bottom-0 bg-background px-[22px] pt-3" style={{ paddingBottom: Math.max(insets.bottom, 16) }}>

@@ -283,8 +283,9 @@ def test_no_endpoint_takes_a_user_id_from_the_client(client, db):
         assert "user_id" not in path
         for operation in operations.values():
             assert all("user" not in p["name"].lower() for p in operation.get("parameters", [])), path
-    request_schema = client.get("/openapi.json").json()["components"]["schemas"]["DeviceRegistration"]
-    assert set(request_schema["properties"]) == {"platform", "app_version"}
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    assert set(schemas["DeviceRegistration"]["properties"]) == {"platform", "app_version", "timezone"}
+    assert set(schemas["MePatch"]["properties"]) == {"timezone"}
 
 
 def test_the_token_is_not_logged(client, caplog):

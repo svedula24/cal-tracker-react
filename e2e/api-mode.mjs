@@ -9,7 +9,8 @@
 // needed: a canned search answer, a small sync server that records what the
 // app sends (below), then every request aborted to stand for an unreachable
 // API, and a revoked token (401). `npm run verify:sync` (e2e/sync-real.mjs)
-// is the same idea against the real backend.
+// is the same idea against the real backend. Last, the Connect ChatGPT screen
+// against mocked pairing-code and connection endpoints.
 // ────────────────────────────────────────────────────────────────────────────
 import { chromium } from 'playwright';
 import { randomUUID } from 'node:crypto';
@@ -52,7 +53,9 @@ const ANSWERS = {
 
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+// A fixed zone, so the checks know what the app sends as its timezone; the clipboard, for Copy.
+const ZONE = 'America/Los_Angeles';
+const page = await browser.newPage({ viewport: { width: 390, height: 844 }, timezoneId: ZONE, permissions: ['clipboard-read', 'clipboard-write'] });
 const btn = (name) => page.getByRole('button', { name, exact: true });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
@@ -79,6 +82,13 @@ const api = {
   requests: [], // every sync answered 200: { token, body }
   rev: 0, // the server's change counter: the cursor of a response
   rows: [], // rows "changed on the server" for the app to pull: { rev, table, row }
+  zones: [], // the body of every PATCH /api/v1/me: { token, body }
+  zoneFailures: 0, // answer this many PATCH /api/v1/me with a 503 first
+  failedZones: [], // the PATCHes answered with that 503
+  codes: [], // the token of every POST /api/v1/pairing-codes
+  connections: [], // what GET /api/v1/connections lists
+  listed: [], // the token of every GET /api/v1/connections
+  deleted: [], // the id of every DELETE /api/v1/connections/{id}
 };
 /** A row changes on the server: the app gets it on its next sync, as from another client. */
 const serve = (table, row) => api.rows.push({ rev: ++api.rev, table, row });
@@ -127,6 +137,45 @@ await mock('**/api/v1/sync', 'POST', async (route, request) => {
   api.rev += count(body.changes);
   api.requests.push({ token, body });
   return json(route, 200, { cursor: api.rev, has_more: false, changes, rejected: [] });
+});
+
+// The account endpoints (backend/README.md): the bearer token as /sync takes it.
+const bearer = async (request) => {
+  const token = ((await request.headerValue('authorization')) ?? '').replace(/^Bearer /, '');
+  return api.tokens.includes(token) && !api.revoked.has(token) ? token : null;
+};
+const refuse = (route) => json(route, 401, { detail: 'invalid token' }, { 'www-authenticate': 'Bearer' });
+await mock('**/api/v1/me', 'PATCH', async (route, request) => {
+  const token = await bearer(request);
+  if (!token) return refuse(route);
+  const body = request.postDataJSON();
+  if (api.zoneFailures > 0) {
+    api.zoneFailures--;
+    api.failedZones.push({ token, body });
+    return json(route, 503, { detail: 'unavailable' });
+  }
+  api.zones.push({ token, body });
+  return json(route, 200, { user_id: randomUUID(), timezone: body.timezone, created_at: new Date().toISOString() });
+});
+await mock('**/api/v1/pairing-codes', 'POST', async (route, request) => {
+  const token = await bearer(request);
+  if (!token) return refuse(route);
+  api.codes.push(token);
+  return json(route, 201, { code: 'K7QM-4XPA', expires_at: new Date(Date.now() + 10 * 60_000).toISOString() });
+});
+await mock('**/api/v1/connections', 'GET', async (route, request) => {
+  const token = await bearer(request);
+  if (!token) return refuse(route);
+  api.listed.push(token);
+  return json(route, 200, { connections: api.connections });
+});
+await mock('**/api/v1/connections/*', 'DELETE', async (route, request) => {
+  if (!(await bearer(request))) return refuse(route);
+  const id = decodeURIComponent(new URL(request.url()).pathname.split('/').pop());
+  api.deleted.push(id);
+  const before = api.connections.length;
+  api.connections = api.connections.filter((c) => c.id !== id);
+  return api.connections.length < before ? route.fulfill({ status: 204, headers: CORS }) : json(route, 404, { detail: 'connection not found' });
 });
 
 let failed = 0;
@@ -191,6 +240,8 @@ try {
   await settled();
   check(api.devices.length === 1 && api.devices[0].platform === 'web', `the device registers exactly once, as platform web`, `sent: ${show(api.devices)}`);
   check(first.token === api.tokens[0], 'the first sync carries Authorization: Bearer <the token from the registration>');
+  check(api.devices[0].timezone === ZONE, `the registration carries the device's timezone (${ZONE})`, `sent: ${show(api.devices[0])}`);
+  check((await stored('kalo.tz.sent')) === ZONE && api.zones.length === 0, 'the zone sent with the registration is recorded, so it is not PATCHed as well', `PATCHes: ${show(api.zones)}`);
   check(((await stored('kalo.token')) ?? '').replace(/^"|"$/g, '') === api.tokens[0], 'the token is kept in localStorage under kalo.token');
   check(first.body.cursor === null, `the first sync pulls from the start (cursor: ${show(first.body.cursor)})`);
   const goal = first.body.changes.goals?.[0];
@@ -320,6 +371,28 @@ try {
   check(api.devices.length === 1 && reloaded.token === api.tokens[0], 'a reload does not register again: the stored token is used');
   check(reloaded.body.cursor === cursor && count(reloaded.body.changes) === 0, `a reload uploads nothing again and pulls from the stored cursor`, `sent: ${show(reloaded.body)}, server cursor ${cursor}`);
 
+  // ── Timezone: sent again only when the device's zone is not the one the server has ──
+  check(api.zones.length === 0, 'a reload with the same zone sends no PATCH /api/v1/me', `PATCHes: ${show(api.zones)}`);
+  await page.evaluate(() => localStorage.setItem('kalo.tz.sent', 'Europe/Paris')); // as if the phone had moved since
+  api.zoneFailures = 1;
+  await open();
+  await until('a PATCH /api/v1/me that fails', () => api.failedZones.length > 0);
+  await wait(1000);
+  check(
+    api.zones.length === 0 && (await stored('kalo.tz.sent')) === 'Europe/Paris',
+    'a PATCH /api/v1/me that fails leaves the zone unrecorded, so it is sent again', `stored: ${await stored('kalo.tz.sent')}`,
+  );
+  await open();
+  await until('PATCH /api/v1/me', () => api.zones.length > 0);
+  await until('the new zone to be recorded', async () => (await stored('kalo.tz.sent')) === ZONE);
+  check(
+    api.zones.length === 1 && api.zones[0].token === api.tokens[0] && keys(api.zones[0].body) === 'timezone' && api.zones[0].body.timezone === ZONE,
+    `a changed zone is sent once: PATCH /api/v1/me {"timezone": "${ZONE}"} with the token`, `sent: ${show(api.zones)}`,
+  );
+  await open();
+  await wait(1000);
+  check(api.zones.length === 1, 'and not again after a reload', `PATCHes: ${show(api.zones)}`);
+
   from = api.requests.length;
   await page.getByLabel('Search foods').fill('banana');
   await btn('Save Banana, raw').click();
@@ -414,6 +487,34 @@ try {
     api.devices.length === 2 && quiet.token === api.tokens[1] && count(quiet.body.changes) === 0 && api.requests.slice(from).filter((r) => r.body.changes?.goals?.length).length === 1,
     'everything is uploaded once: the next start sends nothing and keeps the new token',
   );
+
+  // ── Connect ChatGPT: a code, the connections, Disconnect ──
+  const token = api.tokens.at(-1);
+  await open('/goals');
+  await btn('Connect ChatGPT').click();
+  await page.getByText('Nothing is connected yet.').waitFor({ timeout: 5000 });
+  check(api.listed.length >= 1 && api.listed.every((t) => t === token), 'the Goals row opens Connect ChatGPT, which lists the connections with the device token');
+  check((await page.getByTestId('demo-goals-note').count()) === 1, 'it says the goals are still the demo ones');
+  check((await page.getByText('not in the ChatGPT iPhone app', { exact: false }).count()) === 1, 'it says it works on ChatGPT web, not the iPhone app');
+  await btn('Get code').click();
+  await page.getByLabel('Code K7QM-4XPA').waitFor({ timeout: 5000 });
+  check(api.codes.length === 1 && api.codes[0] === token, 'Get code asks for a pairing code once, with the device token');
+  const left = await page.getByText(/Expires in \d+:\d\d/).textContent();
+  check(/Expires in (10:00|9:5\d)/.test(left), `the code shows with a countdown (${left})`);
+  await btn('Copy code').click();
+  await page.getByText(/Copied/).waitFor({ timeout: 3000 });
+  check((await page.evaluate(() => navigator.clipboard.readText())) === 'K7QM-4XPA', 'Copy puts the code on the clipboard');
+
+  api.connections = [{ id: randomUUID(), client_name: 'ChatGPT', scopes: ['nutrition:read', 'nutrition:write'], created_at: new Date().toISOString(), last_used_at: null }];
+  await open('/connect-chatgpt');
+  await btn('Disconnect ChatGPT').waitFor({ timeout: 5000 });
+  check((await page.getByText(/Can read, log and change/).count()) === 1, 'a connection is listed with what it may do');
+  await btn('Disconnect ChatGPT').click();
+  check(api.deleted.length === 0, 'Disconnect asks first and sends nothing yet');
+  await btn('Confirm disconnect ChatGPT').click();
+  await page.getByText('Nothing is connected yet.').waitFor({ timeout: 5000 });
+  const gone = api.deleted.at(-1);
+  check(api.deleted.length === 1 && api.connections.length === 0 && gone !== undefined, 'confirming sends DELETE /api/v1/connections/{id} and removes the row', `deleted: ${show(api.deleted)}`);
 
   check(errors.length === 0, `no page errors and no console errors of the app's ${show(errors.slice(0, 3))}`);
 } catch (e) {

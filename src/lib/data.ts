@@ -233,6 +233,10 @@ export function useGoals() {
   return { goals: goalFor(rows, todayKey()), rows, ready: goalsStore().ready, set: setGoals };
 }
 
+const DEMO_TARGETS = ['calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium', 'steps', 'goal'] as const;
+/** Whether these targets are still the demo goal's (the user has not set their own yet). */
+export const isDemoGoal = (g: Goals): boolean => DEMO_TARGETS.every((k) => g[k] === goalsSeed[0][k]);
+
 /** The goal in force on `date`. */
 export const useGoalOn = (date: string): Goals => goalFor(useGoalRows(), date);
 

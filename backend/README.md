@@ -230,7 +230,18 @@ curl -X POST localhost:8000/api/v1/devices -H 'Content-Type: application/json' \
 
 curl localhost:8000/api/v1/me -H 'Authorization: Bearer kalo_…'
 # 200 {"user_id": "3f0e6c0a-…", "timezone": "UTC", "created_at": "…"}
+
+curl -X PATCH localhost:8000/api/v1/me -H 'Authorization: Bearer kalo_…' \
+  -H 'Content-Type: application/json' -d '{"timezone": "America/Los_Angeles"}'
+# 200 {"user_id": "3f0e6c0a-…", "timezone": "America/Los_Angeles", "created_at": "…"}
 ```
+
+- The timezone is the user's calendar: "today" (the default day of `/food-logs`,
+  `/nutrition/daily` and `/goals`) is today in that zone. Registration may send it
+  (`"timezone": "Europe/Paris"`); without it, or with a name the server does not know,
+  it is UTC (registration never fails over it). The app sends it at registration and
+  `PATCH`es it when the device's zone changes. `PATCH` answers 422 for a name not in
+  the server's IANA database (`zoneinfo.available_timezones()`, names are case-sensitive).
 
 - The token (`kalo_` + 43 characters) is shown once, in that 201. The server keeps
   only its SHA-256, so a lost token cannot be recovered: register again.
