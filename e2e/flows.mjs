@@ -105,14 +105,14 @@ const home = [
       const demoFoods = await page.evaluate(() => JSON.parse(localStorage.getItem('entries') ?? '[]').filter((e) => e.seed && e.foodId).length);
       if (demoFoods === 0) throw new Error('no demo entries of database foods in storage: this check would prove nothing');
       await btn(page, 'Add').click();
-      await btn(page, 'Scan food').waitFor({ timeout: 3000 });
+      await btn(page, 'Scan barcode').waitFor({ timeout: 3000 });
       await wait(400);
       if ((await page.getByText('Recent', { exact: true }).count()) > 0) throw new Error('Recent card shown with demo data only');
       const rows = await page.getByRole('button', { name: /^Log .+ again/ }).count();
       if (rows > 0) throw new Error(`${rows} recent food(s) offered with demo data only`);
       await btn(page, 'Close menu').last().click();
       await wait(300);
-      if ((await btn(page, 'Scan food').count()) > 0) throw new Error('the + menu did not close');
+      if ((await btn(page, 'Scan barcode').count()) > 0) throw new Error('the + menu did not close');
     },
   },
   {

@@ -351,7 +351,7 @@ export const flows = [
       const recent = (grams) => btn(page, `Log Avocado, raw again, ${grams} g`);
       const openMenu = async () => {
         await btn(page, 'Add').click();
-        await btn(page, 'Scan food').waitFor({ timeout: 3000 });
+        await btn(page, 'Scan barcode').waitFor({ timeout: 3000 });
         await wait(400); // the tiles spring in
       };
       const openEntry = async (name) => {
@@ -386,17 +386,17 @@ export const flows = [
       const rows = await page.getByRole('button', { name: /^Log .+ again/ }).count();
       if (rows > 3) throw new Error(`${rows} recent foods offered, at most 3 expected`);
       // The card must not push the tiles or the close button away.
-      for (const name of ['Saved foods', 'Food Database', 'Scan food']) {
+      for (const name of ['Saved foods', 'Food Database', 'Scan barcode']) {
         const box = await btn(page, name).boundingBox();
         if (!box || box.y < 0 || box.y + box.height > page.viewportSize().height) throw new Error(`${name} tile is off screen with Recent shown`);
       }
       // It is a card like the tiles: on screen, as wide as the full-width tile, with the same background.
       const card = page.getByLabel('Recent foods', { exact: true });
-      const [cardBox, scanBox] = [await card.boundingBox(), await btn(page, 'Scan food').boundingBox()];
+      const [cardBox, scanBox] = [await card.boundingBox(), await btn(page, 'Scan barcode').boundingBox()];
       if (cardBox.y < 0) throw new Error('the Recent card runs off the top of the screen');
       if (Math.abs(cardBox.width - scanBox.width) > 1 || Math.abs(cardBox.x - scanBox.x) > 1) throw new Error(`the Recent card is ${cardBox.width}px wide at x ${cardBox.x}, the tiles ${scanBox.width}px at ${scanBox.x}`);
       const bg = (loc) => loc.evaluate((el) => getComputedStyle(el).backgroundColor);
-      if ((await bg(card)) !== (await bg(btn(page, 'Scan food')))) throw new Error(`the Recent card's background is ${await bg(card)}: className lost`);
+      if ((await bg(card)) !== (await bg(btn(page, 'Scan barcode')))) throw new Error(`the Recent card's background is ${await bg(card)}: className lost`);
       if (cardBox.y + cardBox.height > (await btn(page, 'Saved foods').boundingBox()).y) throw new Error('the Recent card overlaps the tiles');
 
       // Tapping it opens Nutrition prefilled; nothing is logged until Done.
@@ -563,6 +563,17 @@ export const flows = [
       await wait(400);
       if ((await stored()).length !== 0) throw new Error('clean-up left the entry in storage');
       if ((await btn(page, `Edit ${NAME}`).count()) > 0) throw new Error('clean-up left the entry on Home');
+    },
+  },
+  {
+    // This build has no API URL: the barcode lookup goes through the server, so the screen says so.
+    name: 'scan barcode: without the Kalo server it says so and offers the food database',
+    run: async (page, base, { wait }) => {
+      await go(page, base + '/scan-food', wait);
+      await page.getByText('Barcode scanning needs the Kalo server', { exact: true }).waitFor({ timeout: 3000 });
+      if ((await page.getByLabel('Barcode number').count()) > 0) throw new Error('the barcode field is shown without a server');
+      await btn(page, 'Search food database').click();
+      await page.waitForURL(/\/food-database$/, { timeout: 5000 });
     },
   },
 ];

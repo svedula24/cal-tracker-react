@@ -12,17 +12,17 @@ removed on purpose: the app is a single screen.
 | How Daily Score Works | `/score-info` | designed |
 | Food Database | `/food-database` | designed (search + add) |
 | Saved foods | `/saved-foods` | designed |
-| Scan food | `/scan-food` | coming soon (camera/AI = backend) |
+| Scan barcode | `/scan-food` | camera (native) or typed code, looked up through the Kalo server (Open Food Facts); needs EXPO_PUBLIC_API_URL |
 | Entry detail | `/entry/[id]` | designed (edit name/servings, delete) |
 
 ## Navigation
 - **Stack** with Home as the root. No tab bar.
-- Black round **+ button** (bottom right) opens the AddMenu overlay: Saved foods, Food Database, Scan food; the button turns into X.
+- Black round **+ button** (bottom right) opens the AddMenu overlay: Saved foods, Food Database, Scan barcode; the button turns into X.
 
 ```
 Home ──score pill──▶ Daily Score ──"How Daily Score Works"──▶ Score info
 Home ──entry card──▶ Entry detail
-Home ──+ button──▶ AddMenu ──▶ Saved foods | Food Database | Scan food
-Scan food ──"Search food database"──▶ Food Database
+Home ──+ button──▶ AddMenu ──▶ Saved foods | Food Database | Scan barcode
+Scan barcode ──found──▶ Nutrition (replaces it); not found / no server ──"Search food database"──▶ Food Database
 Food Database / Saved foods ──add──▶ back to Home (selected day)
 ```
