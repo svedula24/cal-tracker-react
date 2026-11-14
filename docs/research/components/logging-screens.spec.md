@@ -21,8 +21,8 @@
 ### Saved foods (`/saved-foods`)
 - List of saved foods (resolve via `foodById`), same row style; tap → same add flow (servings stepper + "Add to log"). Swipe left to remove (react-native-gesture-handler `ReanimatedSwipeable` from `react-native-gesture-handler/ReanimatedSwipeable`, red "Remove" action) **and** an accessible remove button (accessibilityLabel `Remove <name>`) so it is testable on web.
 - Empty state: Bookmark icon, "No saved foods yet", "Tap the bookmark in Food Database to save foods you log often." + button "Browse foods" → `/food-database`.
-### Scan food (`/scan-food`)
-- `ComingSoon` (from `Screen.tsx`): ScanLine icon, title "Scan food is coming soon", body "Photo recognition needs a camera and an AI service, which this offline version doesn't include. You can search the food database instead." Action button **"Search food database"** → `router.replace('/food-database')`.
+### Scan barcode (`/scan-food`)
+- Without `EXPO_PUBLIC_API_URL`: `ComingSoon` "Barcode scanning needs the Kalo server" + **"Search food database"**. With it: a camera panel (native only, mounted while focused; EAN-13/8, UPC-A/E; permission prompt / Open settings) or the lookup result (not found, no nutrition facts, unreachable → Try again), a "Type the barcode" field + **Look up**, footer "Product data from Open Food Facts (ODbL)". Found → haptic → `router.replace` to Nutrition with the product (`off:<code>`), logged as a custom entry in grams. Lookup: `src/lib/barcodeApi.ts`.
 ### Entry detail (`/entry/[id]`)
 - `useLocalSearchParams<{ id: string }>()`; find entry. Missing → "Entry not found" + back.
 - Editable name: `TextInput` (accessibilityLabel "Food name") writing `update(id, { name })` on change/blur.
@@ -40,7 +40,7 @@
 | Entry name | editable text | `update(id, {name})` | on-device |
 | Entry servings | stepper | `update(id, {servings})` | on-device |
 | Entry | delete | `remove(id)` | on-device |
-| Scan food | camera/AI | cut, links to Food Database | backend (cut) |
+| Scan barcode | camera + barcode lookup | GET /api/v1/foods/barcode/{code} (Open Food Facts via the server) | backend |
 
 ## Text Content (verbatim)
 Titles: "Food Database", "Saved foods", "Scan food", "Edit entry". Buttons: "Add to log", "Delete entry", "Search food database", "Browse foods".

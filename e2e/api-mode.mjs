@@ -129,6 +129,28 @@ await mock('**/api/v1/sync', 'POST', async (route, request) => {
   return json(route, 200, { cursor: api.rev, has_more: false, changes, rejected: [] });
 });
 
+// GET /api/v1/foods/barcode/{code} (backend/README.md): one product found, one unknown code, one
+// product without nutrition facts. It needs the install's token, as /sync does.
+const PRODUCT = {
+  code: '0737628064502', name: 'Thai Peanut Noodle Kit', brand: 'Simply Asia',
+  nutrients_per_100g: { calories: 385.0, protein_g: 9.6, carbs_g: 71.2, fat_g: 7.7, fiber_g: 1.9, sugar_g: null, sodium_mg: 1250.0 },
+  serving: { label: '0.333 PACKAGE (52 g)', grams: 52.0 }, source: 'openfoodfacts',
+};
+const barcodes = []; // every lookup: { code, token }
+await mock('**/api/v1/foods/barcode/*', 'GET', async (route, request) => {
+  const code = decodeURIComponent(new URL(request.url()).pathname.split('/').pop());
+  const auth = (await request.headerValue('authorization')) ?? '';
+  const token = auth.replace(/^Bearer /, '');
+  barcodes.push({ code, token });
+  if (!auth.startsWith('Bearer ') || !api.tokens.includes(token) || api.revoked.has(token)) {
+    return json(route, 401, { detail: 'Not authenticated' }, { 'www-authenticate': 'Bearer' });
+  }
+  if (code === PRODUCT.code) return json(route, 200, PRODUCT);
+  if (code === '12345678') return json(route, 422, { detail: [{ msg: 'not a valid barcode' }] });
+  if (code === '5012345678900') return json(route, 404, { detail: { reason: 'incomplete', name: 'Mystery Crisps' } });
+  return json(route, 404, { detail: { reason: 'not_found' } });
+});
+
 let failed = 0;
 // `detail` (what the app sent) is printed only when the check fails.
 const check = (ok, what, detail) => {
@@ -416,6 +438,53 @@ try {
     api.devices.length === 2 && quiet.token === api.tokens[1] && count(quiet.body.changes) === 0 && api.requests.slice(from).filter((r) => r.body.changes?.goals?.length).length === 1,
     'everything is uploaded once: the next start sends nothing and keeps the new token',
   );
+
+  // ── Scan barcode: a typed code is looked up with the token; the product opens in Nutrition ──
+  // (the camera does not run in a headless browser; the typed code takes the same path)
+  await settled();
+  from = api.requests.length;
+  await open('/');
+  await btn('Add').click();
+  await btn('Scan barcode').click();
+  await page.getByLabel('Barcode number').waitFor({ timeout: 5000 });
+  check((await page.getByText('Product data from Open Food Facts (ODbL)', { exact: true }).count()) === 1, 'the scan screen credits Open Food Facts');
+  check(await btn('Look up').isDisabled(), 'Look up is disabled until a barcode is typed');
+  await page.getByLabel('Barcode number').fill('0737628064502');
+  await btn('Look up').click();
+  await nutrition();
+  const lookedUp = barcodes.at(-1);
+  check(barcodes.length === 1 && lookedUp.code === '0737628064502' && lookedUp.token === api.tokens.at(-1), 'one lookup of the typed code, with Authorization: Bearer <the token>', `sent: ${show(barcodes)}`);
+  check((await page.getByLabel('Food name').inputValue()) === 'Simply Asia Thai Peanut Noodle Kit', 'Nutrition shows the product with its brand');
+  check((await page.getByLabel('Grams').inputValue()) === '52' && (await page.getByText('0.333 PACKAGE (52 g) = 52 g').count()) === 1, 'Nutrition starts at the product\'s serving, 52 g');
+  check((await page.getByLabel('Calories', { exact: true }).inputValue()) === '200' && (await page.getByLabel('Sugar', { exact: true }).inputValue()) === '0', 'the nutrients are per serving (385 kcal/100 g -> 200), a null nutrient is 0');
+  await btn('Done').click();
+  await home('Simply Asia Thai Peanut Noodle Kit');
+  const scanned = JSON.parse(await stored('entries')).find((e) => e.foodId === 'off:0737628064502');
+  check(scanned?.name === 'Simply Asia Thai Peanut Noodle Kit' && scanned.servings === 52, 'Done logs the product on Home, stored with foodId off:<code>', `stored: ${show(scanned)}`);
+  const scanLog = await pushed('the scanned product to be pushed', 'food_logs', (r) => r.name === 'Simply Asia Thai Peanut Noodle Kit', from);
+  check(scanLog.fdc_id === null && scanLog.unit === 'g' && scanLog.quantity === 52 && scanLog.values.calories === 385, 'it syncs as a custom entry in grams (no fdc_id)', `sent: ${show(scanLog)}`);
+
+  await open('/scan-food');
+  await page.getByLabel('Barcode number').fill('4006381333931');
+  await btn('Look up').click();
+  await page.getByText('No product found', { exact: true }).waitFor({ timeout: 5000 });
+  check((await page.getByText('Open Food Facts has no product with the barcode 4006381333931.').count()) === 1 && (await btn('Search food database').count()) === 1, 'an unknown code says so, with the code and a way to the food database');
+  await page.getByLabel('Barcode number').fill('5012345678900');
+  await btn('Look up').click();
+  await page.getByText('No nutrition facts', { exact: true }).waitFor({ timeout: 5000 });
+  check((await page.getByText(/^Mystery Crisps \(5012345678900\)/).count()) === 1, 'a product without nutrition facts says so, by name');
+  await page.getByLabel('Barcode number').fill('12345678');
+  await btn('Look up').click();
+  await page.getByText("That barcode couldn't be read", { exact: true }).waitFor({ timeout: 5000 });
+  check(true, 'a code the server rejects (422) is shown as unreadable, not as the server being down');
+  api.down = true;
+  await page.getByLabel('Barcode number').fill('0737628064502');
+  await btn('Look up').click();
+  await page.getByText("Couldn't reach the Kalo server", { exact: true }).waitFor({ timeout: 5000 });
+  api.down = false;
+  await btn('Try again').click();
+  await nutrition();
+  check(true, 'an unreachable server offers Try again, which looks the code up again');
 
   check(errors.length === 0, `no page errors and no console errors of the app's ${show(errors.slice(0, 3))}`);
 } catch (e) {

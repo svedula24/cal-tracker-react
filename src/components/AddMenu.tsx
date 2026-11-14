@@ -15,7 +15,7 @@ import { tokens } from '@/lib/tokens';
 const ITEMS = [
   { label: 'Saved foods', Icon: Bookmark, href: '/saved-foods' },
   { label: 'Food Database', Icon: Search, href: '/food-database' },
-  { label: 'Scan food', Icon: ScanLine, href: '/scan-food' },
+  { label: 'Scan barcode', Icon: ScanLine, href: '/scan-food' },
 ] as const;
 
 /** How many recent foods the menu offers: it must fit above the tiles on a small phone. */
@@ -75,10 +75,10 @@ export function AddMenu({ onClose }: { onClose: () => void }) {
             key={label}
             entering={FadeInDown.delay((first + i) * 40).springify().damping(16).stiffness(200)}
             exiting={FadeOutDown.duration(120)}
-            // Three tiles: two side by side, Scan food full width below.
-            // Scan food takes a row; the other two share one. They grow from 40% rather than take a
+            // Three tiles: two side by side, Scan barcode full width below.
+            // Scan barcode takes a row; the other two share one. They grow from 40% rather than take a
             // fixed 47.5%, which with the 16 px gap is wider than the row on a 375 px screen and wrapped.
-            style={label === 'Scan food' ? { width: '100%' } : { flexGrow: 1, flexBasis: '40%' }}
+            style={label === 'Scan barcode' ? { width: '100%' } : { flexGrow: 1, flexBasis: '40%' }}
           >
           <Press
             accessibilityRole="button"
