@@ -6,7 +6,7 @@ import { AccessibilityInfo, ActivityIndicator, AppState, Platform, ScrollView, T
 import { Press } from '@/components/Press';
 import { Card, PushedScreen } from '@/components/Screen';
 import { API_URL } from '@/lib/config';
-import { codeDeadline, type Connection, createPairingCode, disconnect, formatCountdown, listConnections, TooManyRequests } from '@/lib/connectionsApi';
+import { codeDeadline, type Connection, createPairingCode, disconnect, formatCountdown, listConnections, type ProblemContext, problemMessage } from '@/lib/connectionsApi';
 import { isDemoGoal, useGoals } from '@/lib/data';
 import { deviceToken, syncNow } from '@/lib/sync';
 import { SyncUnauthorized } from '@/lib/sync/types';
@@ -18,15 +18,10 @@ const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'ui-
 /** Says `message` with VoiceOver / TalkBack (a changed Text is not read by itself on iOS). */
 const announce = (message: string) => AccessibilityInfo.announceForAccessibility(message);
 
-/** What to tell the user about a failed request. Never the error itself (nothing in it is for them). */
-function problem(e: unknown): string {
-  if (e instanceof TooManyRequests) return 'Too many codes this hour. Try again later.';
-  if (e instanceof SyncUnauthorized) {
-    // The token is no longer accepted: sync registers this phone again, the way it does after any 401.
-    syncNow();
-    return "Kalo's server didn't recognise this phone. It is reconnecting: try again in a moment.";
-  }
-  return "Can't reach Kalo's server. Check your connection and try again.";
+/** The message for a failed request; a 401 also has sync register this phone again (as after any 401). */
+function failed(e: unknown, context: ProblemContext): string {
+  if (e instanceof SyncUnauthorized) syncNow();
+  return problemMessage(e, context);
 }
 
 type CodeState =
@@ -81,7 +76,7 @@ function Connect() {
       const connections = await listConnections(url, token, { signal });
       if (current()) setList({ kind: 'ready', connections });
     } catch (e) {
-      if (current()) setList({ kind: 'error', message: problem(e) });
+      if (current()) setList({ kind: 'error', message: failed(e, 'list') });
     }
   }, [url]);
 
@@ -106,7 +101,7 @@ function Connect() {
       setCode({ kind: 'code', code: got.code, deadline: codeDeadline(got.expiresAt, at) });
     } catch (e) {
       if (signal.aborted) return;
-      const message = problem(e);
+      const message = failed(e, 'code');
       setCode({ kind: 'error', message });
       announce(message);
     }
@@ -269,7 +264,7 @@ function ConnectionRow({ connection, first, onDisconnect }: { connection: Connec
     try {
       await onDisconnect();
     } catch (e) {
-      const text = problem(e);
+      const text = failed(e, 'disconnect');
       setMessage(text);
       setStep('error');
       announce(text);

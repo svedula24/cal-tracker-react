@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 import {
-  CODE_LIFETIME_MS, codeDeadline, createPairingCode, disconnect, formatCountdown, listConnections, patchMe, TooManyRequests, Unprocessable,
+  CODE_LIFETIME_MS, codeDeadline, createPairingCode, disconnect, formatCountdown, listConnections, patchMe, problemMessage, TooManyRequests, Unprocessable,
 } from '../src/lib/connectionsApi.ts';
 import { ApiUnavailable } from '../src/lib/foodsApi.ts';
 import { SyncUnauthorized } from '../src/lib/sync/types.ts';
@@ -149,4 +149,19 @@ test('formatCountdown: m:ss, rounded up, never negative', () => {
   assert.equal(formatCountdown(1), '0:01');
   assert.equal(formatCountdown(0), '0:00');
   assert.equal(formatCountdown(-3000), '0:00');
+});
+
+test('problemMessage: a 429 is "too many codes" only for Get code; the list and Disconnect get a generic one', () => {
+  const e = new TooManyRequests();
+  assert.equal(problemMessage(e, 'code'), 'Too many codes this hour. Try again later.');
+  assert.equal(problemMessage(e, 'list'), 'Too many requests. Try again in a minute.');
+  assert.equal(problemMessage(e, 'disconnect'), 'Too many requests. Try again in a minute.');
+});
+
+test('problemMessage: a 401 says the phone is reconnecting, anything else that the server cannot be reached', () => {
+  for (const ctx of ['code', 'list', 'disconnect']) {
+    assert.match(problemMessage(new SyncUnauthorized(), ctx), /didn't recognise this phone/);
+    assert.equal(problemMessage(new ApiUnavailable('x'), ctx), "Can't reach Kalo's server. Check your connection and try again.");
+    assert.equal(problemMessage(new Error(TOKEN), ctx), "Can't reach Kalo's server. Check your connection and try again.");
+  }
 });

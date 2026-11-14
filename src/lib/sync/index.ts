@@ -75,6 +75,9 @@ function register(url: string): Promise<void> {
  */
 export async function deviceToken(): Promise<string> {
   if (!API_URL) throw new ApiUnavailable('No API URL');
+  // A registration under way (say, sync's after a 401) replaces the stored token: wait for it, so
+  // the old, revoked one is not handed out. If it fails, whatever is stored is still the answer.
+  if (registering) await registering.catch(() => {});
   const known = await loadToken();
   if (known) return known;
   await register(API_URL);

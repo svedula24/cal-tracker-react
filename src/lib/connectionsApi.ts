@@ -28,7 +28,7 @@ export type Connection = {
   lastUsedAt: string | null;
 };
 
-/** 429: too many pairing codes this hour. An ApiUnavailable, so a caller that does not care need not know. */
+/** 429: too many requests (for pairing codes, too many this hour). An ApiUnavailable, so a caller that does not care need not know. */
 export class TooManyRequests extends ApiUnavailable {
   constructor() {
     super('The server answered 429');
@@ -160,4 +160,19 @@ export function codeDeadline(expiresAt: string, receivedAt: number): number {
 export function formatCountdown(ms: number): string {
   const s = Math.max(0, Math.ceil(ms / 1000));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+}
+
+/** What a failed request was for: Get code, loading the list, or Disconnect. */
+export type ProblemContext = 'code' | 'list' | 'disconnect';
+
+/**
+ * What to tell the user about a failed request. Never the error itself (nothing in it is for
+ * them). Pure: on SyncUnauthorized the caller kicks sync to register again.
+ */
+export function problemMessage(e: unknown, context: ProblemContext): string {
+  if (e instanceof TooManyRequests) {
+    return context === 'code' ? 'Too many codes this hour. Try again later.' : 'Too many requests. Try again in a minute.';
+  }
+  if (e instanceof SyncUnauthorized) return "Kalo's server didn't recognise this phone. It is reconnecting: try again in a moment.";
+  return "Can't reach Kalo's server. Check your connection and try again.";
 }
