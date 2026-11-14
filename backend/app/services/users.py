@@ -38,9 +38,8 @@ def hash_token(token: str) -> bytes:
 
 
 def set_timezone(user: User, name: str) -> None:
-    """Sets the user's timezone (their "today" follows it). ValueError for an unknown name. Does not commit."""
-    if not known_timezone(name):
-        raise ValueError("unknown timezone")
+    """Sets the user's timezone (their "today" follows it). `name` is a known zone: the request schema
+    (MePatch) checked it. Does not commit."""
     user.timezone = name
 
 

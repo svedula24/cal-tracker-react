@@ -15,7 +15,7 @@ import { patchMe, Unprocessable } from '@/lib/connectionsApi';
 import { syncStores } from '@/lib/data';
 import { ApiUnavailable } from '@/lib/foodsApi';
 import { loadToken, saveToken } from '@/lib/identity';
-import { currentTimezone, zoneToRecord } from '@/lib/timezone';
+import { createZoneSender, currentTimezone, zoneToRecord } from '@/lib/timezone';
 
 import { postSync, registerDevice } from './api';
 import { attachEngine } from './dirty';
@@ -56,9 +56,10 @@ function register(url: string): Promise<void> {
       registerDevice(url, { platform, appVersion: Constants.expoConfig?.version, timezone }, { signal }),
     );
     // Recorded only when the server took it; otherwise cleared, since what is recorded was sent to the
-    // account before this one. (The server stores UTC for a zone it does not know: sendTimezone() then
+    // account before this one. (The server stores UTC for a zone it does not know: the zone sender then
     // PATCHes it later, refused until the server knows it.) Done before the token is usable, so
-    // sendTimezone() never pairs the new token with the old account's record.
+    // the zone sender never pairs the new token with the old account's record.
+    zoneSender.forget(); // a zone the old account's server refused may be taken now
     const record = zoneToRecord(timezone, stored);
     await (record ? AsyncStorage.setItem(TZ_SENT, record) : AsyncStorage.removeItem(TZ_SENT)).catch(() => {});
     await saveToken(token);
@@ -82,35 +83,18 @@ export async function deviceToken(): Promise<string> {
   return token;
 }
 
-let sendingZone = false;
-// A zone the server refused (422) this session: not sent again on every return to the app.
-let refusedZone: string | null = null;
-
-/** Sends the device's timezone when it is not the one the server was last given. Never rejects. */
-async function sendTimezone(url: string): Promise<void> {
-  if (sendingZone || registering) return; // a registration sends it itself
-  sendingZone = true;
-  try {
-    const zone = currentTimezone();
-    if (!zone || zone === refusedZone || (await AsyncStorage.getItem(TZ_SENT)) === zone) return;
-    const token = await loadToken();
-    if (!token) return; // the registration will send it
-    try {
-      await patchMe(url, token, { timezone: zone }); // its own 15 s timeout
-    } catch (e) {
-      if (e instanceof Unprocessable) refusedZone = zone; // tried again at the next start
-      throw e;
-    }
-    // Recorded only for the account it was sent to: a registration may have replaced it meanwhile
-    // (after a 401), and that one has its own record.
-    if (!registering && (await loadToken()) === token) await AsyncStorage.setItem(TZ_SENT, zone);
-  } catch {
-    // Unreachable, a 401 (sync registers again, with the zone) or a zone the server does not know:
-    // tried again at the next start or return to the app.
-  } finally {
-    sendingZone = false;
-  }
-}
+/** Sends the device's timezone when it is not the one the server was last given (see createZoneSender). */
+const zoneSender = createZoneSender({
+  zone: currentTimezone,
+  recorded: () => AsyncStorage.getItem(TZ_SENT),
+  record: (zone) => AsyncStorage.setItem(TZ_SENT, zone),
+  token: loadToken,
+  patch: async (token, zone) => {
+    if (API_URL) await patchMe(API_URL, token, { timezone: zone }); // its own 15 s timeout
+  },
+  refused: (e) => e instanceof Unprocessable,
+  registering: () => registering !== null,
+});
 
 let started = false;
 let kick: (() => void) | null = null;
@@ -154,11 +138,11 @@ export function startSync(): void {
     attachEngine(engine.markDirty); // replays what was written while the data was loading
     kick = engine.kick;
     engine.kick();
-    void sendTimezone(url);
+    void zoneSender.send();
     AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
       engine.kick();
-      void sendTimezone(url); // the phone may have changed zone while away
+      void zoneSender.send(); // the phone may have changed zone while away
     });
   })().catch(() => {}); // sync is not running this session; the app is unaffected
 }
