@@ -1,21 +1,27 @@
 """The FastAPI app. `uv run uvicorn app.main:app --reload`
 
 Importing does not connect: the engine is built when the app starts and disposed when it stops.
+With PUBLIC_URL set (app/settings.py) it also serves the OAuth authorization server (app/api/oauth.py)
+and the MCP endpoint /mcp (app/mcp/); without it, neither exists.
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import TimeoutError as PoolTimeout
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 
+from app.api import oauth as oauth_api
 from app.api.limits import BodyLimit, SlidingWindow
+from app.api.v1.connections import CODES_PER_HOUR
+from app.api.v1.connections import router as connections_router
 from app.api.v1.devices import router as devices_router
 from app.api.v1.food_logs import router as food_logs_router
 from app.api.v1.foods import router as foods_router
@@ -23,6 +29,7 @@ from app.api.v1.goals import daily_activity_router, goals_router
 from app.api.v1.nutrition import router as nutrition_router
 from app.api.v1.sync import router as sync_router
 from app.db.session import make_engine
+from app.settings import Settings, get_settings
 from kalo.db import database_url, require_head
 
 # A household or office shares one address; an app registers once per install.
@@ -33,9 +40,15 @@ REGISTRATIONS_PER_HOUR = 20
 MAX_BODY_BYTES = 2 * 1024 * 1024
 
 
-def create_app(url: str | None = None) -> FastAPI:
-    """The app, with an engine (connection pool) to `url` (default: DATABASE_URL) for its lifetime."""
+def create_app(url: str | None = None, settings: Settings | None = None, token_verifier: Any = None) -> FastAPI:
+    """The app, with an engine (connection pool) to `url` (default: DATABASE_URL) for its lifetime.
+
+    `settings` default to the environment's (get_settings). `token_verifier` replaces the one /mcp checks
+    access tokens with (app/mcp/auth.py `KaloVerifier`): tests pass a stub.
+    """
     url = url or database_url()
+    settings = settings or get_settings()
+    session_manager = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -48,11 +61,15 @@ def create_app(url: str | None = None) -> FastAPI:
                 require_head(cur)
             app.state.engine = engine
             app.state.sessionmaker = sessionmaker(engine, expire_on_commit=False)
-            yield
+            async with AsyncExitStack() as stack:
+                if session_manager is not None:  # the MCP SDK's task group, for the request handlers
+                    await stack.enter_async_context(session_manager.run())
+                yield
         finally:
             engine.dispose()
 
     app = FastAPI(title="Kalo", lifespan=lifespan)
+    app.state.settings = settings
     app.include_router(foods_router)
     app.include_router(devices_router)
     app.include_router(sync_router)
@@ -60,8 +77,27 @@ def create_app(url: str | None = None) -> FastAPI:
     app.include_router(nutrition_router)
     app.include_router(goals_router)
     app.include_router(daily_activity_router)
+    # The app asks for pairing codes before a tunnel is up, so these exist with or without PUBLIC_URL.
+    app.include_router(connections_router)
+    if settings.public_url is not None:
+        from app.mcp import server as mcp_server  # the SDK is only imported when it is used
+        from app.mcp.auth import KaloVerifier
+
+        app.include_router(oauth_api.router)
+
+        def sessions() -> Session:
+            return app.state.sessionmaker()
+
+        verifier = token_verifier or KaloVerifier(sessions, settings.resource)
+        routes, session_manager = mcp_server.build(settings, sessions, verifier)
+        app.router.routes.extend(routes)
     # Registration needs no token, so one address may only register this often (POST /api/v1/devices).
     app.state.registrations = SlidingWindow(REGISTRATIONS_PER_HOUR, per_seconds=3600)
+    # Pairing codes the app asks for, per user; and pairing-code attempts on the sign-in page, per address
+    # and from everyone. Each app (each test's app) counts on its own; tests may replace them.
+    app.state.pairing_codes = SlidingWindow(CODES_PER_HOUR, per_seconds=3600)
+    app.state.pairing_attempts = SlidingWindow(*oauth_api.ATTEMPTS_PER_ADDRESS)
+    app.state.pairing_attempts_overall = SlidingWindow(*oauth_api.ATTEMPTS_OVERALL)
     # Refused by its declared size, before any of it is read. Added before the CORS middleware, which
     # therefore wraps it: the 413 is readable cross-origin.
     app.add_middleware(BodyLimit, max_bytes=MAX_BODY_BYTES)

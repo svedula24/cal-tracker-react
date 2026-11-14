@@ -1,4 +1,5 @@
-"""Reads over a user's logs: a day's logs, a day's totals, the goal and steps of a day, recent foods.
+"""Reads over a user's logs: a day's logs, a day's totals, the goal and steps of a day, recent foods, and
+the same over a range of days (for history).
 
 Every query is scoped by the user id, which always comes from the bearer token. Writes go through
 app/services/logs.py (the core shared with sync), not through here.
@@ -85,14 +86,69 @@ def activity_on(session: Session, user_id: uuid.UUID, day: date) -> RowMapping |
     return session.execute(stmt).mappings().first()
 
 
+# DAY_TOTALS_SQL per day over a range: one row per day that has logs (a day without is left out).
+RANGE_TOTALS_SQL = text("""
+SELECT log_date,
+       COALESCE(sum(calories), 0)  AS calories,
+       COALESCE(sum(protein_g), 0) AS protein_g,
+       COALESCE(sum(carbs_g), 0)   AS carbs_g,
+       COALESCE(sum(fat_g), 0)     AS fat_g,
+       COALESCE(sum(fiber_g), 0)   AS fiber_g,
+       COALESCE(sum(sugar_g), 0)   AS sugar_g,
+       COALESCE(sum(sodium_mg), 0) AS sodium_mg,
+       count(*) FILTER (WHERE fiber_g IS NULL)   AS fiber_g_unknown,
+       count(*) FILTER (WHERE sugar_g IS NULL)   AS sugar_g_unknown,
+       count(*) FILTER (WHERE sodium_mg IS NULL) AS sodium_mg_unknown,
+       count(*) AS log_count
+FROM food_logs
+WHERE user_id = :user_id AND log_date BETWEEN :start AND :end AND deleted_at IS NULL
+GROUP BY log_date
+""")
+
+
+def range_totals(session: Session, user_id: uuid.UUID, start: date, end: date) -> dict[date, RowMapping]:
+    """`day_totals` for each day from `start` to `end` (inclusive) that has logs, by day."""
+    rows = session.execute(RANGE_TOTALS_SQL, {"user_id": user_id, "start": start, "end": end}).mappings()
+    return {row["log_date"]: row for row in rows}
+
+
+def goals_for_range(session: Session, user_id: uuid.UUID, start: date, end: date) -> list[UserGoal]:
+    """The goals in force on some day from `start` to `end`: the one in force on `start` (if any), then
+    those that start after it up to `end`, oldest first. A day's goal is the last that starts on or before it."""
+    first = goal_on(session, user_id, start)
+    stmt = (
+        select(UserGoal)
+        .where(
+            UserGoal.user_id == user_id,
+            UserGoal.effective_date > start,
+            UserGoal.effective_date <= end,
+            UserGoal.deleted_at.is_(None),
+        )
+        .order_by(UserGoal.effective_date)
+    )
+    return ([first] if first is not None else []) + list(session.scalars(stmt))
+
+
+def activity_for_range(session: Session, user_id: uuid.UUID, start: date, end: date) -> dict[date, RowMapping]:
+    """`activity_on` for each day from `start` to `end` that has an activity row, by day."""
+    stmt = select(
+        DailyActivity.activity_date, DailyActivity.steps, DailyActivity.day_type, DailyActivity.workout_kcal
+    ).where(
+        DailyActivity.user_id == user_id,
+        DailyActivity.activity_date.between(start, end),
+        DailyActivity.deleted_at.is_(None),
+    )
+    return {row["activity_date"]: row for row in session.execute(stmt).mappings()}
+
+
 # Each USDA food the user has logged, once, at its latest log (food_logs_user_recent_idx gives the
 # inner query its order), then most recent first. Custom entries have no fdc_id and are left out.
 # A retired food is kept: the user did log it, and it can still be looked up and logged by id.
 RECENT_SQL = text(f"""
 SELECT {", ".join("f." + column.strip() for column in food_service.COLUMNS.split(","))},
-       recent.quantity AS grams, recent.logged_at
+       recent.quantity AS grams, recent.logged_at, recent.log_date
 FROM (
-    SELECT DISTINCT ON (fdc_id) fdc_id, quantity, logged_at
+    SELECT DISTINCT ON (fdc_id) fdc_id, quantity, logged_at, log_date
     FROM food_logs
     WHERE user_id = :user_id AND deleted_at IS NULL AND fdc_id IS NOT NULL
     ORDER BY fdc_id, logged_at DESC, id DESC  -- id: two logs of one food at the same instant give one answer
@@ -106,6 +162,7 @@ LIMIT :limit
 def recent_foods(
     session: Session, user_id: uuid.UUID, limit: int
 ) -> tuple[Sequence[RowMapping], dict[int, list[FoodPortion]]]:
-    """The user's `limit` most recently logged foods (search columns + `grams`, `logged_at`) and their portions."""
+    """The `limit` foods the user logged most recently (search columns + `grams`, `logged_at`, `log_date`)
+    and their portions."""
     rows = session.execute(RECENT_SQL, {"user_id": user_id, "limit": limit}).mappings().all()
     return rows, food_service.portions_for(session, [row["fdc_id"] for row in rows])

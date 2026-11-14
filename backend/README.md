@@ -407,6 +407,66 @@ uv run python scripts/bench_search.py --limit 50 # the page size the app asks fo
 uv run python scripts/bench_search.py --explain
 ```
 
+## ChatGPT (MCP)
+
+With `PUBLIC_URL` set, the API also serves an MCP server at `/mcp` and a small OAuth 2.1
+authorization server, so ChatGPT can read and write the user's log. Without it, neither exists.
+
+| Variable | |
+| --- | --- |
+| `PUBLIC_URL` | the public https origin (the ngrok domain), no trailing slash; `http://localhost:<port>` for local tests |
+| `KALO_SECRET` | 32+ characters (`openssl rand -hex 32`); signs the sign-in page and the DCR client ids |
+| `OAUTH_CLIENT_IDS`, `OAUTH_REDIRECT_URIS` | default to ChatGPT's; see `app/settings.py` |
+
+**Run it on the Mac** (ngrok's free static domain; `brew install ngrok`, `ngrok config add-authtoken …` once):
+
+```sh
+cd backend
+PUBLIC_URL=https://<your-domain>.ngrok-free.app KALO_SECRET=<secret> \
+  uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1
+ngrok http 8000 --url https://<your-domain>.ngrok-free.app --traffic-policy-file ../ops/ngrok-policy.yml
+```
+
+`--proxy-headers` makes the sign-in rate limit see the caller's address rather than ngrok's. The
+traffic policy (`ops/ngrok-policy.yml`) makes only `/mcp`, `/oauth/*` and `/.well-known/*` public;
+the app keeps using the API on the local network as before.
+
+**Connect:** in the app, Goals → Connect ChatGPT → Get code. In ChatGPT on the web: Settings → Apps &
+Connectors → Advanced → Developer mode, then add a connector with the URL `<PUBLIC_URL>/mcp` and OAuth.
+ChatGPT opens Kalo's sign-in page: enter the code (10 minutes, single use). Untick "also log, edit and
+delete" for a read-only connection. Disconnect in the app revokes it on ChatGPT's next request.
+Connecting ChatGPT again replaces its earlier connection.
+
+Sign-in tries are limited to 10 per 15 minutes per address, and wrong codes to 1000 an hour from
+everyone (8-character codes that last 10 minutes: about a one-in-a-billion chance of a guess). The
+per-address limit needs uvicorn's `--proxy-headers`: without it every caller is ngrok's address and
+shares one allowance. Locking the owner out would take wrong codes from about 25 addresses at once.
+
+**How it works:**
+- Discovery: `/.well-known/oauth-protected-resource/mcp` (RFC 9728) and
+  `/.well-known/oauth-authorization-server` (RFC 8414); `/mcp` without a token is a 401 that points at them.
+- Clients: ChatGPT's client ID metadata document (fetched once a day, nothing else is fetched) or
+  `POST /oauth/register` (stateless, HMAC-signed client ids). Redirects only to allowlisted `https://chatgpt.com/` URIs.
+- Authorization code + PKCE S256, codes single use for 60 s. Access tokens 1 h, refresh tokens
+  90 days, rotated on use; a replayed code revokes the connection. Scopes `nutrition:read` and
+  `nutrition:write`. Tokens are stored hashed, in their own tables: `/api/v1` never accepts them,
+  and `/mcp` never accepts a device token.
+- Tools (`app/mcp/tools.py`): `search_foods`, `get_recent_foods`, `get_daily_macros`,
+  `get_nutrition_history` (read); `log_food`, `log_custom_food`, `update_food_log`,
+  `delete_food_log`, `update_daily_goal` (need `nutrition:write`). They call the same services as
+  the REST routes, so a change gets a new `rev` and reaches the phone on its next sync. Dates are in
+  the user's timezone (`users.timezone`).
+
+App-facing endpoints (device token), with or without `PUBLIC_URL`:
+
+```sh
+curl -X POST localhost:8000/api/v1/pairing-codes -H "Authorization: Bearer $TOKEN"
+# 201 {"code": "K7QM-4XPA", "expires_at": "…"}      (429 over 10 an hour)
+curl localhost:8000/api/v1/connections -H "Authorization: Bearer $TOKEN"
+# 200 {"connections": [{"id", "client_name", "scopes", "created_at", "last_used_at"}]}
+curl -X DELETE localhost:8000/api/v1/connections/<id> -H "Authorization: Bearer $TOKEN"   # 204
+```
+
 ## Layout
 
 ```
@@ -419,15 +479,22 @@ app/
   api/v1/food_logs.py  food-log create, read, edit, delete
   api/v1/nutrition.py  GET /nutrition/daily
   api/v1/goals.py      GET /goals, PUT /goals/{date}, POST /goals/suggest, PUT /daily-activity/{date}
+  api/v1/connections.py  pairing codes, ChatGPT connections (list, disconnect)
+  api/oauth.py         the OAuth authorization server: discovery, sign-in page, token, register
+  mcp/                 the MCP server (/mcp): server.py, tools.py, auth.py (access tokens -> user)
+  settings.py          PUBLIC_URL, KALO_SECRET, the OAuth allowlists
   schemas/             Pydantic request and response models (foods, users, logs, log_api)
   models/foods.py      SQLAlchemy Food and FoodPortion
   models/user_data.py  User, UserToken, FoodLog, UserGoal, DailyActivity, SavedFood
+  models/oauth.py      PairingCode, OAuthGrant, OAuthCode, OAuthToken
   services/foods.py    ranked search SQL, portions_for (a page's portions), get_food, get_portions
   services/users.py    tokens (made, hashed, looked up), register_device
   services/logs.py     how one pushed row is applied: last write wins, the food-log rules
   services/sync.py     the push per table and the pull; upsert_row for the REST goal and day routes
   services/targets.py  a day's target and what remains, suggested goals (pure)
-  services/log_queries.py  a day's logs and totals, the goal and activity on a date, recent foods
+  services/log_queries.py  a day's logs and totals, the goal and activity on a date (and over a range), recent foods
+  services/log_writes.py, goal_writes.py, daily.py  log and goal writes, a day's summary and history (REST and MCP)
+  services/oauth.py, pairing.py  OAuth clients, codes, tokens and grants; pairing codes
   db/session.py        engine, session dependency
 alembic.ini
 migrations/
@@ -435,6 +502,7 @@ migrations/
   versions/            0001_foods_and_portions.py: the USDA tables, checks, indexes
                        0002_user_data.py: users, tokens, logs, goals, steps, saved foods
                        0003_activity_targets.py: goal source and day amounts; daily_steps -> daily_activity
+                       0004_oauth.py: pairing codes, OAuth grants, codes and tokens
 kalo/
   db.py                database_url(): the one source of the connection URL
   calai.py             import a Cal AI report PDF's food log

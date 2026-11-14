@@ -29,8 +29,9 @@ class SlidingWindow:
         self._lock = threading.Lock()
         self._swept = clock()
 
-    def retry_after(self, key: str) -> float | None:
-        """Record an event for `key` and return None, or (the event is refused) the seconds until one is allowed."""
+    def retry_after(self, key: str, record: bool = True) -> float | None:
+        """Record an event for `key` and return None, or (the event is refused) the seconds until one is
+        allowed. `record=False` only checks: the caller records later, if the event turns out to count."""
         with self._lock:
             now = self.clock()
             oldest_kept = now - self.per_seconds
@@ -43,7 +44,8 @@ class SlidingWindow:
                 events.popleft()
             if len(events) >= self.limit:
                 return events[0] + self.per_seconds - now
-            events.append(now)
+            if record:
+                events.append(now)
             return None
 
 
