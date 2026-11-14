@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import make_engine, sqlalchemy_url
 from app.models.foods import Base, Food, FoodPortion
+from app.models.oauth import OAuthCode, OAuthGrant, OAuthToken, PairingCode
 from app.models.user_data import DailyActivity, FoodLog, SavedFood, User, UserGoal, UserToken
 from kalo.db import alembic_config
 
@@ -23,7 +24,8 @@ HEAD = ScriptDirectory.from_config(alembic_config()).get_current_head()
 
 FOODS_TABLES = {"foods", "food_portions", "alembic_version"}  # what revision 0001 creates
 SYNCED_TABLES = ("food_logs", "user_goals", "daily_activity", "saved_foods")
-TABLES = FOODS_TABLES | {"users", "user_tokens", *SYNCED_TABLES}
+OAUTH_TABLES = ("pairing_codes", "oauth_grants", "oauth_codes", "oauth_tokens")  # revision 0004
+TABLES = FOODS_TABLES | {"users", "user_tokens", *SYNCED_TABLES, *OAUTH_TABLES}
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
 FOOD_LOGS_INDEXES = {
     "food_logs_pkey": "UNIQUE btree (id)",
@@ -208,7 +210,13 @@ def test_each_scratch_schema_gets_its_own_version_table(migrated_url):
             conn.execute(f"DROP SCHEMA {second} CASCADE")
 
 
-@pytest.mark.parametrize("model", [Food, FoodPortion, User, UserToken, FoodLog, UserGoal, DailyActivity, SavedFood])
+@pytest.mark.parametrize(
+    "model",
+    [
+        *(Food, FoodPortion, User, UserToken, FoodLog, UserGoal, DailyActivity, SavedFood),
+        *(PairingCode, OAuthGrant, OAuthCode, OAuthToken),
+    ],
+)
 def test_models_match_the_migrated_tables(migrated_url, model):
     schema = schema_of(migrated_url)
     engine = make_engine(migrated_url)
@@ -348,8 +356,9 @@ def test_user_data_columns(migrated_url):
         rows = conn.execute(
             "SELECT table_name, column_name, data_type, is_nullable, column_default, is_generated"
             " FROM information_schema.columns WHERE table_schema = current_schema()"
-            " AND table_name NOT IN ('foods', 'food_portions', 'alembic_version')"
-            " ORDER BY table_name, ordinal_position"
+            " AND table_name NOT IN ('foods', 'food_portions', 'alembic_version', %s, %s, %s, %s)"
+            " ORDER BY table_name, ordinal_position",
+            OAUTH_TABLES,
         ).fetchall()
     by_table = {}
     for table, column, data_type, nullable, default, generated in rows:
@@ -362,7 +371,7 @@ def test_user_data_columns(migrated_url):
         "deleted_at": "timestamp with time zone NULL",
         "rev": "bigint",
     }
-    assert set(by_table) == TABLES - FOODS_TABLES
+    assert set(by_table) == TABLES - FOODS_TABLES - set(OAUTH_TABLES)  # those: test_oauth_columns
     assert by_table["users"] == {
         "id": "uuid DEFAULT gen_random_uuid()",
         "email": "text NULL",
@@ -503,7 +512,8 @@ def test_user_data_indexes(migrated_url):
     with psycopg.connect(migrated_url) as conn:
         rows = conn.execute(
             "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema()"
-            " AND tablename NOT IN ('foods', 'food_portions', 'alembic_version')"
+            " AND tablename NOT IN ('foods', 'food_portions', 'alembic_version', %s, %s, %s, %s)",
+            OAUTH_TABLES,
         ).fetchall()
     indexes = {}
     for name, definition in rows:
@@ -868,3 +878,165 @@ def test_downgrade_to_0002_gives_daily_steps_back_with_its_rows(conn, migrated_u
     assert conn.execute("SELECT steps, day_type, workout_kcal, rev FROM daily_activity").fetchall() == [
         (4000, None, None, rev)
     ]
+
+
+# ---- Revision 0004: pairing codes and OAuth connections ----
+
+
+def test_oauth_columns(migrated_url):
+    with psycopg.connect(migrated_url) as conn:
+        rows = conn.execute(
+            "SELECT table_name, column_name, data_type, is_nullable, column_default"
+            " FROM information_schema.columns WHERE table_schema = current_schema()"
+            " AND table_name IN (%s, %s, %s, %s) ORDER BY table_name, ordinal_position",
+            OAUTH_TABLES,
+        ).fetchall()
+    by_table = {}
+    for table, column, data_type, nullable, default in rows:
+        spec = data_type if nullable == "NO" else f"{data_type} NULL"
+        by_table.setdefault(table, {})[column] = spec + (f" DEFAULT {default}" if default else "")
+    created = "timestamp with time zone DEFAULT now()"
+    tz, tz_null = "timestamp with time zone", "timestamp with time zone NULL"
+    assert by_table == {
+        "pairing_codes": {
+            "code_hash": "bytea",
+            "user_id": "uuid",
+            "created_at": created,
+            "expires_at": tz,
+            "used_at": tz_null,
+        },
+        "oauth_grants": {
+            "id": "uuid DEFAULT gen_random_uuid()",
+            "user_id": "uuid",
+            "client_id": "text",
+            "client_name": "text",
+            "scopes": "ARRAY",
+            "resource": "text",
+            "created_at": created,
+            "last_used_at": tz_null,
+            "revoked_at": tz_null,
+        },
+        "oauth_codes": {
+            "code_hash": "bytea",
+            "user_id": "uuid",
+            "client_id": "text",
+            "client_name": "text",
+            "scopes": "ARRAY",
+            "resource": "text",
+            "redirect_uri": "text",
+            "code_challenge": "text",
+            "created_at": created,
+            "expires_at": tz,
+            "used_at": tz_null,
+            "grant_id": "uuid NULL",
+        },
+        "oauth_tokens": {
+            "token_hash": "bytea",
+            "grant_id": "uuid",
+            "kind": "text",
+            "created_at": created,
+            "expires_at": tz,
+            "rotated_at": tz_null,
+        },
+    }
+
+
+def test_oauth_constraints_and_indexes(migrated_url):
+    schema = schema_of(migrated_url)
+    with psycopg.connect(migrated_url) as conn:
+        constraints = conn.execute(
+            "SELECT c.conname, pg_get_constraintdef(c.oid) FROM pg_constraint c"
+            " JOIN pg_namespace n ON n.oid = c.connamespace"
+            " WHERE n.nspname = current_schema() AND c.conrelid::regclass::text IN (%s, %s, %s, %s)",
+            OAUTH_TABLES,
+        ).fetchall()
+        indexes = conn.execute(
+            "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema()"
+            " AND tablename IN (%s, %s, %s, %s)",
+            OAUTH_TABLES,
+        ).fetchall()
+    scopes = (
+        "CHECK (((scopes <@ ARRAY['nutrition:read'::text, 'nutrition:write'::text])"
+        " AND ('nutrition:read'::text = ANY (scopes))))"
+    )
+    user_fk = "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"
+    grant_fk = "FOREIGN KEY (grant_id) REFERENCES oauth_grants(id) ON DELETE CASCADE"
+    assert {name: " ".join(d.split()) for name, d in constraints} == {
+        "pairing_codes_pkey": "PRIMARY KEY (code_hash)",
+        "pairing_codes_code_hash_check": "CHECK ((octet_length(code_hash) = 32))",
+        "pairing_codes_user_id_fkey": user_fk,
+        "oauth_grants_pkey": "PRIMARY KEY (id)",
+        "oauth_grants_user_id_fkey": user_fk,
+        "oauth_grants_scopes_check": scopes,
+        "oauth_codes_pkey": "PRIMARY KEY (code_hash)",
+        "oauth_codes_code_hash_check": "CHECK ((octet_length(code_hash) = 32))",
+        "oauth_codes_user_id_fkey": user_fk,
+        "oauth_codes_scopes_check": scopes,
+        "oauth_codes_grant_id_fkey": grant_fk,
+        "oauth_tokens_pkey": "PRIMARY KEY (token_hash)",
+        "oauth_tokens_token_hash_check": "CHECK ((octet_length(token_hash) = 32))",
+        "oauth_tokens_grant_id_fkey": grant_fk,
+        "oauth_tokens_kind_check": "CHECK ((kind = ANY (ARRAY['access'::text, 'refresh'::text])))",
+        "oauth_tokens_check": "CHECK (((kind = 'refresh'::text) OR (rotated_at IS NULL)))",
+    }
+    assert {name: d.partition(f" ON {schema}.")[2] for name, d in indexes} == {
+        "pairing_codes_pkey": "pairing_codes USING btree (code_hash)",
+        "pairing_codes_user_id_idx": "pairing_codes USING btree (user_id)",
+        "oauth_grants_pkey": "oauth_grants USING btree (id)",
+        "oauth_grants_user_id_idx": "oauth_grants USING btree (user_id)",
+        "oauth_codes_pkey": "oauth_codes USING btree (code_hash)",
+        "oauth_codes_expires_at_idx": "oauth_codes USING btree (expires_at)",
+        "oauth_tokens_pkey": "oauth_tokens USING btree (token_hash)",
+        "oauth_tokens_grant_id_idx": "oauth_tokens USING btree (grant_id)",
+    }
+
+
+def add_grant(conn, user_id, scopes=("nutrition:read",)) -> uuid.UUID:
+    return insert(
+        conn, "oauth_grants", "id", user_id=user_id, client_id="c", client_name="ChatGPT", scopes=list(scopes),
+        resource="https://kalo.example/mcp",
+    )[0]  # fmt: skip
+
+
+@pytest.mark.parametrize("scopes", [[], ["nutrition:write"], ["nutrition:read", "admin"]])
+def test_a_grant_always_reads_and_knows_only_two_scopes(conn, scopes):
+    with pytest.raises(errors.CheckViolation):
+        add_grant(conn, add_user(conn), scopes)
+
+
+def test_oauth_tokens_rules(conn):
+    grant_id = add_grant(conn, add_user(conn), ("nutrition:read", "nutrition:write"))
+    base = {"grant_id": grant_id, "expires_at": NOW}
+    assert (
+        rejected_by(conn, "oauth_tokens", {**base, "token_hash": b"a" * 32, "kind": "id"}) == "oauth_tokens_kind_check"
+    )
+    assert rejected_by(conn, "oauth_tokens", {**base, "token_hash": b"a" * 31, "kind": "access"}) == (
+        "oauth_tokens_token_hash_check"
+    )
+    access_rotated = {**base, "token_hash": b"a" * 32, "kind": "access", "rotated_at": NOW}
+    assert rejected_by(conn, "oauth_tokens", access_rotated) == "oauth_tokens_check"
+    insert(conn, "oauth_tokens", **{**base, "token_hash": b"r" * 32, "kind": "refresh", "rotated_at": NOW})
+
+
+def test_deleting_a_user_deletes_their_connections(conn):
+    kept, gone = add_user(conn), add_user(conn)
+    for user_id, mark in ((kept, b"k"), (gone, b"g")):
+        grant_id = add_grant(conn, user_id)
+        insert(conn, "oauth_tokens", grant_id=grant_id, token_hash=mark * 32, kind="access", expires_at=NOW)
+        insert(conn, "pairing_codes", code_hash=mark * 32, user_id=user_id, expires_at=NOW)
+        insert(
+            conn, "oauth_codes", code_hash=mark * 32, user_id=user_id, client_id="c", client_name="n",
+            scopes=["nutrition:read"], resource="r", redirect_uri="u", code_challenge="x", expires_at=NOW,
+            grant_id=grant_id,
+        )  # fmt: skip
+    conn.execute("DELETE FROM users WHERE id = %s", (gone,))
+    for table in OAUTH_TABLES:
+        assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 1, table
+
+
+def test_downgrade_to_0003_drops_only_the_oauth_tables(conn, migrated_url):
+    schema = schema_of(migrated_url)
+    command.downgrade(alembic_config(migrated_url), "0003")
+    assert tables_in(migrated_url, schema) == TABLES - set(OAUTH_TABLES)
+    command.upgrade(alembic_config(migrated_url), "head")
+    assert tables_in(migrated_url, schema) == TABLES

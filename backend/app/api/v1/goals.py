@@ -1,50 +1,29 @@
 """/api/v1/goals and /api/v1/daily-activity: a user's goals and days over plain REST, for clients other
 than the app, plus suggested goals.
 
-The app syncs these through POST /api/v1/sync. The writes here go through the same core
-(app/services/sync.py `upsert_row`, then app/services/logs.py `write_row`), so a goal or a day set
-here gets a new `rev` and reaches the phone on its next pull. Every write locks the user row first
-and ends with one commit. The user is the bearer token's; no route takes a user id.
-
-A write here is an edit made now: its `updated_at` is now, or the stored copy's if that is later (a
-phone whose clock runs ahead), so it always replaces what is stored.
+The app syncs these through POST /api/v1/sync. The writes here go through app/services/goal_writes.py
+(the same core as sync), so a goal or a day set here gets a new `rev` and reaches the phone on its next
+pull. Every write locks the user row first and ends with one commit. The user is the bearer token's;
+no route takes a user id.
 """
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Annotated, Any
+from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import ValidationError
-from sqlalchemy.orm import Session
 
 from app.api.deps import CurrentUser, DbSession
-from app.api.v1.food_logs import Now
-from app.models.user_data import User
+from app.api.v1.food_logs import Now, service_error
 from app.schemas.log_api import DailyActivityOut, DailyActivityPut, GoalOut, GoalPut, SuggestIn, SuggestOut
-from app.schemas.logs import Day, rejection_reason
-from app.services import log_queries, targets
-from app.services import logs as log_service
-from app.services import sync as sync_service
+from app.schemas.logs import Day
+from app.services import goal_writes, log_queries, targets
+from app.services.errors import ServiceError
 
 goals_router = APIRouter(prefix="/api/v1/goals", tags=["goals"])
 daily_activity_router = APIRouter(prefix="/api/v1/daily-activity", tags=["goals"])
 
 OnDay = Annotated[Day | None, Query(description="YYYY-MM-DD. Default: today in the user's timezone.")]
-
-
-def _write(session: Session, user: User, table: str, key: Any, values: dict[str, Any], now: datetime) -> Any:
-    """Locks the user, then upserts the row (`values` under `key`) through the sync core and flushes."""
-    log_service.lock_user(session, user.id)
-    stored = sync_service.stored_row(session, user.id, table, key)
-    edited = max(now, stored.updated_at) if stored is not None else now
-    try:
-        row = sync_service.TABLE_BY_NAME[table].row.model_validate({**values, "updated_at": edited})
-    except ValidationError as e:  # the body was validated already; only a row the core refuses gets here
-        raise HTTPException(422, rejection_reason(e.errors())) from e
-    written, _ = sync_service.upsert_row(session, user.id, table, row, stored, now)
-    return written
 
 
 @goals_router.get("", responses={404: {"description": "No goal is in force on that day"}})
@@ -61,8 +40,10 @@ def put_goal(session: DbSession, user: CurrentUser, now: Now, effective_date: Da
     """Creates or replaces the goal that starts on `effective_date` (a deleted one comes back). The goal
     is in force from that day until the next one starts. Leaving out `source`, `workout_kcal` or
     `active_rest_kcal` sets the default ('manual', 0, 0)."""
-    values = {**body.model_dump(), "effective_date": effective_date}
-    out = GoalOut.model_validate(_write(session, user, "goals", effective_date, values, now))
+    try:
+        out = GoalOut.model_validate(goal_writes.put_goal(session, user, effective_date, body.model_dump(), now))
+    except ServiceError as e:  # the body was validated already; only a row the core refuses gets here
+        raise service_error(e) from e
     session.commit()
     return out
 
@@ -79,8 +60,10 @@ def put_daily_activity(
     session: DbSession, user: CurrentUser, now: Now, activity_date: Day, body: DailyActivityPut
 ) -> DailyActivityOut:
     """Sets the day's steps, day type and workout calories (a field left out is cleared: null)."""
-    values = {**body.model_dump(), "activity_date": activity_date}
-    written = _write(session, user, "daily_activity", activity_date, values, now)
+    try:
+        written = goal_writes.put_activity(session, user, activity_date, body.model_dump(), now)
+    except ServiceError as e:
+        raise service_error(e) from e
     out = DailyActivityOut(
         activity_date=written.activity_date,
         steps=written.steps,

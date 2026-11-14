@@ -1,0 +1,11 @@
+# ngrok traffic policy for the ChatGPT tunnel (backend/README.md, "ChatGPT (MCP)").
+# Only the MCP endpoint, the OAuth pages and the discovery documents are public; every other path
+# (the app's REST API, /docs) answers 404 at ngrok and never reaches the Mac.
+on_http_request:
+  - expressions:
+      - "!(req.url.path == '/mcp' || req.url.path.startsWith('/oauth/') || req.url.path.startsWith('/.well-known/'))"
+    actions:
+      - type: custom-response
+        config:
+          status_code: 404
+          body: Not found
