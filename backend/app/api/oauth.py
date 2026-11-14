@@ -39,10 +39,12 @@ router = APIRouter(tags=["oauth"])
 
 PAGE_LIFETIME = 600  # seconds a rendered authorize page may be submitted
 # Pairing-code attempts (limiters made in app/main.py, on app.state.pairing_attempts and
-# app.state.pairing_attempts_overall): per client address per 15 minutes, and from everyone per hour, so
-# 40-bit codes stay out of reach.
+# app.state.pairing_attempts_overall): every try, per client address per 15 minutes; and wrong codes from
+# everyone per hour, a backstop against many addresses at once. 1000 guesses an hour at a 40-bit code
+# that lives 10 minutes is about a one-in-a-billion chance; the backstop is high so that a stranger who
+# finds the tunnel cannot lock the owner out with a few dozen wrong codes.
 ATTEMPTS_PER_ADDRESS = (10, 15 * 60)
-ATTEMPTS_OVERALL = (60, 3600)
+ATTEMPTS_OVERALL = (1000, 3600)
 MAX_PARAM = 2048  # longest accepted state, challenge, URI or client id
 WHERE_TO_GET_A_CODE = "Open Kalo, go to Goals → Connect ChatGPT and tap Get code."
 
@@ -264,7 +266,7 @@ def authorize(request: Request, session: DbSession, form: FormFields) -> Respons
     address = request.client.host if request.client else "unknown"
     wait = request.app.state.pairing_attempts.retry_after(address)
     if wait is None:
-        wait = request.app.state.pairing_attempts_overall.retry_after("all")
+        wait = request.app.state.pairing_attempts_overall.retry_after("all", record=False)
     if wait is not None:
         minutes = max(1, math.ceil(wait / 60))
         message = f"Too many tries. Wait {minutes} minute{'s' if minutes > 1 else ''} and try again."
@@ -273,6 +275,7 @@ def authorize(request: Request, session: DbSession, form: FormFields) -> Respons
 
     user_id = pairing.consume(session, form.get("pairing_code", ""))
     if user_id is None:
+        request.app.state.pairing_attempts_overall.retry_after("all")  # a wrong code counts overall
         message = f"That code didn't work: it may be mistyped, expired or already used. {WHERE_TO_GET_A_CODE}"
         return _page(f"Connect {client.client_name} to Kalo", _form(client, fields, error=message), 400)
     asked = frozenset(fields["scope"].split())

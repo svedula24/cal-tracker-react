@@ -626,9 +626,18 @@ def test_pairing_attempts_are_rate_limited_overall(client):
     client.app.state.pairing_attempts_overall = SlidingWindow(3, per_seconds=3600)
     _, challenge = pkce()
     fields = hidden(client.get(f"/oauth/authorize?{authorize_query(challenge)}").text)
+    # A right code does not count overall: only wrong ones do.
+    for _ in range(3):
+        assert submit(client, fields, new_code(client, device(client))).status_code == 303
     for _ in range(3):
         assert submit(client, fields, "ZZZZ-ZZZZ").status_code == 400
     assert submit(client, fields, "ZZZZ-ZZZZ").status_code == 429
+    # While limited, a right code is refused too (and not spent).
+    code = new_code(client, device(client))
+    r = submit(client, fields, code)
+    assert r.status_code == 429 and "Too many tries" in r.text
+    client.app.state.pairing_attempts_overall = SlidingWindow(3, per_seconds=3600)
+    assert submit(client, fields, code).status_code == 303
 
 
 @pytest.mark.parametrize(

@@ -437,9 +437,10 @@ ChatGPT opens Kalo's sign-in page: enter the code (10 minutes, single use). Unti
 delete" for a read-only connection. Disconnect in the app revokes it on ChatGPT's next request.
 Connecting ChatGPT again replaces its earlier connection.
 
-Sign-in tries are limited to 10 per 15 minutes per address and 60 an hour in all (8-character
-codes that last 10 minutes). Anyone who knows the tunnel's address can use up the hourly 60 and make
-the owner wait up to an hour: an accepted trade for a personal tunnel.
+Sign-in tries are limited to 10 per 15 minutes per address, and wrong codes to 1000 an hour from
+everyone (8-character codes that last 10 minutes: about a one-in-a-billion chance of a guess). The
+per-address limit needs uvicorn's `--proxy-headers`: without it every caller is ngrok's address and
+shares one allowance. Locking the owner out would take wrong codes from about 25 addresses at once.
 
 **How it works:**
 - Discovery: `/.well-known/oauth-protected-resource/mcp` (RFC 9728) and
