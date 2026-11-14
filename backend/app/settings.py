@@ -14,6 +14,9 @@ OFF_BASE_URL        the Open Food Facts origin barcode lookups read from, no tra
                     Default: https://world.openfoodfacts.org
 OFF_USER_AGENT      the User-Agent sent to Open Food Facts, which asks for "AppName/Version (contact)".
                     Default: Kalo/0.1 (+https://github.com/svedula24/cal-tracker-react)
+ALLOW_REGISTRATION  whether POST /api/v1/devices creates new users: true (default) or false. A deployment
+                    registers its phone, then sets it to false so nobody else can. Anything other than
+                    true/false/1/0/yes/no/on/off is refused, so a typo cannot leave registration open.
 """
 
 from __future__ import annotations
@@ -21,6 +24,7 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 DEFAULT_CLIENT_IDS = ("https://chatgpt.com/oauth/client.json",)
 DEFAULT_REDIRECT_URIS = ("https://chatgpt.com/connector_platform_oauth_redirect",)
@@ -37,6 +41,7 @@ class Settings:
     oauth_redirect_uris: tuple[str, ...] = DEFAULT_REDIRECT_URIS
     off_base_url: str = DEFAULT_OFF_BASE_URL
     off_user_agent: str = DEFAULT_OFF_USER_AGENT
+    allow_registration: bool = True
 
     def __post_init__(self) -> None:
         if self.public_url is None:
@@ -55,11 +60,44 @@ class Settings:
             raise ValueError("PUBLIC_URL is not set")
         return self.public_url + "/mcp"
 
+    @property
+    def public_host(self) -> str | None:
+        """PUBLIC_URL's host name, lowercase and without a port, when it is a real (https) public origin.
+
+        None without PUBLIC_URL, and for an http://localhost one (local testing): that host is not public,
+        and the web build and simulator call the API on it.
+        """
+        if self.public_url is None or not self.public_url.startswith("https://"):
+            return None
+        return urlsplit(self.public_url).hostname
+
+
+def host_name(host: str) -> str:
+    """A Host header's name: lowercase, without its port or a trailing dot ("Kalo.Example.:443" -> "kalo.example")."""
+    host = host.strip().lower()
+    if host.startswith("["):  # an IPv6 literal, "[::1]:8000" -> "::1" (as urlsplit's hostname has it)
+        return host[1:].partition("]")[0]
+    return host.rpartition(":")[0].rstrip(".") if ":" in host else host.rstrip(".")
+
 
 def _list(value: str | None, default: tuple[str, ...]) -> tuple[str, ...]:
     if value is None or not value.strip():
         return default
     return tuple(item.strip() for item in value.split(",") if item.strip())
+
+
+_TRUE = ("true", "1", "yes", "on")
+_FALSE = ("false", "0", "no", "off")
+
+
+def _bool(name: str, value: str | None, default: bool) -> bool:
+    if value is None or not value.strip():
+        return default
+    if value.strip().lower() in _TRUE:
+        return True
+    if value.strip().lower() in _FALSE:
+        return False
+    raise ValueError(f"{name} must be true or false, not {value!r}")
 
 
 def get_settings(environ: Mapping[str, str] | None = None) -> Settings:
@@ -73,4 +111,5 @@ def get_settings(environ: Mapping[str, str] | None = None) -> Settings:
         oauth_redirect_uris=_list(env.get("OAUTH_REDIRECT_URIS"), DEFAULT_REDIRECT_URIS),
         off_base_url=(env.get("OFF_BASE_URL") or "").strip().rstrip("/") or DEFAULT_OFF_BASE_URL,
         off_user_agent=(env.get("OFF_USER_AGENT") or "").strip() or DEFAULT_OFF_USER_AGENT,
+        allow_registration=_bool("ALLOW_REGISTRATION", env.get("ALLOW_REGISTRATION"), default=True),
     )

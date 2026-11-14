@@ -211,7 +211,7 @@ uv run uvicorn app.main:app --host 0.0.0.0   # then EXPO_PUBLIC_API_URL=http://<
 
 That exposes the API to the whole network. The food data is public, but anyone
 on the network can also register a device (below), so use it on a network you
-trust.
+trust, and close registration (`ALLOW_REGISTRATION=false`) once your phone has registered.
 
 CORS: any origin may call the API (`Access-Control-Allow-Origin: *`) with `GET`,
 `POST`, `PUT`, `PATCH` or `DELETE` and the `Authorization` and `Content-Type` headers,
@@ -259,6 +259,9 @@ curl -X PATCH localhost:8000/api/v1/me -H 'Authorization: Bearer kalo_…' \
     own forwarded address and get around the limit.
   - The count is kept in the server process. With several workers or instances,
     limit at the proxy as well.
+- `ALLOW_REGISTRATION=false` closes registration: `POST /api/v1/devices` is 403
+  (`registration is closed on this server`) and creates nothing, before the body is read or the
+  limit counts. Default `true`. Tokens already issued keep working.
 - To revoke a token, set `user_tokens.revoked_at`. There is no endpoint for it yet.
 
 In the code, services write into the request's session and never commit; a route
@@ -475,19 +478,56 @@ authorization server, so ChatGPT can read and write the user's log. Without it, 
 | `PUBLIC_URL` | the public https origin (the ngrok domain), no trailing slash; `http://localhost:<port>` for local tests |
 | `KALO_SECRET` | 32+ characters (`openssl rand -hex 32`); signs the sign-in page and the DCR client ids |
 | `OAUTH_CLIENT_IDS`, `OAUTH_REDIRECT_URIS` | default to ChatGPT's; see `app/settings.py` |
+| `ALLOW_REGISTRATION` | `false` once your phone has registered (default `true`); see "Identity" |
 
 **Run it on the Mac** (ngrok's free static domain; `brew install ngrok`, `ngrok config add-authtoken …` once):
 
+Put the settings in `backend/.env` (gitignored; start from `.env.example`), not on the command
+line, where they end up in your shell history:
+
+```sh
+# backend/.env
+DATABASE_URL=postgresql://kalo:kalo@localhost:5432/kalo
+PUBLIC_URL=https://<your-domain>.ngrok-free.app
+KALO_SECRET=<openssl rand -hex 32>
+ALLOW_REGISTRATION=false
+```
+
 ```sh
 cd backend
-PUBLIC_URL=https://<your-domain>.ngrok-free.app KALO_SECRET=<secret> \
-  uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1
+uv run --env-file .env uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1
 ngrok http 8000 --url https://<your-domain>.ngrok-free.app --traffic-policy-file ../ops/ngrok-policy.yml
 ```
 
 `--proxy-headers` makes the sign-in rate limit see the caller's address rather than ngrok's. The
 traffic policy (`ops/ngrok-policy.yml`) makes only `/mcp`, `/oauth/*` and `/.well-known/*` public;
-the app keeps using the API on the local network as before.
+the app keeps using the API on the local network as before. The app does the same on its own: a
+request whose `Host` is `PUBLIC_URL`'s host (any port or case) and whose path is not `/mcp`, `/mcp/…`,
+`/oauth/…` or `/.well-known/…` is a plain 404, so the REST API, `/docs` and `/openapi.json` stay off
+the public host even if ngrok is started without the policy. Requests on any other host (`localhost`,
+the Mac's LAN address the phone uses) are unaffected. (With an `http://localhost` `PUBLIC_URL`, for
+local testing, there is no public host and nothing is hidden.)
+
+**Registration:** register the phone first (start the server once with `ALLOW_REGISTRATION=true`,
+or without the line, and open the app so it registers), then set `ALLOW_REGISTRATION=false` and
+restart. From then on nobody else, on the LAN or anywhere, can create a user. To register a new
+phone, reopen registration the same way, let it register, and close it again.
+
+**Pairing codes:** only type a pairing code into a ChatGPT sign-in page you started yourself (by
+adding the connector, above). Someone who sends you a sign-in link and asks for your code is asking
+for access to your log.
+
+**If `KALO_SECRET` was ever typed inline** (on a command line, so it is in your shell history),
+replace it with a new one (`openssl rand -hex 32`) in `.env` and restart. That invalidates open
+sign-in pages and the client ids handed out by `POST /oauth/register` (a client registered that way
+registers again); nothing else: connections, access and refresh tokens and device tokens keep
+working.
+
+**Database password:** `docker-compose.yml` uses `kalo` unless `POSTGRES_PASSWORD` is set (in the
+shell or in `backend/.env`, which docker-compose reads). Postgres applies it only when it creates
+the data volume; for an existing one, change it with
+`docker exec kalo-db psql -U kalo -d kalo -c "ALTER USER kalo PASSWORD '<new>'"`. Either way, put the
+same password in `DATABASE_URL`.
 
 **Connect:** in the app, Goals → Connect ChatGPT → Get code. In ChatGPT on the web: Settings → Apps &
 Connectors → Advanced → Developer mode, then add a connector with the URL `<PUBLIC_URL>/mcp` and OAuth.
@@ -540,7 +580,8 @@ app/
   api/v1/connections.py  pairing codes, ChatGPT connections (list, disconnect)
   api/oauth.py         the OAuth authorization server: discovery, sign-in page, token, register
   mcp/                 the MCP server (/mcp): server.py, tools.py, auth.py (access tokens -> user)
-  settings.py          PUBLIC_URL, KALO_SECRET, the OAuth allowlists, OFF_BASE_URL, OFF_USER_AGENT
+  settings.py          PUBLIC_URL, KALO_SECRET, the OAuth allowlists, OFF_BASE_URL, OFF_USER_AGENT,
+                       ALLOW_REGISTRATION
   schemas/             Pydantic request and response models (foods, users, logs, log_api)
   models/foods.py      SQLAlchemy Food and FoodPortion
   models/user_data.py  User, UserToken, FoodLog, UserGoal, DailyActivity, SavedFood
