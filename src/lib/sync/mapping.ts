@@ -6,7 +6,7 @@ import type { DayLog, Entry } from '@/lib/data';
 import type { SavedFood } from '@/lib/savedFoods';
 
 // Relative with the .ts extension so Node's test runner can import it as well.
-import { entryGrams, foodOfEntry, G, scale } from '../measure.ts';
+import { entryGrams, foodOfEntry, G, OZ, scale } from '../measure.ts';
 import { NUTRIENT_KEYS, type Goals, type Nutrients } from '../nutrition.ts';
 import { isUuid } from '../uuid.ts';
 import type { DailyStepsRow, FoodLogRow, GoalRow, NutrientValues, SavedFoodRow, Table } from './types.ts';
@@ -133,14 +133,19 @@ export function logToEntry(log: FoodLogRow, existing?: Entry): Entry {
   } else {
     food = known ?? { id: customId(log.id), name: log.name, per100g, portions: [] };
   }
+  // The server keeps grams only. The unit this device measured the entry in (ounces, "1 banana")
+  // is kept when the copy here is of the same food, so a pulled change, or its own row coming
+  // back, does not switch the entry to grams; the amount is the server's either way.
+  const unit = existing?.measure && known?.id === food.id && existing.measure.grams > 0 ? existing.measure : G;
+  const measure = unit.label === OZ.label ? OZ : unit;
   return {
     ...head,
-    servings: log.quantity,
-    nutrients: scale(per100g, 1),
+    servings: log.quantity / measure.grams,
+    nutrients: scale(per100g, measure.grams),
     per100g,
     ...(sameNutrients(food.per100g, per100g) ? {} : { foodPer100g: food.per100g }),
     portions: food.portions,
-    measure: G,
+    measure,
     foodId: food.id,
     foodName: food.name,
     ...photo,

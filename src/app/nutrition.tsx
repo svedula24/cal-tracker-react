@@ -8,7 +8,7 @@ import { Press } from '@/components/Press';
 import { cardShadow, goBack } from '@/components/Screen';
 import type { Food } from '@/data/foods';
 import { type Entry, newEntry, useEntries, useSavedFoods } from '@/lib/data';
-import { defaultServing, editedPer100g, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, parseValue, qtyText, scale, times, typedValue, withValue } from '@/lib/measure';
+import { defaultServing, editedPer100g, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, OZ, parseQty, parseValue, qtyText, sameUnit, scale, times, typedValue, unitOf, unitsOf, withValue } from '@/lib/measure';
 import { formatTime, type Nutrients, zero } from '@/lib/nutrition';
 import { parseFood } from '@/lib/savedFoods';
 import { useSelectedDay } from '@/lib/selectedDay';
@@ -78,10 +78,14 @@ function NutritionForm({ entry, base, grams }: { entry?: Entry; base: Food | nul
   const pager = useRef<ScrollViewInstance>(null);
 
   const [name, setName] = useState(entry?.name ?? base?.name ?? '');
-  // For a food: grams. For a hand-written entry: servings.
+  // For a food: grams, whatever unit the field shows. For a hand-written entry: servings.
   const initial = base ? (grams ?? entryGrams(entry, base)) : (entry?.servings ?? 1);
   const [qty, setQty] = useState(initial);
-  const [text, setText] = useState(qtyText(initial));
+  // The unit the amount is typed in (grams, ounces or one of the food's portions). The field shows
+  // qty / unit.grams; `qty` itself stays in grams, so switching units never changes the amount.
+  const units = base ? unitsOf(base) : [];
+  const [unit, setUnit] = useState(() => (base ? unitOf(entry, base) : G));
+  const [text, setText] = useState(qtyText(initial / unit.grams));
   const [more, setMore] = useState(false);
   const [menu, setMenu] = useState(false);
   const [page, setPage] = useState(0);
@@ -108,7 +112,11 @@ function NutritionForm({ entry, base, grams }: { entry?: Entry; base: Food | nul
   const onQty = (t: string) => {
     setText(t);
     const n = parseQty(t);
-    if (n !== null) setQty(n);
+    if (n !== null) setQty(n * unit.grams);
+  };
+  const onUnit = (next: typeof unit) => {
+    setUnit(next);
+    setText(qtyText(qty / next.grams)); // the same amount, shown in the new unit
   };
   // Typed-over values replace the entry's per-100 g copy (what reopening it reads); the food's
   // own values are kept beside them, so `base` stays the database food.
@@ -117,10 +125,12 @@ function NutritionForm({ entry, base, grams }: { entry?: Entry; base: Food | nul
     if (!valid) return;
     const finalName = name.trim() || base?.name || entry?.name || 'Food';
     if (entry) {
-      entries.update(entry.id, { name: finalName, servings: qty, measure: base ? G : entry.measure, nutrients: perUnit, ...typedOver });
+      // A food is stored as `servings` × its unit (so it reopens in that unit); `nutrients` is per one unit.
+      const amount = base ? { servings: qty / unit.grams, measure: unit, nutrients: times(perUnit, unit.grams) } : { servings: qty, measure: entry.measure, nutrients: perUnit };
+      entries.update(entry.id, { name: finalName, ...amount, ...typedOver });
       goBack();
     } else if (base) {
-      entries.add({ ...newEntry(base, G, qty, day), name: finalName, nutrients: perUnit, ...typedOver });
+      entries.add({ ...newEntry(base, unit, qty / unit.grams, day), name: finalName, nutrients: times(perUnit, unit.grams), ...typedOver });
       router.dismissTo('/');
     }
   };
@@ -191,23 +201,47 @@ function NutritionForm({ entry, base, grams }: { entry?: Entry; base: Food | nul
             <Text className="flex-1 text-[20px] font-semibold text-foreground">{base ? 'Amount' : 'Number of Servings'}</Text>
             <View className={`h-[40px] flex-row items-center justify-center rounded-full border bg-card pl-2 pr-3 ${valid ? 'border-border' : 'border-bad'}`}>
               <TextInput
-                accessibilityLabel={base ? 'Grams' : 'Number of servings'}
+                accessibilityLabel={!base ? 'Number of servings' : sameUnit(unit, G) ? 'Grams' : sameUnit(unit, OZ) ? 'Ounces' : `Amount in ${unit.label}`}
                 value={text}
                 onChangeText={onQty}
-                onBlur={() => setText(qtyText(qty))} // parseQty already rounds to what is shown
+                onBlur={() => setText(qtyText(qty / unit.grams))} // back to the amount, as shown in this unit
                 keyboardType="decimal-pad"
                 selectTextOnFocus
                 className="text-center text-[18px] font-semibold text-foreground"
                 style={{ width: 64, outlineStyle: 'none' } as object}
               />
-              {base ? <Text className="text-[18px] font-semibold text-foreground">g</Text> : null}
+              {base && (sameUnit(unit, G) || sameUnit(unit, OZ)) ? <Text className="text-[18px] font-semibold text-foreground">{unit.label}</Text> : null}
               <Pencil size={16} color={c.foreground} style={{ marginLeft: 6 }} />
             </View>
           </View>
-          {serving && serving !== HUNDRED_G ? (
-            <Text className="mt-[8px] px-[6px] text-[13px] text-muted">
-              {serving.label} = {fmt(serving.grams)} g
-            </Text>
+          {base ? (
+            <>
+              {/* The unit the amount is typed in: grams, ounces, or one of the food's portions. */}
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mt-[12px]" contentContainerStyle={{ gap: 8, paddingHorizontal: 6 }}>
+                {units.map((u) => (
+                  <Press
+                    key={u.label}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Measure in ${u.label}`}
+                    accessibilityState={{ selected: sameUnit(u, unit) }}
+                    aria-selected={sameUnit(u, unit)} // react-native-web ignores accessibilityState
+                    onPress={() => onUnit(u)}
+                    className={`h-[34px] items-center justify-center rounded-full border px-[14px] ${sameUnit(u, unit) ? 'border-foreground bg-foreground' : 'border-border bg-card'}`}
+                  >
+                    <Text className={`text-[14px] font-medium ${sameUnit(u, unit) ? 'text-background' : 'text-foreground'}`}>{u.label}</Text>
+                  </Press>
+                ))}
+              </ScrollView>
+              <Text className="mt-[8px] px-[6px] text-[13px] text-muted">
+                {sameUnit(unit, G)
+                  ? serving && serving !== HUNDRED_G
+                    ? `${serving.label} = ${fmt(serving.grams)} g`
+                    : ''
+                  : sameUnit(unit, OZ)
+                    ? `${fmt(qty)} g`
+                    : `${unit.label} = ${fmt(unit.grams)} g · ${fmt(qty)} g in all`}
+              </Text>
+            </>
           ) : null}
 
           <View className="mt-[24px]">

@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { defaultServing, editedPer100g, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, parseQty, parseValue, qtyText, scale, servingSummary, times, typedValue, withValue } from '../src/lib/measure.ts';
+import { defaultServing, editedPer100g, entryGrams, fmt, foodOfEntry, G, HUNDRED_G, OZ, parseQty, parseValue, qtyText, sameUnit, scale, servingSummary, times, typedValue, unitOf, unitsOf, withValue } from '../src/lib/measure.ts';
+import { sum } from '../src/lib/nutrition.ts';
 
 // USDA "Banana, raw" per 100 g; its portions, default first.
 const banana = {
@@ -126,5 +127,67 @@ test('typedValue: an edit, an invalid draft, and typing back what the field show
   assert.equal(typedValue('0.7', atFocus, 0.74), null); // retyped: the exact 0.74 stays
   assert.equal(typedValue(' 0.7 ', atFocus, 5), 0.74); // typed back after an edit: the exact value is restored
   assert.equal(typedValue('0', { text: '12', value: 12 }, 12), 0);
+});
+
+
+test('unitsOf: grams and ounces first, then the food\'s portions in its order', () => {
+  assert.deepEqual(unitsOf(banana), [G, OZ, { label: '1 banana', grams: 126 }, { label: '1 cup, sliced', grams: 150 }]);
+  assert.equal(unitsOf(banana)[0], G);
+  assert.equal(unitsOf(banana)[1], OZ);
+  close(OZ.grams, 28.349523125, 'one ounce');
+  assert.deepEqual(unitsOf({ ...banana, portions: [] }), [G, OZ]);
+  // A portion that weighs nothing, or duplicates grams / ounces by label, is left out; the rest keep their order.
+  const odd = { ...banana, portions: [{ label: '1 slice', grams: 6 }, { label: 'g', grams: 1 }, { label: '1 pinch', grams: 0 }, { label: 'oz', grams: 28.35 }, { label: '1 cup', grams: 150 }] };
+  assert.deepEqual(unitsOf(odd).map((u) => u.label), ['g', 'oz', '1 slice', '1 cup']);
+});
+
+test('sameUnit: the same label and weight, not the same object', () => {
+  assert.ok(sameUnit(G, { label: 'g', grams: 1 }));
+  assert.ok(sameUnit(OZ, JSON.parse(JSON.stringify(OZ)))); // a stored copy
+  assert.ok(sameUnit(banana.portions[0], { label: '1 banana', grams: 126 }));
+  assert.ok(!sameUnit(banana.portions[0], { label: '1 banana', grams: 118 })); // relabelled weight
+  assert.ok(!sameUnit(banana.portions[0], { label: '1 large banana', grams: 126 }));
+  assert.ok(!sameUnit(G, OZ));
+});
+
+test('unitOf: the unit an entry was measured in, when the food still offers it; else grams', () => {
+  const entry = { id: 'e1', date: '2026-11-10', time: 't', name: 'Banana, raw', servings: 2, nutrients: banana.per100g, per100g: banana.per100g, portions: banana.portions, foodId: banana.id };
+  assert.equal(unitOf(undefined, banana), G);
+  assert.equal(unitOf(entry, banana), G); // an older entry without a measure
+  const byValue = unitOf({ ...entry, measure: { label: '1 banana', grams: 126 } }, banana); // a copy, as stored
+  assert.deepEqual(byValue, { label: '1 banana', grams: 126 });
+  assert.equal(byValue, banana.portions[0]); // the food's own portion
+  assert.equal(unitOf({ ...entry, measure: { label: '1 slice', grams: 6 } }, banana), G); // the food no longer lists it
+  assert.equal(unitOf({ ...entry, measure: { label: '1 banana', grams: 118 } }, banana), G); // same label, another weight
+  assert.equal(unitOf({ ...entry, measure: { label: 'g', grams: 1 } }, banana), G);
+  assert.equal(unitOf({ ...entry, measure: { label: 'oz', grams: 28.349523125 } }, banana), OZ);
+  assert.equal(unitOf({ ...entry, measure: banana.portions[0] }, { ...banana, portions: [] }), G);
+});
+
+test('an entry stored in g, oz or a portion stands for the same grams and the same day totals', () => {
+  const perGram = scale(banana.per100g, 1);
+  const grams = 252;
+  const base = { id: 'e1', date: '2026-11-10', time: 't', name: 'Banana, raw', per100g: banana.per100g, portions: banana.portions, foodId: banana.id };
+  // What Done stores: servings = amount in the unit, measure = the unit, nutrients per one unit.
+  const stored = (unit) => ({ ...base, servings: grams / unit.grams, measure: unit, nutrients: times(perGram, unit.grams) });
+  const [inG, inOz, inBanana] = [G, OZ, banana.portions[0]].map(stored);
+  assert.equal(inBanana.servings, 2);
+  for (const e of [inG, inOz, inBanana]) close(entryGrams(e, banana), grams, `grams via ${e.measure.label}`);
+  // servings × nutrients, exactly, then the day's rounded totals.
+  const exact = times(perGram, grams);
+  for (const e of [inG, inOz, inBanana]) for (const k of Object.keys(exact)) close(times(e.nutrients, e.servings)[k], exact[k], `${k} via ${e.measure.label}`);
+  close(exact.calories, 224.28, 'calories');
+  for (const e of [inOz, inBanana]) assert.deepEqual(sum([e]), sum([inG]), `day totals via ${e.measure.label}`);
+  assert.equal(sum([inG]).calories, 224);
+  assert.equal(sum([inG, inOz, inBanana]).calories, 673); // 3 × 224.28
+  // The screen's own arithmetic: the field shows grams / unit.grams.
+  assert.equal(qtyText(grams / OZ.grams), '8.89');
+  assert.equal(qtyText((4 * OZ.grams) / 126), '0.9');
+  assert.equal(fmt(4 * OZ.grams), '113');
+});
+
+test('unitsOf: a portion that is just "1 oz" or "1 g" is not offered twice', () => {
+  const almonds = { id: 'usda:170567', name: 'Almonds', per100g: { calories: 579, protein: 21, carbs: 22, fat: 50, fiber: 12, sugar: 4, sodium: 1 }, portions: [{ label: '1 cup, whole', grams: 143 }, { label: '1 oz', grams: 28.4 }, { label: '1 OZ', grams: 28.35 }, { label: '1 g', grams: 1 }, { label: '1 oz (23 whole kernels)', grams: 28.4 }] };
+  assert.deepEqual(unitsOf(almonds).map((u) => u.label), ['g', 'oz', '1 cup, whole', '1 oz (23 whole kernels)']);
 });
 

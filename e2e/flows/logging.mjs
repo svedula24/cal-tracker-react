@@ -439,4 +439,115 @@ export const flows = [
       await wait(300);
     },
   },
+  {
+    // Self-contained: logs one banana under its own name and deletes it.
+    name: 'nutrition: the amount can be typed in g, oz or a portion; the entry reopens in its unit',
+    run: async (page, base, { wait }) => {
+      const NAME = 'Unit test banana';
+      const chips = () => page.getByRole('button', { name: /^Measure in / });
+      const chip = (label) => btn(page, `Measure in ${label}`);
+      // The selected chip is filled (bg-foreground), the others are cards. Read from the paint, not
+      // aria-selected: react-native-web 0.21 drops accessibilityState, so it never reaches the DOM.
+      const selected = () =>
+        chips().evaluateAll((els) => {
+          const bg = els.map((el) => getComputedStyle(el).backgroundColor);
+          const count = (c) => bg.filter((x) => x === c).length;
+          return els.filter((_, i) => count(bg[i]) === 1).map((el) => el.getAttribute('aria-label').replace('Measure in ', '')).join(', ');
+        });
+      const expectSelected = async (label) => {
+        const on = await selected();
+        if (on !== label) throw new Error(`expected the ${label} chip selected, selected: ${on || 'none'}`);
+      };
+      const expectField = async (label, value) => {
+        const field = page.getByLabel(label, { exact: true });
+        await field.waitFor({ timeout: 3000 }).catch(() => {
+          throw new Error(`no amount field labelled "${label}"`);
+        });
+        if ((await field.inputValue()) !== value) throw new Error(`${label} shows ${await field.inputValue()}, not ${value}`);
+      };
+      const stored = () => page.evaluate((n) => JSON.parse(localStorage.getItem('entries') ?? '[]').filter((e) => e.name === n), NAME);
+      const openEntry = async () => {
+        await btn(page, `Edit ${NAME}`).first().click();
+        await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      };
+
+      await go(page, base + '/food-database', wait);
+      await page.getByLabel('Search foods').fill('banana');
+      await btn(page, 'Banana, raw').click();
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      await page.getByLabel('Food name').fill(NAME);
+
+      // One chip per unit: grams, ounces, then the banana's USDA portions; grams selected.
+      const labels = await chips().evaluateAll((els) => els.map((el) => el.getAttribute('aria-label').replace('Measure in ', '')));
+      const want = ['g', 'oz', '1 banana', '1 slice', '1 cup', '1 cup, mashed', '1 linear inch'];
+      if (labels.join(' | ') !== want.join(' | ')) throw new Error(`unit chips: ${labels.join(' | ')}`);
+      await expectSelected('g');
+      await page.getByText('1 banana = 126 g', { exact: true }).waitFor({ timeout: 2000 });
+
+      // Switching units converts what the field shows; the amount and the cards stay.
+      await page.getByLabel('Grams').fill('252');
+      await expectCalories(page, '244');
+      await chip('oz').click();
+      await expectSelected('oz');
+      await expectField('Ounces', '8.89'); // 252 / 28.3495
+      if ((await page.getByLabel('Grams').count()) > 0) throw new Error('the field is still labelled Grams in ounces');
+      await expectCalories(page, '244');
+      await page.getByText('252 g', { exact: true }).waitFor({ timeout: 2000 });
+
+      // Typed in ounces: 4 oz = 113.4 g × 0.97 kcal/g.
+      await page.getByLabel('Ounces', { exact: true }).fill('4');
+      await expectCalories(page, '110');
+      await page.getByText('113 g', { exact: true }).waitFor({ timeout: 2000 });
+
+      // In a portion: the field shows bananas, the hint the portion and the total.
+      await chip('1 banana').click();
+      await expectSelected('1 banana');
+      await expectField('Amount in 1 banana', '0.9'); // 113.4 / 126
+      await expectCalories(page, '110');
+      await page.getByText('1 banana = 126 g · 113 g in all', { exact: true }).waitFor({ timeout: 2000 });
+      await page.getByLabel('Amount in 1 banana', { exact: true }).fill('2');
+      await expectCalories(page, '244');
+      await page.getByText('1 banana = 126 g · 252 g in all', { exact: true }).waitFor({ timeout: 2000 });
+      await btn(page, 'Done').click();
+
+      // Logged as 2 bananas; marked the user's, so the load-time guess cannot take it for demo data.
+      await btn(page, `Edit ${NAME}`).waitFor({ timeout: 5000 });
+      await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+      const card = btn(page, `Edit ${NAME}`);
+      if (!/244 Calories/.test(await card.innerText())) throw new Error(`Home card reads "${(await card.innerText()).replace(/\n/g, ' / ')}"`);
+      const check = async (when) => {
+        const rows = await stored();
+        if (rows.length !== 1) throw new Error(`${when}: ${rows.length} stored entries named ${NAME}`);
+        const [e] = rows;
+        if (e.seed !== false) throw new Error(`${when}: a logged entry measured in a portion is stored with seed ${e.seed}`);
+        if (e.measure?.label !== '1 banana' || e.measure?.grams !== 126 || e.servings !== 2) throw new Error(`${when}: stored as ${e.servings} × ${JSON.stringify(e.measure)}`);
+        if (Math.abs(e.nutrients.calories - 122.22) > 1e-6) throw new Error(`${when}: nutrients per banana are ${e.nutrients.calories} kcal, not 122.22`);
+      };
+      await check('after Done');
+
+      await openEntry();
+      await expectSelected('1 banana');
+      await expectField('Amount in 1 banana', '2');
+      await expectCalories(page, '244');
+      await btn(page, 'Back').click();
+      await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+
+      // After a reload (stored entries are migrated at load) it still opens in bananas.
+      await page.reload({ waitUntil: 'networkidle' });
+      await wait(800);
+      await check('after a reload');
+      await openEntry();
+      await expectSelected('1 banana');
+      await expectField('Amount in 1 banana', '2');
+      await expectCalories(page, '244');
+
+      // Clean up, so later flows and Home's totals are unaffected.
+      await btn(page, 'More options').click();
+      await btn(page, 'Delete entry').click();
+      await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+      await wait(400);
+      if ((await stored()).length !== 0) throw new Error('clean-up left the entry in storage');
+      if ((await btn(page, `Edit ${NAME}`).count()) > 0) throw new Error('clean-up left the entry on Home');
+    },
+  },
 ];
