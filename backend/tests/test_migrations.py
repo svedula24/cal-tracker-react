@@ -13,6 +13,7 @@ from sqlalchemy import DefaultClause, inspect, text
 from sqlalchemy.orm import Session
 
 from app.db.session import make_engine, sqlalchemy_url
+from app.models.barcodes import BarcodeProduct
 from app.models.foods import Base, Food, FoodPortion
 from app.models.oauth import OAuthCode, OAuthGrant, OAuthToken, PairingCode
 from app.models.user_data import DailyActivity, FoodLog, SavedFood, User, UserGoal, UserToken
@@ -25,7 +26,8 @@ HEAD = ScriptDirectory.from_config(alembic_config()).get_current_head()
 FOODS_TABLES = {"foods", "food_portions", "alembic_version"}  # what revision 0001 creates
 SYNCED_TABLES = ("food_logs", "user_goals", "daily_activity", "saved_foods")
 OAUTH_TABLES = ("pairing_codes", "oauth_grants", "oauth_codes", "oauth_tokens")  # revision 0004
-TABLES = FOODS_TABLES | {"users", "user_tokens", *SYNCED_TABLES, *OAUTH_TABLES}
+BARCODE_TABLE = "barcode_products"  # revision 0005
+TABLES = FOODS_TABLES | {"users", "user_tokens", *SYNCED_TABLES, *OAUTH_TABLES, BARCODE_TABLE}
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
 FOOD_LOGS_INDEXES = {
     "food_logs_pkey": "UNIQUE btree (id)",
@@ -215,6 +217,7 @@ def test_each_scratch_schema_gets_its_own_version_table(migrated_url):
     [
         *(Food, FoodPortion, User, UserToken, FoodLog, UserGoal, DailyActivity, SavedFood),
         *(PairingCode, OAuthGrant, OAuthCode, OAuthToken),
+        BarcodeProduct,
     ],
 )
 def test_models_match_the_migrated_tables(migrated_url, model):
@@ -356,9 +359,9 @@ def test_user_data_columns(migrated_url):
         rows = conn.execute(
             "SELECT table_name, column_name, data_type, is_nullable, column_default, is_generated"
             " FROM information_schema.columns WHERE table_schema = current_schema()"
-            " AND table_name NOT IN ('foods', 'food_portions', 'alembic_version', %s, %s, %s, %s)"
+            " AND table_name NOT IN ('foods', 'food_portions', 'alembic_version', %s, %s, %s, %s, %s)"
             " ORDER BY table_name, ordinal_position",
-            OAUTH_TABLES,
+            (*OAUTH_TABLES, BARCODE_TABLE),
         ).fetchall()
     by_table = {}
     for table, column, data_type, nullable, default, generated in rows:
@@ -371,7 +374,7 @@ def test_user_data_columns(migrated_url):
         "deleted_at": "timestamp with time zone NULL",
         "rev": "bigint",
     }
-    assert set(by_table) == TABLES - FOODS_TABLES - set(OAUTH_TABLES)  # those: test_oauth_columns
+    assert set(by_table) == TABLES - FOODS_TABLES - set(OAUTH_TABLES) - {BARCODE_TABLE}  # tested on their own
     assert by_table["users"] == {
         "id": "uuid DEFAULT gen_random_uuid()",
         "email": "text NULL",
@@ -499,7 +502,8 @@ def test_user_data_constraints(migrated_url):
     }
     # And one "never negative" CHECK per numeric column, named <table>_<column>_check.
     never_negative = {name for _, kind, name, d in rows if kind == "c" and d.endswith(" >= (0)::double precision))")}
-    assert never_negative - {name for name in never_negative if name.startswith("foods_")} == (
+    others = {name for name in never_negative if name.startswith(("foods_", "barcode_products_"))}
+    assert never_negative - others == (
         {f"food_logs_unit_{n}_check" for n in NUTRIENTS}
         | {f"food_logs_{column}_check" for column in FOOD_VALUES}
         | {f"user_goals_{n}_check" for n in (*NUTRIENTS, "workout_kcal", "active_rest_kcal")}
@@ -512,8 +516,8 @@ def test_user_data_indexes(migrated_url):
     with psycopg.connect(migrated_url) as conn:
         rows = conn.execute(
             "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema()"
-            " AND tablename NOT IN ('foods', 'food_portions', 'alembic_version', %s, %s, %s, %s)",
-            OAUTH_TABLES,
+            " AND tablename NOT IN ('foods', 'food_portions', 'alembic_version', %s, %s, %s, %s, %s)",
+            (*OAUTH_TABLES, BARCODE_TABLE),
         ).fetchall()
     indexes = {}
     for name, definition in rows:
@@ -1037,6 +1041,100 @@ def test_deleting_a_user_deletes_their_connections(conn):
 def test_downgrade_to_0003_drops_only_the_oauth_tables(conn, migrated_url):
     schema = schema_of(migrated_url)
     command.downgrade(alembic_config(migrated_url), "0003")
-    assert tables_in(migrated_url, schema) == TABLES - set(OAUTH_TABLES)
+    assert tables_in(migrated_url, schema) == TABLES - set(OAUTH_TABLES) - {BARCODE_TABLE}
     command.upgrade(alembic_config(migrated_url), "head")
     assert tables_in(migrated_url, schema) == TABLES
+
+
+# ---- Revision 0005: the barcode cache ----
+
+
+def test_barcode_products_columns_constraints_and_indexes(migrated_url):
+    schema = schema_of(migrated_url)
+    with psycopg.connect(migrated_url) as conn:
+        columns = conn.execute(
+            "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns"
+            " WHERE table_schema = current_schema() AND table_name = 'barcode_products' ORDER BY ordinal_position"
+        ).fetchall()
+        constraints = conn.execute(
+            "SELECT c.conname, pg_get_constraintdef(c.oid) FROM pg_constraint c"
+            " JOIN pg_namespace n ON n.oid = c.connamespace"
+            " WHERE n.nspname = current_schema() AND c.conrelid::regclass::text = 'barcode_products'"
+        ).fetchall()
+        indexes = conn.execute(
+            "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema()"
+            " AND tablename = 'barcode_products'"
+        ).fetchall()
+    assert {c: (t if n == "NO" else f"{t} NULL") for c, t, n, default in columns} == {
+        "code": "text",
+        "found": "boolean",
+        "reason": "text NULL",
+        "name": "text NULL",
+        "brand": "text NULL",
+        **{n: "real NULL" for n in NUTRIENTS},
+        "serving_label": "text NULL",
+        "serving_grams": "real NULL",
+        "fetched_at": "timestamp with time zone",
+    }
+    assert [default for *_, default in columns] == [None] * len(columns)
+    assert {name: " ".join(d.split()) for name, d in constraints} == {
+        "barcode_products_pkey": "PRIMARY KEY (code)",
+        "barcode_products_code_check": "CHECK ((code ~ '^[0-9]{8,14}$'::text))",
+        "barcode_products_reason_check": "CHECK ((reason = ANY (ARRAY['not_found'::text, 'incomplete'::text])))",
+        "barcode_products_name_check": "CHECK ((name <> ''::text))",
+        **{f"barcode_products_{n}_check": f"CHECK (({n} >= (0)::double precision))" for n in NUTRIENTS},
+        "barcode_products_serving_grams_check": "CHECK ((serving_grams > (0)::double precision))",
+        "barcode_products_check": "CHECK (((reason IS NULL) = found))",
+        "barcode_products_check1": (
+            "CHECK (((NOT found) OR (num_nulls(name, calories, protein_g, carbs_g, fat_g) = 0)))"
+        ),
+        "barcode_products_check2": "CHECK (((serving_label IS NULL) = (serving_grams IS NULL)))",
+    }
+    assert {name: d.partition(f" ON {schema}.")[2] for name, d in indexes} == {
+        "barcode_products_pkey": "barcode_products USING btree (code)",
+    }
+
+
+FOUND_PRODUCT = {
+    "code": "0737628064502", "found": True, "name": "Thai Peanut Noodle Kit", "calories": 385,
+    "protein_g": 9.6, "carbs_g": 71.2, "fat_g": 7.7, "fetched_at": NOW,
+}  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("overrides", "constraint"),
+    [
+        ({"code": "0737628"}, "barcode_products_code_check"),
+        ({"code": "073762806450x"}, "barcode_products_code_check"),
+        ({"found": False, "reason": "gone"}, "barcode_products_reason_check"),
+        ({"name": ""}, "barcode_products_name_check"),
+        ({"fat_g": -1}, "barcode_products_fat_g_check"),
+        ({"sodium_mg": -1}, "barcode_products_sodium_mg_check"),
+        ({"serving_label": "1 bar", "serving_grams": 0}, "barcode_products_serving_grams_check"),
+        ({"reason": "incomplete"}, "barcode_products_check"),
+        ({"protein_g": None}, "barcode_products_check1"),
+        ({"name": None}, "barcode_products_check1"),
+        ({"serving_label": "1 bar"}, "barcode_products_check2"),
+        ({"serving_grams": 40}, "barcode_products_check2"),
+    ],
+)
+def test_barcode_products_rejects_bad_rows(conn, overrides, constraint):
+    assert rejected_by(conn, "barcode_products", {**FOUND_PRODUCT, **overrides}) == constraint
+
+
+def test_barcode_products_accepts_found_and_missing_products(conn):
+    insert(conn, "barcode_products", **FOUND_PRODUCT, serving_label="0.333 PACKAGE (52 g)", serving_grams=52)
+    insert(conn, "barcode_products", code="12345670", found=False, reason="not_found", fetched_at=NOW)
+    insert(conn, "barcode_products", code="4006381333931", found=False, reason="incomplete", name="Pen", fetched_at=NOW)
+    missing_without_reason = {"code": "96385074", "found": False, "fetched_at": NOW}
+    assert rejected_by(conn, "barcode_products", missing_without_reason) == "barcode_products_check"
+
+
+def test_downgrade_to_0004_drops_only_the_barcode_cache(conn, migrated_url):
+    schema = schema_of(migrated_url)
+    insert(conn, "barcode_products", **FOUND_PRODUCT)
+    command.downgrade(alembic_config(migrated_url), "0004")
+    assert tables_in(migrated_url, schema) == TABLES - {BARCODE_TABLE}
+    command.upgrade(alembic_config(migrated_url), "head")
+    assert tables_in(migrated_url, schema) == TABLES
+    assert conn.execute("SELECT count(*) FROM barcode_products").fetchone()[0] == 0

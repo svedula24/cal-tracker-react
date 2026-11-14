@@ -1,4 +1,5 @@
-"""Settings read from the environment: the public URL that turns on OAuth and MCP, and their secrets.
+"""Settings read from the environment: the public URL that turns on OAuth and MCP, their secrets, and
+where barcode lookups go.
 
 PUBLIC_URL          the server's public origin (the ngrok domain), no trailing slash. Unset = the OAuth
                     authorization server and the MCP endpoint are off (the rest of the API is unchanged).
@@ -9,6 +10,10 @@ OAUTH_CLIENT_IDS    comma-separated client ids (client ID metadata document URLs
                     Only these URLs are ever fetched. Default: ChatGPT's.
 OAUTH_REDIRECT_URIS comma-separated redirect URIs a client may use (each must also start with
                     https://chatgpt.com/). Default: ChatGPT's connector redirect.
+OFF_BASE_URL        the Open Food Facts origin barcode lookups read from, no trailing slash.
+                    Default: https://world.openfoodfacts.org
+OFF_USER_AGENT      the User-Agent sent to Open Food Facts, which asks for "AppName/Version (contact)".
+                    Default: Kalo/0.1 (+https://github.com/svedula24/cal-tracker-react)
 """
 
 from __future__ import annotations
@@ -20,6 +25,8 @@ from dataclasses import dataclass
 DEFAULT_CLIENT_IDS = ("https://chatgpt.com/oauth/client.json",)
 DEFAULT_REDIRECT_URIS = ("https://chatgpt.com/connector_platform_oauth_redirect",)
 MIN_SECRET_LENGTH = 32
+DEFAULT_OFF_BASE_URL = "https://world.openfoodfacts.org"
+DEFAULT_OFF_USER_AGENT = "Kalo/0.1 (+https://github.com/svedula24/cal-tracker-react)"
 
 
 @dataclass(frozen=True)
@@ -28,6 +35,8 @@ class Settings:
     secret: bytes = b""
     oauth_client_ids: tuple[str, ...] = DEFAULT_CLIENT_IDS
     oauth_redirect_uris: tuple[str, ...] = DEFAULT_REDIRECT_URIS
+    off_base_url: str = DEFAULT_OFF_BASE_URL
+    off_user_agent: str = DEFAULT_OFF_USER_AGENT
 
     def __post_init__(self) -> None:
         if self.public_url is None:
@@ -62,4 +71,6 @@ def get_settings(environ: Mapping[str, str] | None = None) -> Settings:
         secret=(env.get("KALO_SECRET") or "").encode(),
         oauth_client_ids=_list(env.get("OAUTH_CLIENT_IDS"), DEFAULT_CLIENT_IDS),
         oauth_redirect_uris=_list(env.get("OAUTH_REDIRECT_URIS"), DEFAULT_REDIRECT_URIS),
+        off_base_url=(env.get("OFF_BASE_URL") or "").strip().rstrip("/") or DEFAULT_OFF_BASE_URL,
+        off_user_agent=(env.get("OFF_USER_AGENT") or "").strip() or DEFAULT_OFF_USER_AGENT,
     )
