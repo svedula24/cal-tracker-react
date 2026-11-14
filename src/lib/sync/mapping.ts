@@ -9,7 +9,7 @@ import type { SavedFood } from '@/lib/savedFoods';
 import { entryGrams, foodOfEntry, G, OZ, scale } from '../measure.ts';
 import { NUTRIENT_KEYS, type Goals, type Nutrients } from '../nutrition.ts';
 import { isUuid } from '../uuid.ts';
-import type { DailyStepsRow, FoodLogRow, GoalRow, NutrientValues, SavedFoodRow, Table } from './types.ts';
+import type { DailyActivityRow, FoodLogRow, GoalRow, NutrientValues, SavedFoodRow, Table } from './types.ts';
 
 /** A row as it is read for a push: the engine adds `updated_at` and `deleted_at`. */
 type Unsynced<Row> = Omit<Row, 'updated_at' | 'deleted_at'>;
@@ -167,9 +167,9 @@ export function savedToRow(saved: SavedFood, savedAt: string): Unsynced<SavedFoo
 export const rowToSavedId = (row: Pick<SavedFoodRow, 'fdc_id'>): string => usdaId(row.fdc_id);
 
 // ── Goals ────────────────────────────────────────────────────────────────────
-/** The app's one set of goals as the goal in force from `effectiveDate` (YYYY-MM-DD). */
-export const goalsToRow = (goals: Goals, effectiveDate: string): Unsynced<GoalRow> => ({
-  effective_date: effectiveDate,
+/** One of the app's goal rows as the goal in force from its effective date (the row's key). */
+export const goalsToRow = (goals: Goals): Unsynced<GoalRow> => ({
+  effective_date: goals.effectiveDate,
   calories: goals.calories,
   protein_g: goals.protein,
   carbs_g: goals.carbs,
@@ -179,11 +179,19 @@ export const goalsToRow = (goals: Goals, effectiveDate: string): Unsynced<GoalRo
   sodium_mg: goals.sodium,
   steps: goals.steps,
   goal: goals.goal,
+  source: goals.source,
+  workout_kcal: goals.workoutKcal,
+  active_rest_kcal: goals.activeRestKcal,
 });
 
-/** A goal row as the app's goals (the app keeps one set, under the id `goals`). */
+/**
+ * A goal row as one of the app's goal rows (id = the effective date). A field a server without it
+ * leaves out takes the app's default: typed by hand, nothing added for a workout or active-rest day.
+ */
 export const rowToGoals = (row: GoalRow): Goals => ({
-  id: 'goals',
+  id: row.effective_date,
+  effectiveDate: row.effective_date,
+  source: row.source === 'computed' ? 'computed' : 'manual',
   calories: row.calories,
   protein: row.protein_g,
   carbs: row.carbs_g,
@@ -193,17 +201,26 @@ export const rowToGoals = (row: GoalRow): Goals => ({
   sodium: row.sodium_mg,
   steps: row.steps,
   goal: row.goal,
+  workoutKcal: row.workout_kcal ?? 0,
+  activeRestKcal: row.active_rest_kcal ?? 0,
 });
 
 // ── Day logs ─────────────────────────────────────────────────────────────────
-/** A day's steps. The rollover stays on the device: it is never sent. */
-export const dayLogToRow = (log: DayLog): Unsynced<DailyStepsRow> => ({ log_date: log.id, steps: log.steps });
+/** A day's activity: steps, day type and its own workout calories. The rollover stays on the device: it is never sent. */
+export const dayLogToRow = (log: DayLog): Unsynced<DailyActivityRow> => ({
+  activity_date: log.id,
+  steps: log.steps,
+  day_type: log.dayType ?? null,
+  workout_kcal: log.workoutKcal ?? null,
+});
 
-/** A steps row as a day log, keeping this device's rollover for that day (0 when it has none). */
-export const rowToDayLog = (row: DailyStepsRow, existing?: DayLog): DayLog => ({
-  id: row.log_date,
+/** An activity row as a day log, keeping this device's rollover for that day (0 when it has none). */
+export const rowToDayLog = (row: DailyActivityRow, existing?: DayLog): DayLog => ({
+  id: row.activity_date,
   steps: row.steps,
   rollover: existing?.rollover ?? 0,
+  dayType: row.day_type ?? null,
+  workoutKcal: row.workout_kcal ?? null,
 });
 
 // ── Keys ─────────────────────────────────────────────────────────────────────
@@ -211,7 +228,7 @@ const KEY_FIELD = {
   food_logs: 'id',
   saved_foods: 'fdc_id',
   goals: 'effective_date',
-  daily_steps: 'log_date',
+  daily_activity: 'activity_date',
 } as const satisfies Record<Table, string>;
 
 /** The key of a row, as text: the log's id, the food's `fdc_id`, the goal's or the day's date. */

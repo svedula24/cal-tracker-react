@@ -2,7 +2,7 @@
 // the app, so the engine, the API client and the mapping can all import this file.
 // Timestamps are ISO 8601 with a zone; dates are YYYY-MM-DD.
 
-export type Table = 'food_logs' | 'saved_foods' | 'goals' | 'daily_steps';
+export type Table = 'food_logs' | 'saved_foods' | 'goals' | 'daily_activity';
 
 export type NutrientValues = {
   calories: number;
@@ -57,13 +57,23 @@ export type GoalRow = {
   sodium_mg: number;
   steps: number;
   goal: 'lose' | 'maintain' | 'gain';
+  /** 'computed': the calorie and macro targets were filled from a suggestion; 'manual': typed. */
+  source: 'computed' | 'manual';
+  /** Calories added to a workout day's target. */
+  workout_kcal: number;
+  /** Calories added to an active-rest day's target. */
+  active_rest_kcal: number;
   updated_at: string;
   deleted_at: string | null;
 };
 
-export type DailyStepsRow = {
-  log_date: string;
+export type DailyActivityRow = {
+  activity_date: string;
   steps: number;
+  /** null = not set. */
+  day_type: 'workout' | 'active_rest' | 'rest' | null;
+  /** Calories for this day's workout, used instead of the goal's amount whatever the day type; null = the goal's. */
+  workout_kcal: number | null;
   updated_at: string;
   deleted_at: string | null;
 };
@@ -72,7 +82,7 @@ export type SyncChanges = {
   food_logs: FoodLogRow[];
   saved_foods: SavedFoodRow[];
   goals: GoalRow[];
-  daily_steps: DailyStepsRow[];
+  daily_activity: DailyActivityRow[];
 };
 
 export type SyncRequest = { cursor: number | null; changes: Partial<SyncChanges> };

@@ -4,24 +4,24 @@ import Svg, { Circle } from 'react-native-svg';
 import { Press } from '@/components/Press';
 import { cardShadow } from '@/components/Screen';
 import { Ring } from '@/components/Ring';
-import { dayBudget, useDayLogs, useEntries, useGoals } from '@/lib/data';
+import { useDayBudgets, useEntries } from '@/lib/data';
 import { dayStatus, sum, weekStrip } from '@/lib/nutrition';
 import { tokens } from '@/lib/tokens';
 
 const SIZE = 35;
 
-/** Five past days, today, tomorrow. Past rings: green on goal, red off goal. */
+/** Five past days, today, tomorrow. Past rings: green on goal, red off goal (the goal that day). */
 export function WeekStrip({ selected, onSelect, todayProgress }: { selected: string; onSelect: (key: string) => void; todayProgress: number }) {
   const entries = useEntries().items;
-  const { goals } = useGoals();
-  const logs = useDayLogs().items;
   const days = weekStrip();
+  // Each day is judged against the goal in force on that day.
+  const budgets = useDayBudgets(days.map((d) => d.key));
   return (
     <View className="flex-row justify-between px-[8px]">
       {days.map((d) => {
         const active = d.key === selected;
         const eaten = sum(entries.filter((e) => e.date === d.key)).calories;
-        const status = dayStatus(eaten, dayBudget(goals.calories, logs.find((l) => l.id === d.key)));
+        const status = dayStatus(eaten, budgets[d.key]);
         return (
           <Press
             key={d.key}

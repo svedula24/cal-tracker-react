@@ -1,6 +1,7 @@
 // Kalo verification spec, consumed by e2e/verify.mjs (`npm run verify`).
 // Flows share one browser page and run in order: Home's seed checks first (the
 // first launch must match the reference screenshots), then the logging screens.
+import * as goals from './flows/goals.mjs';
 import * as logging from './flows/logging.mjs';
 
 const go = async (page, url, wait) => {
@@ -24,7 +25,7 @@ const home = [
     name: 'home: first launch matches the reference numbers',
     run: async (page, base, { wait }) => {
       await go(page, base + '/', wait);
-      for (const t of ['2543', '/3429', '+200', '+202', '174', '322', '59', 'Honey']) await must(page, t, 'seed');
+      for (const t of ['2543', '/3429', '+200', '+202', '174', '322', '/433g', '59', 'Honey']) await must(page, t, 'seed');
       await btn(page, 'Daily score 89').waitFor({ timeout: 3000 });
     },
   },
@@ -154,5 +155,5 @@ const home = [
   },
 ];
 
-export const routes = ['/', ...logging.routes, '/daily-score', '/score-info', '/nutrition'];
-export const flows = [...home, ...logging.flows];
+export const routes = ['/', ...logging.routes, '/daily-score', '/score-info', '/nutrition', ...goals.routes];
+export const flows = [...home, ...logging.flows, ...goals.flows];

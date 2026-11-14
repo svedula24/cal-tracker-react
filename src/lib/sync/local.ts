@@ -1,10 +1,11 @@
 // Between the app's collections and the sync engine's callbacks (./engine.ts): which local rows
 // exist, what each looks like on the wire, and how pulled rows are written back. Pure: no React
-// Native, no storage, no clock (the stores and `today` arrive through `deps`), so Node can
+// Native, no storage, no clock (the stores arrive through `deps`), so Node can
 // unit-test it with fake stores: tests/syncLocal.test.mjs.
 //
 // Keys are exactly what the server uses: a log's id; a saved food's FoodData Central id as text
-// ("2709224" for the saved id `usda:2709224`); GOALS_SINCE for the goals; a day's date for its steps.
+// ("2709224" for the saved id `usda:2709224`); a goal row's effective date (also its id here); a
+// day's date for its steps.
 import type { Food } from '@/data/foods';
 import type { DayLog, Entry } from '@/lib/data';
 import type { Goals } from '@/lib/nutrition';
@@ -13,16 +14,10 @@ import type { SavedFood } from '@/lib/savedFoods';
 // Relative with the .ts extension so Node's test runner can import it as well.
 import { isSavedFood } from '../savedFoods.ts';
 import { dayLogToRow, entryToLog, fdcIdOf, goalsToRow, keyOf, logToEntry, rowToDayLog, rowToGoals, rowToSavedId, savedToRow, tombstone } from './mapping.ts';
-import type { GoalRow, SyncChanges, Table } from './types.ts';
+import type { SyncChanges, Table } from './types.ts';
 
 /** The part of a Collection (src/lib/store.ts) this file uses. `put` replaces the item with that id, or appends it. */
 type Store<T> = { items: T[]; put(item: T): void; remove(id: string): void };
-
-/**
- * The app has one set of goals and no screen to change them, so they are sent as one goal row in
- * force since before any log. When a goals screen exists, a change will be a new row dated that day.
- */
-export const GOALS_SINCE = '2020-01-01';
 
 /** `saved_at` of a bookmark made before the app recorded it: fixed, so it is the same on every push. */
 const SAVED_AT_UNKNOWN = '2020-01-01T00:00:00.000Z';
@@ -40,8 +35,6 @@ export function createLocal(deps: {
   dayLogs: Store<DayLog>;
   /** A database food by its `usda:<n>` id, for a pulled bookmark (the row carries only the id). */
   findFood: (id: string) => Promise<Food | null>;
-  /** YYYY-MM-DD, local. */
-  today: () => string;
 }): {
   read: (table: Table, key: string) => object | null;
   all: () => { table: Table; key: string }[];
@@ -49,7 +42,7 @@ export function createLocal(deps: {
   tombstone: (table: Table, key: string) => object;
   keyOf: (table: Table, row: object) => string;
 } {
-  const { entries, saved, goals, dayLogs, findFood, today } = deps;
+  const { entries, saved, goals, dayLogs, findFood } = deps;
 
   const byId = <T extends { id: string }>(store: Store<T>, id: string): T | undefined => store.items.find((i) => i.id === id);
   // By number, so the key "7" finds the food however its id was written.
@@ -66,12 +59,12 @@ export function createLocal(deps: {
         return s ? savedToRow(s, isTime(s.savedAt) ? s.savedAt : SAVED_AT_UNKNOWN) : null;
       }
       case 'goals': {
-        const g = goals.items[0];
-        if (key !== GOALS_SINCE || !g) return null;
-        const row = goalsToRow(g, GOALS_SINCE);
+        const g = byId(goals, key);
+        if (!g || !isDay(g.effectiveDate) || g.effectiveDate !== key) return null;
+        const row = goalsToRow(g);
         return allFinite(row) ? row : null;
       }
-      case 'daily_steps': {
+      case 'daily_activity': {
         const log = byId(dayLogs, key);
         return log && isDay(log.id) && Number.isFinite(log.steps) ? dayLogToRow(log) : null;
       }
@@ -90,8 +83,8 @@ export function createLocal(deps: {
       const fdcId = fdcIdOf(s.id);
       if (fdcId !== null) out.push({ table: 'saved_foods', key: String(fdcId) });
     }
-    if (read('goals', GOALS_SINCE)) out.push({ table: 'goals', key: GOALS_SINCE });
-    for (const d of dayLogs.items) if (read('daily_steps', d.id)) out.push({ table: 'daily_steps', key: d.id });
+    for (const g of goals.items) if (read('goals', g.id)) out.push({ table: 'goals', key: g.id });
+    for (const d of dayLogs.items) if (read('daily_activity', d.id)) out.push({ table: 'daily_activity', key: d.id });
     return out;
   };
 
@@ -150,33 +143,33 @@ export function createLocal(deps: {
         });
     });
 
-    // The goal in force today: the live row with the latest date that has begun.
-    const now = today();
-    const begun: GoalRow[] = [];
+    // Every goal row is kept (each past day is judged by the goal in force that day), keyed by its
+    // effective date. A deleted row is removed.
     each(changes?.goals, (row) => {
-      if (row.deleted_at != null || !isDay(row.effective_date) || row.effective_date > now) return;
-      if (allFinite(row) && ['lose', 'maintain', 'gain'].includes(row.goal)) begun.push(row);
-    });
-    const goal = begun.reduce<GoalRow | null>(
-      (best, row) =>
-        !best || row.effective_date > best.effective_date || (row.effective_date === best.effective_date && row.updated_at > best.updated_at) ? row : best,
-      null,
-    );
-    if (goal) {
-      try {
-        const next = rowToGoals(goal);
-        if (allFinite(next) && !same(byId(goals, next.id), next)) goals.put(next);
-      } catch {}
-    }
-
-    each(changes?.daily_steps, (row) => {
-      if (!isDay(row.log_date)) return;
-      const existing = byId(dayLogs, row.log_date);
+      if (!isDay(row.effective_date)) return;
+      const existing = byId(goals, row.effective_date);
       if (row.deleted_at != null) {
-        if (existing) dayLogs.remove(row.log_date);
+        if (existing) goals.remove(row.effective_date);
+        return;
+      }
+      if (!allFinite(row) || !['lose', 'maintain', 'gain'].includes(row.goal)) return;
+      if (row.source != null && row.source !== 'computed' && row.source !== 'manual') return;
+      const next = rowToGoals(row);
+      if (!allFinite(next)) return;
+      // Compared as rows: a stored row may hold the same values with its fields in another order.
+      if (!existing || !same(goalsToRow(existing), goalsToRow(next))) goals.put(next);
+    });
+
+    each(changes?.daily_activity, (row) => {
+      if (!isDay(row.activity_date)) return;
+      const existing = byId(dayLogs, row.activity_date);
+      if (row.deleted_at != null) {
+        if (existing) dayLogs.remove(row.activity_date);
         return;
       }
       if (!Number.isFinite(row.steps)) return;
+      if (row.workout_kcal != null && !Number.isFinite(row.workout_kcal)) return;
+      if (row.day_type != null && !['workout', 'active_rest', 'rest'].includes(row.day_type)) return;
       const next = rowToDayLog(row, existing);
       if (!same(existing, next)) dayLogs.put(next);
     });

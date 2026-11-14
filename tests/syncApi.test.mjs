@@ -26,13 +26,13 @@ const log = {
 };
 const custom = { ...log, id: '0b9d3f0e-6c1b-4f5e-9a55-2f0f3c1f7a02', fdc_id: null, food_name: null, unit: 'serving', quantity: 1, food_values: null };
 const savedFood = { fdc_id: 169640, saved_at: AT, updated_at: AT, deleted_at: null };
-const goal = { effective_date: '2026-11-01', calories: 3027, protein_g: 182, carbs_g: 433, fat_g: 94, fiber_g: 38, sugar_g: 113, sodium_mg: 2300, steps: 10000, goal: 'gain', updated_at: AT, deleted_at: null };
-const steps = { log_date: '2026-11-10', steps: 5782, updated_at: AT, deleted_at: null };
+const goal = { effective_date: '2026-11-01', calories: 3027, protein_g: 182, carbs_g: 433, fat_g: 94, fiber_g: 38, sugar_g: 113, sodium_mg: 2300, steps: 10000, goal: 'gain', source: 'manual', workout_kcal: 0, active_rest_kcal: 0, updated_at: AT, deleted_at: null };
+const steps = { activity_date: '2026-11-10', steps: 5782, day_type: 'workout', workout_kcal: null, updated_at: AT, deleted_at: null };
 
 const response = (changes = {}, rest = {}) => ({
   cursor: 42,
   has_more: false,
-  changes: { food_logs: [], saved_foods: [], goals: [], daily_steps: [], ...changes },
+  changes: { food_logs: [], saved_foods: [], goals: [], daily_activity: [], ...changes },
   rejected: [],
   ...rest,
 });
@@ -94,7 +94,7 @@ test('registerDevice: an aborted request rejects with the abort error', async ()
 
 test('postSync: one POST with the bearer token and the request as JSON; the response comes back as sent', async () => {
   const body = response(
-    { food_logs: [log, custom], saved_foods: [savedFood], goals: [goal], daily_steps: [steps] },
+    { food_logs: [log, custom], saved_foods: [savedFood], goals: [goal], daily_activity: [steps] },
     { has_more: true, rejected: [{ table: 'saved_foods', key: '1', reason: 'unknown_food' }] },
   );
   const fetch = fakeFetch(body);
@@ -174,7 +174,7 @@ test('postSync: a body that is not a SyncResponse is ApiUnavailable', async () =
     response({ food_logs: undefined }),
     response({ saved_foods: undefined }),
     response({ goals: null }),
-    response({ daily_steps: {} }),
+    response({ daily_activity: {} }),
   ];
   for (const body of bodies) {
     await unavailable(postSync('http://api.test', TOKEN, request, { fetch: fakeFetch(body) }));
@@ -217,9 +217,11 @@ test('postSync: one malformed row is ApiUnavailable, so nothing downstream sees 
       { ...goal, calories: null },
       { ...goal, steps: '10000' },
       { ...goal, goal: 'bulk' },
+      { ...goal, source: 'guessed' },
+      { ...goal, workout_kcal: '300' },
       { ...goal, updated_at: null },
     ],
-    daily_steps: [{ ...steps, log_date: 20261110 }, { ...steps, steps: null }, { ...steps, updated_at: undefined }, { ...steps, deleted_at: 0 }],
+    daily_activity: [{ ...steps, activity_date: 20261110 }, { ...steps, steps: null }, { ...steps, updated_at: undefined }, { ...steps, deleted_at: 0 }, { ...steps, day_type: 'active_recovery' }, { ...steps, workout_kcal: 'lots' }],
   };
   for (const [table, rows] of Object.entries(bad)) {
     for (const row of rows) {
@@ -239,7 +241,7 @@ test('postSync: a deleted row needs only its key and the two times', async () =>
     food_logs: [{ id: log.id, updated_at: AT, deleted_at: AT }, { ...log, deleted_at: AT }],
     saved_foods: [{ fdc_id: 169640, updated_at: AT, deleted_at: AT }],
     goals: [{ effective_date: '2026-11-01', updated_at: AT, deleted_at: AT }],
-    daily_steps: [{ log_date: '2026-11-10', updated_at: AT, deleted_at: AT }],
+    daily_activity: [{ activity_date: '2026-11-10', updated_at: AT, deleted_at: AT }],
   };
   assert.deepEqual((await postSync('http://api.test', TOKEN, request, { fetch: fakeFetch(response(deleted)) })).changes, deleted);
   // The key and the times are still required.

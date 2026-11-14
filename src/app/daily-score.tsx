@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { ChevronRight, Info } from 'lucide-react-native';
+import { ChevronRight, Info, SlidersHorizontal } from 'lucide-react-native';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { Easing, FadeIn, SlideInUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -7,7 +7,7 @@ import Svg, { Circle, Defs, LinearGradient, Stop } from 'react-native-svg';
 
 import { Press } from '@/components/Press';
 import { useDay } from '@/lib/data';
-import { parseDay } from '@/lib/nutrition';
+import { parseDay, roundHalfAway } from '@/lib/nutrition';
 import { useSelectedDay } from '@/lib/selectedDay';
 import { tokens } from '@/lib/tokens';
 
@@ -82,7 +82,7 @@ export default function DailyScore() {
                 />
               </View>
               <Text className="w-[80px] text-right text-[12.5px] text-muted">
-                {r.eaten}/{r.goal}
+                {r.eaten}/{roundHalfAway(r.goal)}
                 {r.unit}
               </Text>
               <Text className="w-[64px] text-right text-[12.5px] text-muted">{r.onTrack ? 'On track' : 'Adjust'}</Text>
@@ -92,9 +92,19 @@ export default function DailyScore() {
 
         <Press
           accessibilityRole="button"
+          accessibilityLabel="Edit goals"
+          onPress={() => router.push('/goals')}
+          className="mt-[11px] flex-row items-center border-t border-track pb-[14px] pt-[17px]"
+        >
+          <SlidersHorizontal size={16} color={c.muted} />
+          <Text className="ml-[11px] flex-1 text-[12.5px] text-muted">Edit goals</Text>
+          <ChevronRight size={17} color={c.muted} />
+        </Press>
+        <Press
+          accessibilityRole="button"
           accessibilityLabel="How Daily Score Works"
           onPress={() => router.push('/score-info')}
-          className="mt-[11px] flex-row items-center border-t border-track pb-[20px] pt-[17px]"
+          className="flex-row items-center border-t border-track pb-[20px] pt-[14px]"
         >
           <Info size={16} color={c.muted} />
           <Text className="ml-[11px] flex-1 text-[12.5px] text-muted">How Daily Score Works</Text>

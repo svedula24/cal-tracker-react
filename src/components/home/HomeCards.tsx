@@ -8,19 +8,20 @@ import {
   Apple,
   History,
   Candy,
+  Dumbbell,
   PersonStanding,
   Soup,
   Target,
   Wheat,
 } from 'lucide-react-native';
 import { useState } from 'react';
-import { Text, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 
 import { Press } from '@/components/Press';
 import { Ring } from '@/components/Ring';
 import { Card, cardShadow } from '@/components/Screen';
 import { STREAK_DAYS } from '@/lib/data';
-import type { Nutrients } from '@/lib/nutrition';
+import { type DayType, type Nutrients, roundHalfAway } from '@/lib/nutrition';
 import { tokens } from '@/lib/tokens';
 
 const c = tokens.colors;
@@ -114,7 +115,7 @@ export function NutrientCard({ k, eaten, goal }: { k: NutrientKey; eaten: number
       <View className="flex-row items-end">
         <Text className={`${String(eaten).length >= 4 ? 'text-[15px]' : 'text-[16.5px]'} font-semibold text-foreground`}>{eaten}</Text>
         <Text className="mb-[2px] ml-[1px] text-[10px] text-muted" numberOfLines={1}>
-          /{goal}
+          /{roundHalfAway(goal)}
           {m.unit}
         </Text>
       </View>
@@ -157,12 +158,43 @@ export function HealthScoreCard({ value, text }: { value: number; text: string }
 }
 
 // ── Page 3: activity ─────────────────────────────────────────────────────────
-export function StepsCard({ steps, goal }: { steps: number; goal: number }) {
+/** A typed whole number (commas allowed); null when it is not one. */
+const parseWhole = (t: string): number | null => {
+  const s = t.replace(/,/g, '').trim();
+  return /^\d{1,7}$/.test(s) ? Number(s) : null;
+};
+
+/** The day's steps: tap the number to type it (Enter or leaving the field saves; anything else is dropped). */
+export function StepsCard({ steps, goal, onSteps }: { steps: number; goal: number; onSteps: (steps: number) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const save = () => {
+    const n = draft === null ? null : parseWhole(draft);
+    if (n !== null && n !== steps) onSteps(n);
+    setDraft(null);
+  };
   return (
     <Card className="h-[216px] flex-1 px-[16px] pt-[16px]">
       <Text className="text-[13.5px] text-muted">Steps</Text>
-      <View className="flex-row items-end">
-        <Text className="text-[24px] font-bold text-foreground">{steps.toLocaleString('en-US')}</Text>
+      <View className="h-[32px] flex-row items-end">
+        {draft === null ? (
+          <Press accessibilityRole="button" accessibilityLabel="Edit steps" onPress={() => setDraft(String(steps))}>
+            <Text className="text-[24px] font-bold text-foreground">{steps.toLocaleString('en-US')}</Text>
+          </Press>
+        ) : (
+          <TextInput
+            accessibilityLabel="Steps"
+            value={draft}
+            onChangeText={setDraft}
+            onSubmitEditing={save}
+            onBlur={save}
+            autoFocus
+            selectTextOnFocus
+            keyboardType="number-pad"
+            returnKeyType="done"
+            className={`text-[24px] font-bold ${parseWhole(draft) === null ? 'text-bad' : 'text-foreground'}`}
+            style={{ width: 90, padding: 0, outlineStyle: 'none' } as object}
+          />
+        )}
         <Text className="mb-[3px] ml-[3px] text-[13px] text-muted">/{goal.toLocaleString('en-US')}</Text>
       </View>
       <View className="mt-[22px] items-center">
@@ -174,7 +206,86 @@ export function StepsCard({ steps, goal }: { steps: number; goal: number }) {
   );
 }
 
-export function BurnedCard({ total }: { total: number }) {
+export const DAY_TYPES: { value: DayType; label: string }[] = [
+  { value: 'workout', label: 'Workout' },
+  { value: 'active_rest', label: 'Active rest' },
+  { value: 'rest', label: 'Rest' },
+];
+
+/**
+ * The day's type and, optionally, its own workout calories (empty = the goal's amount for the
+ * day type, shown as the placeholder). Tapping the selected type again clears it.
+ */
+export function DayTypeCard({
+  dayType,
+  workoutKcal,
+  goalKcal,
+  onDayType,
+  onWorkoutKcal,
+}: {
+  dayType: DayType | null;
+  workoutKcal: number | null;
+  goalKcal: number;
+  onDayType: (t: DayType | null) => void;
+  onWorkoutKcal: (kcal: number | null) => void;
+}) {
+  const shown = workoutKcal === null ? '' : String(workoutKcal);
+  const [draft, setDraft] = useState<string | null>(null);
+  const text = draft ?? shown;
+  const invalid = draft !== null && draft.trim() !== '' && parseWhole(draft) === null;
+  const save = () => {
+    if (draft === null) return;
+    const next = draft.trim() === '' ? null : parseWhole(draft);
+    if ((draft.trim() === '' || next !== null) && next !== workoutKcal) onWorkoutKcal(next);
+    setDraft(null);
+  };
+  return (
+    <Card className="mt-[10px] px-[16px] pb-[14px] pt-[14px]">
+      <Text className="text-[13.5px] text-muted">Day type</Text>
+      <View className="mt-[9px] flex-row" style={{ gap: 8 }}>
+        {DAY_TYPES.map((t) => {
+          const on = dayType === t.value;
+          return (
+            <Press
+              key={t.value}
+              accessibilityRole="button"
+              accessibilityLabel={`${t.label} day`}
+              accessibilityState={{ selected: on }}
+              aria-selected={on} // react-native-web ignores accessibilityState
+              onPress={() => onDayType(on ? null : t.value)}
+              className={`h-[32px] flex-1 items-center justify-center rounded-full border ${on ? 'border-foreground bg-foreground' : 'border-border bg-card'}`}
+            >
+              <Text className={`text-[13.5px] font-medium ${on ? 'text-background' : 'text-foreground'}`}>{t.label}</Text>
+            </Press>
+          );
+        })}
+      </View>
+      <View className="mt-[12px] flex-row items-center">
+        <Dumbbell size={16} color={c.muted} />
+        <Text className="ml-[8px] flex-1 text-[13.5px] text-muted">Workout calories</Text>
+        <View className={`h-[32px] flex-row items-center rounded-full border bg-card px-[12px] ${invalid ? 'border-bad' : 'border-border'}`}>
+          <TextInput
+            accessibilityLabel="Workout calories"
+            value={text}
+            placeholder={String(goalKcal)}
+            placeholderTextColor={c.faint}
+            onChangeText={setDraft}
+            onSubmitEditing={save}
+            onBlur={save}
+            keyboardType="number-pad"
+            returnKeyType="done"
+            className={`text-right text-[15px] font-semibold ${invalid ? 'text-bad' : 'text-foreground'}`}
+            style={{ width: 52, padding: 0, outlineStyle: 'none' } as object}
+          />
+          <Text className="ml-[3px] text-[13px] text-muted">cal</Text>
+        </View>
+      </View>
+    </Card>
+  );
+}
+
+/** Calories added to the day for activity: steps, plus the workout or active-rest calories. */
+export function BurnedCard({ total, steps, day }: { total: number; steps: number; day: { label: string; kcal: number } | null }) {
   return (
     <Card className="h-[216px] flex-1 px-[16px] pt-[16px]">
       <Text className="text-[13.5px] text-muted">Calories burned</Text>
@@ -182,7 +293,8 @@ export function BurnedCard({ total }: { total: number }) {
         <Text className="text-[24px] font-bold text-foreground">{total}</Text>
         <Text className="mb-[3px] ml-[3px] text-[13px] text-muted">cal</Text>
       </View>
-      <BurnRow icon={<Footprints size={17} color={c.foreground} />} label="Steps" value={total} />
+      <BurnRow icon={<Footprints size={17} color={c.foreground} />} label="Steps" value={steps} />
+      {day ? <BurnRow icon={<Dumbbell size={17} color={c.foreground} />} label={day.label} value={day.kcal} /> : null}
     </Card>
   );
 }

@@ -59,8 +59,9 @@ export default function ScoreInfo() {
 
         <Section title="Your calorie goal">
           <P>
-            The calories goal used for the score is your daily goal plus any rollover calories plus the calories you've
-            burned from steps.
+            Each day is scored against the goal you had that day. Its calorie goal is that goal plus the calories you
+            burned from steps, plus your workout or active-rest calories on those days, plus any rollover calories. A
+            quarter of the activity calories is added to the carbs goal, in grams.
           </P>
         </Section>
 

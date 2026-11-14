@@ -456,27 +456,50 @@ test('saved foods: `usda:<n>` ↔ fdc_id; anything else is not synced', () => {
   assert.equal(rowToSavedId(fromServer(savedToRow({ id: banana.id, food: banana }, AT))), banana.id);
 });
 
-test('goals: the seven targets, steps and the goal, from the date the caller gives', () => {
-  const goals = { id: 'goals', calories: 3027, protein: 182, carbs: 433, fat: 94, fiber: 38, sugar: 113, sodium: 2300, steps: 10000, goal: 'gain' };
-  const row = goalsToRow(goals, '2026-11-10');
-  assert.deepEqual(row, { effective_date: '2026-11-10', calories: 3027, protein_g: 182, carbs_g: 433, fat_g: 94, fiber_g: 38, sugar_g: 113, sodium_mg: 2300, steps: 10000, goal: 'gain' });
+test('goals: one dated row each way, with its source and the workout and active-rest calories', () => {
+  const goals = {
+    id: '2026-11-10', effectiveDate: '2026-11-10', source: 'computed',
+    calories: 3027, protein: 182, carbs: 433, fat: 94, fiber: 38, sugar: 113, sodium: 2300, steps: 10000, goal: 'gain', workoutKcal: 300, activeRestKcal: 150,
+  };
+  const row = goalsToRow(goals);
+  assert.deepEqual(row, {
+    effective_date: '2026-11-10', calories: 3027, protein_g: 182, carbs_g: 433, fat_g: 94, fiber_g: 38, sugar_g: 113, sodium_mg: 2300, steps: 10000, goal: 'gain',
+    source: 'computed', workout_kcal: 300, active_rest_kcal: 150,
+  });
   assert.deepEqual(rowToGoals(fromServer(row)), goals);
-  assert.deepEqual(goalsToRow(rowToGoals(fromServer(row)), row.effective_date), row);
+  assert.deepEqual(goalsToRow(rowToGoals(fromServer(row))), row);
 });
 
-test('day logs: steps only; the rollover stays on the device', () => {
-  const row = dayLogToRow({ id: '2026-11-10', steps: 5782, rollover: 200 });
-  assert.deepEqual(row, { log_date: '2026-11-10', steps: 5782 });
-  assert.deepEqual(rowToDayLog(fromServer(row), { id: '2026-11-10', steps: 100, rollover: 200 }), { id: '2026-11-10', steps: 5782, rollover: 200 });
-  assert.deepEqual(rowToDayLog(fromServer(row)), { id: '2026-11-10', steps: 5782, rollover: 0 });
+test('goals: a row without the newer fields is typed by hand, with nothing added for a day type', () => {
+  // eslint-disable-next-line no-unused-vars
+  const { source, workout_kcal, active_rest_kcal, ...old } = goalsToRow({
+    id: '2020-01-01', effectiveDate: '2020-01-01', source: 'computed', calories: 1, protein: 1, carbs: 1, fat: 1, fiber: 1, sugar: 1, sodium: 1, steps: 1, goal: 'lose', workoutKcal: 9, activeRestKcal: 9,
+  });
+  const g = rowToGoals(fromServer(old));
+  assert.equal(g.id, '2020-01-01');
+  assert.equal(g.source, 'manual');
+  assert.equal(g.workoutKcal, 0);
+  assert.equal(g.activeRestKcal, 0);
+});
+
+test("day logs: steps, day type and the day's workout calories; the rollover stays on the device", () => {
+  const row = dayLogToRow({ id: '2026-11-10', steps: 5782, rollover: 200, dayType: 'workout', workoutKcal: 0 });
+  assert.deepEqual(row, { activity_date: '2026-11-10', steps: 5782, day_type: 'workout', workout_kcal: 0 });
+  assert.deepEqual(rowToDayLog(fromServer(row), { id: '2026-11-10', steps: 100, rollover: 200 }), { id: '2026-11-10', steps: 5782, rollover: 200, dayType: 'workout', workoutKcal: 0 });
+  assert.deepEqual(rowToDayLog(fromServer(row)), { id: '2026-11-10', steps: 5782, rollover: 0, dayType: 'workout', workoutKcal: 0 });
+  // A log from before day types: both are null on the wire.
+  assert.deepEqual(dayLogToRow({ id: '2026-11-09', steps: 1, rollover: 0 }), { activity_date: '2026-11-09', steps: 1, day_type: null, workout_kcal: null });
 });
 
 test('keyOf and tombstone: the key of every table, each the inverse of the other', () => {
   const rows = {
     food_logs: [entryToLog(logged(banana, 150)), ID],
     saved_foods: [savedToRow({ id: banana.id, food: banana }, AT), '2709224'],
-    goals: [goalsToRow({ id: 'goals', calories: 1, protein: 1, carbs: 1, fat: 1, fiber: 1, sugar: 1, sodium: 1, steps: 1, goal: 'lose' }, '2026-11-01'), '2026-11-01'],
-    daily_steps: [dayLogToRow({ id: '2026-11-10', steps: 1, rollover: 0 }), '2026-11-10'],
+    goals: [
+      goalsToRow({ id: '2026-11-01', effectiveDate: '2026-11-01', source: 'manual', calories: 1, protein: 1, carbs: 1, fat: 1, fiber: 1, sugar: 1, sodium: 1, steps: 1, goal: 'lose', workoutKcal: 0, activeRestKcal: 0 }),
+      '2026-11-01',
+    ],
+    daily_activity: [dayLogToRow({ id: '2026-11-10', steps: 1, rollover: 0 }), '2026-11-10'],
   };
   for (const [table, [row, key]] of Object.entries(rows)) {
     assert.equal(keyOf(table, row), key, table);
@@ -487,5 +510,5 @@ test('keyOf and tombstone: the key of every table, each the inverse of the other
   assert.deepEqual(tombstone('food_logs', ID), { id: ID });
   assert.deepEqual(tombstone('saved_foods', '2709224'), { fdc_id: 2709224 }); // a number on the wire
   assert.deepEqual(tombstone('goals', '2026-11-01'), { effective_date: '2026-11-01' });
-  assert.deepEqual(tombstone('daily_steps', '2026-11-10'), { log_date: '2026-11-10' });
+  assert.deepEqual(tombstone('daily_activity', '2026-11-10'), { activity_date: '2026-11-10' });
 });

@@ -31,8 +31,10 @@ MIN_YEAR, MAX_YEAR = 1900, 2200
 MAX_INT = 2**31 - 1  # INTEGER columns (steps)
 MAX_BIGINT = 2**63 - 1
 
-TABLES = ("food_logs", "saved_foods", "goals", "daily_steps")
-TableName = Literal["food_logs", "saved_foods", "goals", "daily_steps"]
+TABLES = ("food_logs", "saved_foods", "goals", "daily_activity")
+# daily_steps: the name an app from before daily_activity pushes its days under (key log_date). It is
+# still accepted on push, and a rejection of one of those rows names it; a pull never returns it.
+TableName = Literal["food_logs", "saved_foods", "goals", "daily_activity", "daily_steps"]
 
 
 def _number(value: Any) -> Any:
@@ -73,6 +75,7 @@ def _not_blank(value: str) -> str:
     return value
 
 
+FiniteNumber = Annotated[float, BeforeValidator(_number)]
 Amount = Annotated[float, BeforeValidator(_number), Field(ge=0, le=MAX_NUMBER)]
 Quantity = Annotated[float, BeforeValidator(_number), Field(gt=0, le=MAX_NUMBER)]
 Steps = Annotated[int, Field(strict=True, ge=0, le=MAX_INT)]
@@ -80,6 +83,8 @@ FdcId = Annotated[int, Field(strict=True, ge=0, le=MAX_BIGINT)]
 Day = Annotated[date, BeforeValidator(_not_a_number), AfterValidator(_sane_year)]
 Timestamp = Annotated[AwareDatetime, BeforeValidator(_not_a_number), AfterValidator(_sane_year)]
 Name = Annotated[str, Field(strict=True, min_length=1, max_length=MAX_NAME), AfterValidator(_text)]
+GoalSource = Literal["computed", "manual"]
+DayType = Literal["workout", "active_rest", "rest"]
 
 
 class NutrientValues(BaseModel):
@@ -142,13 +147,20 @@ class GoalRow(BaseModel):
     goal: Literal["lose", "maintain", "gain"]
     updated_at: Timestamp
     deleted_at: Timestamp | None = None
+    # Added later: a row from an app that does not send them still syncs, with these defaults.
+    source: GoalSource = "manual"
+    workout_kcal: Amount = 0  # added to the day's calories on a workout day
+    active_rest_kcal: Amount = 0  # on an active-rest day
 
 
-class DailyStepsRow(BaseModel):
-    log_date: Day
+class DailyActivityRow(BaseModel):
+    activity_date: Day
     steps: Steps
     updated_at: Timestamp
     deleted_at: Timestamp | None = None
+    # Added later; None is also what a row from an app that does not send them gets.
+    day_type: DayType | None = None  # None = not said
+    workout_kcal: Amount | None = None  # that day's workout calories, whatever the day type; None = the goal's
 
 
 # A deletion needs only the key, `updated_at` and `deleted_at`. A pushed row whose `deleted_at` is
@@ -170,8 +182,8 @@ class GoalTombstone(Tombstone):
     effective_date: Day
 
 
-class DailyStepsTombstone(Tombstone):
-    log_date: Day
+class DailyActivityTombstone(Tombstone):
+    activity_date: Day
 
 
 RawRow = dict[str, Any]
@@ -186,10 +198,12 @@ class SyncPush(BaseModel):
     food_logs: list[RawRow] = []
     saved_foods: list[RawRow] = []
     goals: list[RawRow] = []
-    daily_steps: list[RawRow] = []
+    daily_activity: list[RawRow] = []
+    daily_steps: list[RawRow] = []  # the legacy name of daily_activity, rows keyed by log_date
 
     def row_count(self) -> int:
-        return len(self.food_logs) + len(self.saved_foods) + len(self.goals) + len(self.daily_steps)
+        tables = (self.food_logs, self.saved_foods, self.goals, self.daily_activity, self.daily_steps)
+        return sum(len(rows) for rows in tables)
 
 
 class SyncRequest(BaseModel):
@@ -203,7 +217,7 @@ class SyncChanges(BaseModel):
     food_logs: list[FoodLogRow] = []
     saved_foods: list[SavedFoodRow] = []
     goals: list[GoalRow] = []
-    daily_steps: list[DailyStepsRow] = []
+    daily_activity: list[DailyActivityRow] = []
 
 
 class Rejected(BaseModel):
