@@ -47,7 +47,8 @@ jobs:
       - name: Clear any review.md from the checkout
         run: rm -f review.md
 
-      - uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
+      - id: claude
+        uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -75,7 +76,10 @@ jobs:
             --allowedTools "Skill,Read(~/.claude/projects/**),Edit(/review.md),mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments --jq '[.[] | select(.user.login == \"claude[bot]\" or .user.login == \"${{ github.repository_owner }}\")]'),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
             --disallowedTools "Read(//proc/**),Read(//sys/**),Read(//etc/**),Read(//root/**),Read(~/work/_temp/**),Read(./.git/**),Bash(git *--no-index*),Bash(git *--output*)"
 
+      # The action skips itself (and sets no conclusion) when this workflow file differs from the
+      # default branch's, e.g. on a PR that changes it. Then there is no review to post.
       - name: Post the review
+        if: steps.claude.outputs.conclusion != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -127,6 +131,7 @@ jobs:
         run: rm -f review.md
 
       - if: steps.pr-check.outputs.count == '0'
+        id: claude
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -152,7 +157,8 @@ jobs:
             --allowedTools "Skill,Read(~/.claude/projects/**),Edit(/review.md),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git cat-file:*)"
             --disallowedTools "Read(//proc/**),Read(//sys/**),Read(//etc/**),Read(//root/**),Read(~/work/_temp/**),Read(./.git/**),Bash(git *--no-index*),Bash(git *--output*)"
 
-      - if: steps.pr-check.outputs.count == '0'
+      # Skipped when the action skipped itself (no conclusion): see the PR job.
+      - if: steps.pr-check.outputs.count == '0' && steps.claude.outputs.conclusion != ''
         name: Post the review
         env:
           GH_TOKEN: ${{ github.token }}
