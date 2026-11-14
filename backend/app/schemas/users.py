@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
-from app.services.users import known_timezone
+from app.timezones import known_timezone
 
 
 def _check_timezone(value: str) -> str:
@@ -28,7 +28,7 @@ class DeviceRegistration(BaseModel):
     app_version: str | None = Field(default=None, max_length=32)
     # An IANA name; the user's calendar day ("today") follows it. Omitted, null or a name this server
     # does not know: UTC. Not a 422, because a phone with newer tz data than the server must still register.
-    timezone: str | None = Field(default=None, max_length=64)
+    timezone: str | None = None
 
     def label(self) -> str | None:
         """The token label: `ios 1.4.0`, `web`, or None when the app sent neither."""
@@ -40,6 +40,7 @@ class DeviceRegistered(BaseModel):
 
     user_id: uuid.UUID
     token: str
+    timezone: str  # the zone the server stored: the one sent, or UTC when it did not know it
 
 
 class Me(BaseModel):

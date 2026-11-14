@@ -63,7 +63,7 @@ def test_registering_returns_a_user_id_and_a_token(client):
     r = client.post("/api/v1/devices", json={"platform": "ios", "app_version": "1.4.0"})
     assert r.status_code == 201
     body = r.json()
-    assert set(body) == {"user_id", "token"}
+    assert set(body) == {"user_id", "token", "timezone"}
     assert uuid.UUID(body["user_id"]).version == 4
     assert TOKEN_RE.fullmatch(body["token"])
     assert r.headers["cache-control"] == "no-store"

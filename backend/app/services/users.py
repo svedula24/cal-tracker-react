@@ -13,14 +13,13 @@ from __future__ import annotations
 
 import hashlib
 import secrets
-import zoneinfo
 from datetime import timedelta
-from functools import cache
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from app.models.user_data import User, UserToken
+from app.timezones import known_timezone
 
 TOKEN_PREFIX = "kalo_"
 # last_used_at is rewritten at most this often, so an authenticated read is normally one SELECT.
@@ -38,17 +37,6 @@ def hash_token(token: str) -> bytes:
     return hashlib.sha256(token.encode()).digest()
 
 
-@cache
-def _timezones() -> frozenset[str]:
-    # Reads the tz database from disk (about 600 names), so once per process.
-    return frozenset(zoneinfo.available_timezones())
-
-
-def known_timezone(name: str) -> bool:
-    """Whether `name` is an IANA zone this machine knows ("America/Los_Angeles", "UTC")."""
-    return name in _timezones()
-
-
 def set_timezone(user: User, name: str) -> None:
     """Sets the user's timezone (their "today" follows it). ValueError for an unknown name. Does not commit."""
     if not known_timezone(name):
@@ -59,11 +47,9 @@ def set_timezone(user: User, name: str) -> None:
 def register_device(session: Session, label: str | None, timezone: str | None = None) -> tuple[User, str]:
     """A new anonymous user and its first token (returned in the clear, stored hashed). Does not commit.
 
-    `timezone`: an IANA name. None or a name this machine does not know leaves the column's UTC.
+    `timezone`: an IANA name. None or a name this server does not know is UTC.
     """
-    user = User()
-    if timezone is not None and known_timezone(timezone):
-        user.timezone = timezone
+    user = User(timezone=timezone if timezone is not None and known_timezone(timezone) else "UTC")
     token = new_token()
     session.add(user)
     session.flush()  # inserts the user, so its generated id can go in the token row

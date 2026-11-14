@@ -52,10 +52,10 @@ const unavailable = (promise) => assert.rejects(promise, isUnavailable);
 /** Everything an error could print: its text, its cause's, and its own fields. */
 const printed = (e) => [String(e), e.stack ?? '', String(e.cause ?? ''), e.cause?.stack ?? '', JSON.stringify(e)].join('\n');
 
-test('registerDevice: one POST of {platform, app_version, timezone}; the 201 gives the user id and the token', async () => {
-  const fetch = fakeFetch({ user_id: '7f0c7b62-4b8e-4b0f-9a52-1c2d3e4f5a6b', token: TOKEN }, 201);
+test('registerDevice: one POST of {platform, app_version, timezone}; the 201 gives the user id, the token and the stored zone', async () => {
+  const fetch = fakeFetch({ user_id: '7f0c7b62-4b8e-4b0f-9a52-1c2d3e4f5a6b', token: TOKEN, timezone: 'America/Los_Angeles' }, 201);
   const got = await registerDevice('http://api.test/', { platform: 'ios', appVersion: '1.4.0', timezone: 'America/Los_Angeles' }, { fetch });
-  assert.deepEqual(got, { userId: '7f0c7b62-4b8e-4b0f-9a52-1c2d3e4f5a6b', token: TOKEN });
+  assert.deepEqual(got, { userId: '7f0c7b62-4b8e-4b0f-9a52-1c2d3e4f5a6b', token: TOKEN, timezone: 'America/Los_Angeles' });
   assert.equal(fetch.calls.length, 1);
   const { url, init } = fetch.calls[0];
   assert.equal(url, 'http://api.test/api/v1/devices');
@@ -67,8 +67,9 @@ test('registerDevice: one POST of {platform, app_version, timezone}; the 201 giv
 
 test('registerDevice: the app version and the timezone are optional', async () => {
   const fetch = fakeFetch({ user_id: 'u', token: TOKEN }, 201);
-  await registerDevice('http://api.test', { platform: 'web' }, { fetch });
+  const got = await registerDevice('http://api.test', { platform: 'web' }, { fetch });
   assert.deepEqual(JSON.parse(fetch.calls[0].init.body), { platform: 'web', app_version: null, timezone: null });
+  assert.equal(got.timezone, null); // a server that does not report the zone: the app treats it as not taken
 });
 
 test('registerDevice: an error status (the registration limit included), a network error or a wrong body is ApiUnavailable', async () => {

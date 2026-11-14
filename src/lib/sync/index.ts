@@ -52,11 +52,14 @@ let registering: Promise<void> | null = null;
 function register(url: string): Promise<void> {
   registering ??= (async () => {
     const timezone = currentTimezone();
-    const { token } = await withTimeout((signal) =>
+    const { token, timezone: stored } = await withTimeout((signal) =>
       registerDevice(url, { platform, appVersion: Constants.expoConfig?.version, timezone }, { signal }),
     );
-    // Before the token is usable, so sendTimezone() cannot see a token and an unrecorded zone.
-    if (timezone) await AsyncStorage.setItem(TZ_SENT, timezone).catch(() => {});
+    // Recorded only when the server took it; otherwise cleared, since what is recorded was sent to the
+    // account before this one. (The server stores UTC for a zone it does not know: sendTimezone() then
+    // PATCHes it later, refused until the server knows it.) Done before the token is usable, so
+    // sendTimezone() never pairs the new token with the old account's record.
+    await (timezone && stored === timezone ? AsyncStorage.setItem(TZ_SENT, timezone) : AsyncStorage.removeItem(TZ_SENT)).catch(() => {});
     await saveToken(token);
   })().finally(() => {
     registering = null;

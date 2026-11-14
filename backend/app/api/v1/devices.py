@@ -32,7 +32,7 @@ def register_device(
     user, token = user_service.register_device(session, body.label() if body else None, body.timezone if body else None)
     session.commit()
     response.headers["Cache-Control"] = "no-store"
-    return DeviceRegistered(user_id=user.id, token=token)
+    return DeviceRegistered(user_id=user.id, token=token, timezone=user.timezone)
 
 
 @router.get("/me")

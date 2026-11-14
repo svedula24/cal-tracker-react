@@ -83,6 +83,7 @@ const api = {
   rev: 0, // the server's change counter: the cursor of a response
   rows: [], // rows "changed on the server" for the app to pull: { rev, table, row }
   zones: [], // the body of every PATCH /api/v1/me: { token, body }
+  unknownZone: false, // true: registrations store UTC, as a server that does not know the zone does
   zoneFailures: 0, // answer this many PATCH /api/v1/me with a 503 first
   failedZones: [], // the PATCHes answered with that 503
   codes: [], // the token of every POST /api/v1/pairing-codes
@@ -122,7 +123,8 @@ await mock('**/api/v1/devices', 'POST', (route, request) => {
   api.devices.push(request.postDataJSON());
   api.tokens.push(token);
   api.rows = []; // a new user has nothing on the server
-  return json(route, 201, { user_id: randomUUID(), token });
+  const zone = request.postDataJSON()?.timezone;
+  return json(route, 201, { user_id: randomUUID(), token, timezone: api.unknownZone || !zone ? 'UTC' : zone });
 });
 await mock('**/api/v1/sync', 'POST', async (route, request) => {
   const auth = (await request.headerValue('authorization')) ?? '';
@@ -469,6 +471,8 @@ try {
   await settled();
   from = api.requests.length;
   revoke();
+  api.unknownZone = true; // and this time the server does not know the zone: it stores UTC
+  const zonesBefore = api.zones.length;
   await open('/');
   const full = await until('the upload after registering again', () => api.requests.slice(from).find((r) => r.body.changes?.goals?.length));
   check(api.refused === 1 && api.devices.length === 2 && full.token === api.tokens[1], `a 401 from /sync makes the app register again and sync with the new token (401s: ${api.refused}, registrations: ${api.devices.length})`);
@@ -487,6 +491,13 @@ try {
     api.devices.length === 2 && quiet.token === api.tokens[1] && count(quiet.body.changes) === 0 && api.requests.slice(from).filter((r) => r.body.changes?.goals?.length).length === 1,
     'everything is uploaded once: the next start sends nothing and keeps the new token',
   );
+  await until('PATCH /api/v1/me after a registration that stored UTC', () => api.zones.length > zonesBefore);
+  check(
+    api.zones.at(-1).token === api.tokens[1] && api.zones.at(-1).body.timezone === ZONE,
+    'a zone the registration did not take (the server stored UTC) is not recorded, so it is PATCHed on the next start',
+    `PATCHes: ${show(api.zones.slice(zonesBefore))}`,
+  );
+  api.unknownZone = false;
 
   // ── Connect ChatGPT: a code, the connections, Disconnect ──
   const token = api.tokens.at(-1);

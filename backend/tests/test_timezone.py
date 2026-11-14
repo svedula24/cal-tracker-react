@@ -11,9 +11,9 @@ import psycopg
 import pytest
 from fastapi.testclient import TestClient
 
+from app import timezones
 from app.api.v1.food_logs import utc_now
 from app.main import create_app
-from app.services import users as user_service
 
 pytestmark = pytest.mark.skipif(not os.environ.get("DATABASE_URL"), reason="DATABASE_URL not set")
 
@@ -49,7 +49,9 @@ def patch_me(client, who, body):
 
 
 def test_registration_stores_the_timezone(client, db):
-    who = register(client, platform="ios", timezone="America/Los_Angeles")
+    r = client.post("/api/v1/devices", json={"platform": "ios", "timezone": "America/Los_Angeles"})
+    assert r.json()["timezone"] == "America/Los_Angeles"  # what was stored, so the app knows it was taken
+    who = {"Authorization": f"Bearer {r.json()['token']}"}
     assert stored_timezones(db) == ["America/Los_Angeles"]
     assert client.get("/api/v1/me", headers=who).json()["timezone"] == "America/Los_Angeles"
 
@@ -63,12 +65,18 @@ def test_registration_without_a_timezone_is_utc(client, db, body):
 @pytest.mark.parametrize("zone", ["Mars/Olympus_Mons", "america/los_angeles", "", "PST"])
 def test_registration_with_an_unknown_timezone_still_registers_as_utc(client, db, zone):
     # A phone whose tz data is newer than the server's must not be locked out of sync.
-    register(client, timezone=zone)
+    # The response says UTC, so the app knows the zone was not taken and sends it again later.
+    r = client.post("/api/v1/devices", json={"timezone": zone})
+    assert (r.status_code, r.json()["timezone"]) == (201, "UTC")
     assert stored_timezones(db) == ["UTC"]
 
 
-def test_registration_refuses_a_timezone_that_is_not_a_short_string(client, db):
-    assert client.post("/api/v1/devices", json={"timezone": "x" * 65}).status_code == 422
+def test_registration_with_a_long_timezone_still_registers_as_utc(client, db):
+    r = client.post("/api/v1/devices", json={"timezone": "x" * 500})
+    assert (r.status_code, r.json()["timezone"]) == (201, "UTC")
+
+
+def test_registration_refuses_a_timezone_that_is_not_a_string(client, db):
     assert client.post("/api/v1/devices", json={"timezone": 5}).status_code == 422
     assert stored_timezones(db) == []
 
@@ -138,10 +146,10 @@ def test_patch_me_is_allowed_cross_origin(client):
 
 
 def test_the_known_timezones_are_read_once():
-    user_service._timezones.cache_clear()
-    assert user_service.known_timezone("Pacific/Pago_Pago")
-    assert not user_service.known_timezone("Nowhere/Special")
-    assert user_service._timezones.cache_info().misses == 1
+    timezones._timezones.cache_clear()
+    assert timezones.known_timezone("Pacific/Pago_Pago")
+    assert not timezones.known_timezone("Nowhere/Special")
+    assert timezones._timezones.cache_info().misses == 1
 
 
 def today_seen(client, who, now):

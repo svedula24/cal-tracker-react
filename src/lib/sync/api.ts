@@ -136,7 +136,7 @@ export async function registerDevice(
   baseUrl: string,
   info: { platform: 'ios' | 'android' | 'web'; appVersion?: string; timezone?: string | null },
   opts: FetchOpts = {},
-): Promise<{ userId: string; token: string }> {
+): Promise<{ userId: string; token: string; timezone: string | null }> {
   let body: unknown;
   try {
     const payload = { platform: info.platform, app_version: info.appVersion ?? null, timezone: info.timezone ?? null };
@@ -146,7 +146,8 @@ export async function registerDevice(
     throw e instanceof SyncUnauthorized ? new ApiUnavailable('The sync API answered 401') : e;
   }
   if (!isObject(body) || !isText(body.user_id) || !isText(body.token)) throw new ApiUnavailable('The sync API sent an unexpected response');
-  return { userId: body.user_id, token: body.token };
+  // The zone the server stored (the one sent, or UTC when it did not know it); null from an older server.
+  return { userId: body.user_id, token: body.token, timezone: isText(body.timezone) ? body.timezone : null };
 }
 
 /**
