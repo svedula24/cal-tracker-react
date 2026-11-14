@@ -47,6 +47,7 @@ export function migrateEntries(items: Entry[]): Entry[] {
  * from the server, such as an import): from then on they only add made-up food to real days. They
  * were never sent, so there is nothing to delete on the server. Only entries the app seeded as demo
  * are dropped, never one tagged by migrateEntries' guess (`seedGuessed`), which may be the user's.
+ * The trade-off: an install from before the flag keeps its old demo entries (the user can delete them).
  * Runs at load, after migrateEntries, so the list is saved once. Same array when nothing changes.
  */
 export function dropDemoEntries(items: Entry[]): Entry[] {

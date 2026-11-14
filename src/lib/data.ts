@@ -151,7 +151,7 @@ const addEntry = (entry: Entry) => {
 };
 // Any edit makes a demo entry the user's.
 const updateEntry = (id: string, patch: Partial<Entry>) => {
-  entriesStore().update(id, { ...patch, seed: false });
+  entriesStore().update(id, { ...patch, seed: false, seedGuessed: undefined });
   markDirty('food_logs', id);
 };
 const removeEntry = (id: string) => {
