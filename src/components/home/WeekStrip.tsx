@@ -10,9 +10,12 @@ import { caloriesByDay, dayStatus, parseDay, stripPage, stripPageOf, todayKey } 
 import { tokens } from '@/lib/tokens';
 
 const SIZE = 35;
-/** This week and the 52 before it; more when entries go further back (up to ten years). */
-const MIN_PAGES = 53;
-const MAX_PAGES = 52 * 10 + 1;
+/**
+ * Two pages: this week (five days back, today, tomorrow) and the week before it (6 to 12 days back),
+ * so today and the 12 days before it can be seen, and the strip can't be swiped any further back. Older days are kept
+ * (and synced); they just aren't reachable from Home.
+ */
+const PAGES = 2;
 /** Room for the active day's shadow inside the scroll view, which clips its content. */
 const SHADOW_ROOM = 14;
 
@@ -29,7 +32,7 @@ type Props = {
 
 /**
  * The day strip, in pages of 7 days that snap one at a time. Page 0 (where it starts) is five
- * days back, today and tomorrow; swiping right goes back a week at a time. Past rings: green on
+ * days back, today and tomorrow; swiping right shows the week before (PAGES: two weeks in all). Past rings: green on
  * goal, red off goal (the goal that day), dashed when nothing was logged.
  */
 export function WeekStrip({ ref, selected, onSelect, todayProgress, onAwayChange }: Props) {
@@ -38,14 +41,7 @@ export function WeekStrip({ ref, selected, onSelect, todayProgress, onAwayChange
   const tKey = todayKey();
   const today = useMemo(() => parseDay(tKey), [tKey]);
 
-  const pages = useMemo(() => {
-    let oldest = 0;
-    for (const k of kcal.keys()) {
-      const p = stripPageOf(k, today);
-      if (Number.isFinite(p) && p > oldest) oldest = p;
-    }
-    return Math.min(MAX_PAGES, Math.max(MIN_PAGES, oldest + 1));
-  }, [kcal, today]);
+  const pages = PAGES;
   // Oldest page first, so swiping right goes back in time; the list starts at its end.
   const data = useMemo(() => Array.from({ length: pages }, (_, i) => pages - 1 - i), [pages]);
 
