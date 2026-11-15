@@ -32,8 +32,8 @@ class Dataset:
 
 
 # The latest release of each generic dataset (https://fdc.nal.usda.gov/download-datasets/).
-# Same releases as the app's bundled JSON (scripts/build-usda-foods.mjs).
-# Bumping a release means updating its sha256 pin too.
+# Same releases and pins as the app's bundled JSON (scripts/build-usda-foods.mjs).
+# Bumping a release means updating its sha256 pin in both places.
 DATASETS = (
     Dataset(
         "FoodData_Central_foundation_food_json_2026-10-29",
