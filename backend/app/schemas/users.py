@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 
 from pydantic import AfterValidator, BaseModel, BeforeValidator, ConfigDict, Field
 
+from app.services.users import INTEGRATION_LABEL
 from app.timezones import known_timezone
 
 
@@ -21,6 +22,14 @@ def _check_timezone(value: str) -> str:
 Timezone = Annotated[str, Field(min_length=1, max_length=64), AfterValidator(_check_timezone)]
 
 
+def _not_integration(value: str | None) -> str | None:
+    # The version goes into the token's label; a label with this prefix marks an integration token
+    # (app/services/integrations.py), so a device must never get one.
+    if value is not None and value.startswith(INTEGRATION_LABEL):
+        raise ValueError(f"must not start with {INTEGRATION_LABEL!r}")
+    return value
+
+
 def _long_is_unknown(value: object) -> object:
     # A name longer than any IANA zone is unknown (UTC), not worth keeping, and not a 422 either.
     return None if isinstance(value, str) and len(value) > 64 else value
@@ -30,7 +39,7 @@ class DeviceRegistration(BaseModel):
     """What the app says about itself when it registers: labels the token, and sets the user's timezone."""
 
     platform: Literal["ios", "android", "web"] | None = None
-    app_version: str | None = Field(default=None, max_length=32)
+    app_version: Annotated[str | None, Field(max_length=32), AfterValidator(_not_integration)] = None
     # An IANA name; the user's calendar day ("today") follows it. Omitted, null or a name this server
     # does not know: UTC. Not a 422, because a phone with newer tz data than the server must still register.
     timezone: Annotated[str | None, BeforeValidator(_long_is_unknown)] = None
