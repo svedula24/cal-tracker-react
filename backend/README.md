@@ -461,7 +461,7 @@ curl localhost:8000/api/v1/foods/barcode/737628064502 -H 'Authorization: Bearer 
   count). Over that, a lookup is served from a stale cached answer, else 503
   with `Retry-After`. Each user may also look up 60 barcodes an hour (cached
   ones count; 429 with `Retry-After` above that). Like registrations, both
-  counts are kept per process.
+  counts are kept per process, or in Postgres with `RATE_LIMITS=db` (see "Deploy on Vercel").
 - `OFF_BASE_URL` and `OFF_USER_AGENT` (`app/settings.py`) set where lookups go
   and the User-Agent OFF asks for.
 
@@ -565,6 +565,180 @@ curl localhost:8000/api/v1/connections -H "Authorization: Bearer $TOKEN"
 curl -X DELETE localhost:8000/api/v1/connections/<id> -H "Authorization: Bearer $TOKEN"   # 204
 ```
 
+## Deploy on Vercel
+
+One Vercel project (free Hobby plan) serves the web app and the API on one origin,
+`https://<project>.vercel.app`, with the database on Neon (free plan, added from the Vercel
+Marketplace). The Mac stops being the server: no ngrok, no uvicorn, no docker.
+
+**How it is put together** (`vercel.json` at the repo root, Vercel
+[Services](https://vercel.com/docs/services), in beta on all plans):
+
+- `web`: the repo root. Vercel runs `npm ci`, then `npx expo export --platform web` with
+  `EXPO_PUBLIC_API_URL` set to `PUBLIC_URL`, then, when the app has a service worker (`public/sw.js`, from the
+  home-screen web app change), `node scripts/sw-manifest.mjs dist` (writes `dist/sw-files.json` and stamps a
+  build id into `dist/sw.js`; the build fails if the worker exists but the script doesn't), and serves `dist/`
+  from its CDN.
+  Without `PUBLIC_URL`, or if that script is missing or fails, the build fails rather than ship a
+  web app without its API or with a stale service worker. Every path that is not
+  a file gets `index.html` (the app is a single-page export, `app.json` `web.output: "single"`).
+- `api`: `backend/`, a [FastAPI](https://vercel.com/docs/frameworks/backend/fastapi) Vercel Function
+  (`app/main.py`, `app`; dependencies from `pyproject.toml` and `uv.lock`, Python from
+  `.python-version`). It gets `/api/*`, `/mcp`, `/mcp/*`, `/oauth/*` and `/.well-known/*`, with the
+  path unchanged; everything else goes to `web`. With `SERVE_API_PUBLICLY` there is no `/docs`,
+  `/redoc` or `/openapi.json` (and those paths are not routed to the API anyway).
+- Files in the export (`/sw.js`, `/manifest.json`, the icons, `/assets/**`) are served as files:
+  Vercel serves an existing file before applying rewrites, so the `index.html` fallback never
+  replaces them. `vercel.json` sets `sw.js` and `sw-files.json` to `no-cache` (a new service worker is picked up on the
+  next visit), `manifest.json` to `application/manifest+json`, and `.wasm` to `application/wasm`.
+- The lifespan runs per instance (Vercel supports FastAPI lifespan events): it connects once,
+  checks the schema is at head (one small query) and starts the MCP session manager. The MCP
+  endpoint is stateless, so any instance can answer any request. The OAuth client-metadata cache is
+  per instance (a cold instance fetches ChatGPT's metadata again; harmless).
+- Instances share no memory, so the rate limits are counted in Postgres (`RATE_LIMITS=db`, table
+  `rate_limits`, through a small pool of their own so they never wait on the requests' pool), and the
+  client's address is the first entry of `x-forwarded-for`, which Vercel overwrites so a client
+  cannot spoof it (`CLIENT_IP_HEADER`, on by default when `VERCEL=1`). Food search and lookup, which
+  need no token, are limited to 600 an hour per address (429 with `Retry-After`; the app then
+  searches its bundled list).
+- The function connects to Neon's pooled endpoint (`DATABASE_URL`, PgBouncer in transaction mode)
+  with a small pool that checks a connection before use (`DB_POOL_*` below), since Neon closes
+  connections when its compute suspends. `DB_POOL_SIZE=0` turns the pool off (a connection per
+  request) if that ever misbehaves.
+
+### 1. Create the project
+
+1. Sign up at [vercel.com](https://vercel.com) with GitHub (Hobby plan) and let it see the repo.
+2. **Add New → Project**, import the repo. Leave Root Directory as the repo root; Vercel reads
+   `vercel.json`. Note the project name: the address will be `https://<project-name>.vercel.app`.
+3. Before **Deploy**, open **Environment Variables** and paste this block (Vercel accepts a pasted
+   `.env`), with your values. Scope every one to **Production** only (untick Preview and
+   Development): a preview would otherwise build the web app against the production URL, and it has
+   no database.
+
+   ```sh
+   PUBLIC_URL=https://<project-name>.vercel.app
+   KALO_SECRET=<the one in backend/.env, or a new one: openssl rand -hex 32>
+   SERVE_API_PUBLICLY=true
+   RATE_LIMITS=db
+   ALLOW_REGISTRATION=false
+   OFF_USER_AGENT=Kalo/0.1 (<your email>)
+   DB_POOL_SIZE=5
+   DB_POOL_PRE_PING=true
+   DB_POOL_RECYCLE=300
+   DB_CONNECT_TIMEOUT=10
+   ```
+
+   `ALLOW_REGISTRATION=false` from the start: your account arrives with the copied data (step 3),
+   and a new device joins it with a link code, which works with registration closed.
+4. **Deploy.** The web app comes up; the API answers 500 until it has a database (next step).
+   Check **Settings → Domains**: if the production domain is not the `PUBLIC_URL` you set, change
+   `PUBLIC_URL` to it.
+5. Check **Settings → Deployment Protection**: the production domain must stay public (ChatGPT,
+   the Shortcut and Safari reach it without a Vercel login). Protecting previews (Hobby's default,
+   "Standard Protection") is fine; only use the production domain, never a per-deployment
+   `…-<hash>.vercel.app` URL, which that protection covers.
+
+### 2. Add Neon
+
+1. In the project, **Storage → Create Database → Neon** (or the Neon page on the Vercel
+   Marketplace → Install), create a Neon account through Vercel, plan **Free**.
+2. Region: the one next to the function's (**Settings → Functions → Function Region**; Vercel's
+   default is Washington, D.C., `iad1`, so pick AWS US East (N. Virginia)).
+3. Connect it to the project for Production. Leave "Create database branch for deployment →
+   Preview" unticked (preview branches would start without the copied data).
+   Neon adds `DATABASE_URL` (pooled, the one the API uses) and `DATABASE_URL_UNPOOLED` (direct)
+   to the project's environment variables, among others.
+
+### 3. Copy the data from the Mac
+
+Stop the Mac's API first (Ctrl-C the uvicorn and ngrok processes) so nothing changes during the
+copy, but leave docker running. Then, in `backend/`:
+
+```sh
+# backend/.env.neon (gitignored): Neon's direct URL, DATABASE_URL_UNPOOLED (the host without
+# -pooler), from the database's page under Vercel → Storage, or Neon's console → Connect with
+# connection pooling off
+TARGET_DATABASE_URL=postgresql://...@ep-....neon.tech/neondb?sslmode=require&channel_binding=require
+```
+
+```sh
+uv run --env-file .env.neon python -m kalo.copy_db
+```
+
+It migrates Neon to head (Alembic, over the direct connection, as Neon recommends for migrations),
+then copies every table from the docker database (`DATABASE_URL`, default the local one) in one
+transaction: the USDA foods and portions, your user and device token, logs, goals, activity, saved
+foods, ChatGPT connections, pairing codes and the barcode cache, ids, `rev`s and sequences included.
+Before writing anything it refuses a target that is the source itself (however the URL is spelled)
+or that already has rows in any of those tables, and it prints only
+table names, row counts and the host. To redo it, delete and recreate the Neon database (or its
+`public` schema) first. The local database only needs to be at any migration up to head; it is
+only read.
+
+Then **Deployments → … → Redeploy** the latest deployment, so the function starts against the
+migrated database.
+
+### 4. Verify
+
+```sh
+U=https://<project-name>.vercel.app
+curl -sI $U/ | head -1                                        # 200, the web app
+curl -s -o /dev/null -w '%{http_code}\n' $U/goals             # 200 (any app route serves index.html)
+curl -s "$U/api/v1/foods/search?q=banana&limit=1"             # 200, JSON from the USDA foods
+curl -s $U/api/v1/me                                          # 401 {"detail":"missing bearer token"}
+curl -s -X POST $U/api/v1/devices                             # 403 registration is closed
+curl -s $U/.well-known/oauth-authorization-server             # "issuer" is $U
+curl -s $U/.well-known/oauth-protected-resource/mcp           # "resource" is $U/mcp
+curl -s -i -X POST $U/mcp | head -1                           # 401 (needs a ChatGPT token)
+curl -s -o /dev/null -w '%{http_code}\n' $U/docs              # 200 but the web app, not Swagger
+# The next two need the home-screen web app (service worker) change:
+curl -sI $U/sw.js | grep -iE '^(content-type|cache-control)'  # text/javascript, no-cache (not index.html)
+curl -sI $U/sw-files.json | grep -iE '^(content-type|cache-control)'  # application/json, no-cache
+curl -sI $U/manifest.json | grep -i '^content-type'          # application/manifest+json
+curl -sI $U/apple-touch-icon.png | grep -i '^content-type'   # image/png
+curl -sI $U/icon-192.png | grep -i '^content-type'           # image/png
+curl -sI $U/icon-512.png | grep -i '^content-type'           # image/png
+# a .wasm file: its path is in the export (find dist/assets -name '*.wasm' after a local build)
+curl -sI $U/assets/<path>.wasm | grep -i '^content-type'     # application/wasm
+```
+
+Then the app: run Expo Go against the new API (`EXPO_PUBLIC_API_URL=$U npx expo start` in the repo
+root). It keeps its device token, which was copied, so it sees all its data. Add the iPhone web app
+by opening `$U` in Safari, Share → Add to Home Screen, and link it to your account from the app
+(Goals → Link another device).
+
+### 5. Reconnect ChatGPT
+
+ChatGPT's connection is bound to the old URL. In ChatGPT, remove the old Kalo connector, add one
+with the URL `$U/mcp` (OAuth), and sign in with a new pairing code from the app (Goals → Connect
+ChatGPT). In the app, disconnect the old connection if it is still listed.
+
+### Later changes
+
+- Every push to `main` deploys. A change with a new migration: migrate Neon before the deploy that
+  needs it (until then the API refuses to start: the schema check):
+  `uv run --env-file .env.neon sh -c 'DATABASE_URL="$TARGET_DATABASE_URL" alembic upgrade head'`
+- Reloading the USDA foods, likewise:
+  `uv run --env-file .env.neon sh -c 'DATABASE_URL="$TARGET_DATABASE_URL" python -m kalo.usda.load'`
+- Logs: Vercel → the project → Logs (the API's), Observability.
+
+### Retire the Mac setup
+
+Once the checks above pass and the phone works against `$U`:
+
+- Stop uvicorn (`:8000`/`:8001`) and ngrok for good; remove any login item or script that starts
+  them. The ngrok domain can be released in the ngrok dashboard.
+- Keep the docker database a while as a backup (`docker compose stop` in `backend/`), then
+  `docker compose down` (add `-v` to delete its data volume once you no longer want it).
+- `backend/.env` (the tunnel's `PUBLIC_URL`) is no longer used; keep `KALO_SECRET` only in Vercel.
+
+**Settings used only by this deployment** (`app/settings.py`): `SERVE_API_PUBLICLY` (the whole API
+on `PUBLIC_URL`'s host; default false keeps the tunnel's public-host guard), `RATE_LIMITS`
+(`memory` default, `db`), `CLIENT_IP_HEADER`, `DB_POOL_SIZE` (default 10, `0` = no pool),
+`DB_POOL_PRE_PING`, `DB_POOL_RECYCLE`, `DB_CONNECT_TIMEOUT`. Their defaults leave the local setup as
+it was (apart from the food-search limit, which applies everywhere, in memory by default).
+
 ## Layout
 
 ```
@@ -581,12 +755,14 @@ app/
   api/oauth.py         the OAuth authorization server: discovery, sign-in page, token, register
   mcp/                 the MCP server (/mcp): server.py, tools.py, auth.py (access tokens -> user)
   settings.py          PUBLIC_URL, KALO_SECRET, the OAuth allowlists, OFF_BASE_URL, OFF_USER_AGENT,
-                       ALLOW_REGISTRATION
+                       ALLOW_REGISTRATION, and the deployment switches (SERVE_API_PUBLICLY, RATE_LIMITS,
+                       CLIENT_IP_HEADER, DB_POOL_*, DB_CONNECT_TIMEOUT)
   schemas/             Pydantic request and response models (foods, users, logs, log_api)
   models/foods.py      SQLAlchemy Food and FoodPortion
   models/user_data.py  User, UserToken, FoodLog, UserGoal, DailyActivity, SavedFood
   models/oauth.py      PairingCode, OAuthGrant, OAuthCode, OAuthToken
   models/barcodes.py   BarcodeProduct (the Open Food Facts cache)
+  models/limits.py     RateLimit (the shared rate-limit counts)
   services/foods.py    ranked search SQL, portions_for (a page's portions), get_food, get_portions
   services/users.py    tokens (made, hashed, looked up), register_device
   services/logs.py     how one pushed row is applied: last write wins, the food-log rules
@@ -596,7 +772,8 @@ app/
   services/log_writes.py, goal_writes.py, daily.py  log and goal writes, a day's summary and history (REST and MCP)
   services/oauth.py, pairing.py  OAuth clients, codes, tokens and grants; pairing codes
   services/barcodes.py normalize, fetch_off (Open Food Facts), lookup (the cache)
-  db/session.py        engine, session dependency
+  services/limits.py   rate limits in Postgres (RATE_LIMITS=db), make_limiter
+  db/session.py        engine (pool settings), session dependency
 alembic.ini
 migrations/
   env.py
@@ -605,9 +782,11 @@ migrations/
                        0003_activity_targets.py: goal source and day amounts; daily_steps -> daily_activity
                        0004_oauth.py: pairing codes, OAuth grants, codes and tokens
                        0005_barcode_products.py: the Open Food Facts lookup cache
+                       0006_rate_limits.py: rate-limit counts shared by serverless instances
 kalo/
   db.py                database_url(): the one source of the connection URL
   calai.py             import a Cal AI report PDF's food log
+  copy_db.py           copy every row into an empty database (the move to Neon)
   usda/                the loader: datasets, nutrients, portions, load
 scripts/
   bench_search.py      search benchmark

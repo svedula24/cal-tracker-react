@@ -20,18 +20,19 @@ from sqlalchemy.orm import Session, sessionmaker
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api import oauth as oauth_api
-from app.api.limits import BodyLimit, SlidingWindow
+from app.api.limits import BodyLimit
 from app.api.v1.connections import CODES_PER_HOUR
 from app.api.v1.connections import router as connections_router
 from app.api.v1.devices import router as devices_router
 from app.api.v1.food_logs import router as food_logs_router
-from app.api.v1.foods import BARCODE_LOOKUPS_PER_HOUR, OFF_READS_PER_MINUTE
+from app.api.v1.foods import BARCODE_LOOKUPS_PER_HOUR, FOOD_SEARCHES_PER_HOUR, OFF_READS_PER_MINUTE
 from app.api.v1.foods import router as foods_router
 from app.api.v1.goals import daily_activity_router, goals_router
 from app.api.v1.integrations import router as integrations_router
 from app.api.v1.nutrition import router as nutrition_router
 from app.api.v1.sync import router as sync_router
-from app.db.session import make_engine
+from app.db.session import make_engine, make_limits_engine
+from app.services.limits import make_limiter
 from app.settings import Settings, get_settings, host_name
 from kalo.db import database_url, require_head
 
@@ -81,6 +82,24 @@ class PublicHostGuard:
         await self.app(scope, receive, send)
 
 
+class ClientAddressHeader:
+    """Takes the client's address from `header` (CLIENT_IP_HEADER), set by a proxy that overwrites what the
+    client sent: on Vercel the connection's peer is Vercel's, not the phone's, and per-address rate limits
+    would otherwise count everyone together. Without the header the peer stays. Plain ASGI."""
+
+    def __init__(self, app: ASGIApp, header: str) -> None:
+        self.app = app
+        self.header = header.lower().encode("latin-1")
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket"):
+            value = next((v for k, v in scope["headers"] if k == self.header), None)
+            address = value.decode("latin-1").split(",")[0].strip() if value else ""
+            if address:
+                scope = {**scope, "client": (address, 0)}
+        await self.app(scope, receive, send)
+
+
 def create_app(url: str | None = None, settings: Settings | None = None, token_verifier: Any = None) -> FastAPI:
     """The app, with an engine (connection pool) to `url` (default: DATABASE_URL) for its lifetime.
 
@@ -93,14 +112,17 @@ def create_app(url: str | None = None, settings: Settings | None = None, token_v
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        engine = make_engine(url)
+        engine = make_engine(url, settings)
+        limits_engine = make_limits_engine(url, settings) if settings.rate_limits == "db" else None
         try:
             # Blocks startup until Postgres answers, so a bad URL fails fast; and refuses a database that
             # is not migrated (SchemaOutOfDate), which would otherwise answer every request with a 500.
             # require_head takes a psycopg cursor, so this reaches the driver connection under the engine.
+            # One connection and two small queries per process start (on Vercel, per cold start).
             with engine.connect() as conn, conn.connection.cursor() as cur:
                 require_head(cur)
             app.state.engine = engine
+            app.state.limits_engine = limits_engine
             app.state.sessionmaker = sessionmaker(engine, expire_on_commit=False)
             async with AsyncExitStack() as stack:
                 if session_manager is not None:  # the MCP SDK's task group, for the request handlers
@@ -108,8 +130,12 @@ def create_app(url: str | None = None, settings: Settings | None = None, token_v
                 yield
         finally:
             engine.dispose()
+            if limits_engine is not None:
+                limits_engine.dispose()
 
-    app = FastAPI(title="Kalo", lifespan=lifespan)
+    # On a deployment that serves the API publicly (Vercel) there is no /docs, /redoc or /openapi.json.
+    hidden = {"docs_url": None, "redoc_url": None, "openapi_url": None} if settings.serve_api_publicly else {}
+    app = FastAPI(title="Kalo", lifespan=lifespan, **hidden)
     app.state.settings = settings
     app.include_router(foods_router)
     app.include_router(devices_router)
@@ -133,16 +159,24 @@ def create_app(url: str | None = None, settings: Settings | None = None, token_v
         verifier = token_verifier or KaloVerifier(sessions, settings.resource)
         routes, session_manager = mcp_server.build(settings, sessions, verifier)
         app.router.routes.extend(routes)
+    # The rate limits, in this process's memory or (RATE_LIMITS=db) in Postgres, shared by every instance
+    # (app/services/limits.py). Each is named after its app.state attribute.
+    def limit(name: str, count: int, per_seconds: float) -> None:
+        setattr(app.state, name, make_limiter(app, name, count, per_seconds))
+
     # Registration needs no token, so one address may only register this often (POST /api/v1/devices).
-    app.state.registrations = SlidingWindow(REGISTRATIONS_PER_HOUR, per_seconds=3600)
+    limit("registrations", REGISTRATIONS_PER_HOUR, per_seconds=3600)
     # Pairing codes the app asks for, per user; and pairing-code attempts on the sign-in page, per address
-    # and from everyone. Each app (each test's app) counts on its own; tests may replace them.
-    app.state.pairing_codes = SlidingWindow(CODES_PER_HOUR, per_seconds=3600)
-    app.state.pairing_attempts = SlidingWindow(*oauth_api.ATTEMPTS_PER_ADDRESS)
-    app.state.pairing_attempts_overall = SlidingWindow(*oauth_api.ATTEMPTS_OVERALL)
+    # and from everyone. In memory, each app (each test's app) counts on its own; tests may replace them.
+    limit("pairing_codes", CODES_PER_HOUR, per_seconds=3600)
+    limit("pairing_attempts", *oauth_api.ATTEMPTS_PER_ADDRESS)
+    limit("pairing_attempts_overall", *oauth_api.ATTEMPTS_OVERALL)
     # Barcode lookups per user: they share the server's one Open Food Facts allowance.
-    app.state.barcode_lookups = SlidingWindow(BARCODE_LOOKUPS_PER_HOUR, per_seconds=3600)
-    app.state.off_reads = SlidingWindow(OFF_READS_PER_MINUTE, per_seconds=60)
+    limit("barcode_lookups", BARCODE_LOOKUPS_PER_HOUR, per_seconds=3600)
+    limit("off_reads", OFF_READS_PER_MINUTE, per_seconds=60)
+    # Food search and lookup need no token, so they are limited per address (generous: the app searches
+    # as the user types, debounced).
+    limit("food_searches", FOOD_SEARCHES_PER_HOUR, per_seconds=3600)
     # Refused by its declared size, before any of it is read. Added before the CORS middleware, which
     # therefore wraps it: the 413 is readable cross-origin.
     app.add_middleware(BodyLimit, max_bytes=MAX_BODY_BYTES)
@@ -160,11 +194,16 @@ def create_app(url: str | None = None, settings: Settings | None = None, token_v
     # A page of 50 foods with their portions is 18 to 36 kB of JSON and gzips to about 3 kB (measured
     # on banana, rice, chicken breast): less for a phone to download. Small bodies are left alone.
     app.add_middleware(GZipMiddleware, minimum_size=1000)
-    # Added last, so it is the outermost: on the public host a hidden path is refused before CORS, the
+    # Added after the others, so it wraps them: on the public host a hidden path is refused before CORS, the
     # body limit, gzip or routing do any work. Its 404 carries no CORS headers (unlike the 413 above), as
     # at ngrok: those paths are not served there to any origin, and a preflight to them fails too.
-    if settings.public_host is not None:
+    # With SERVE_API_PUBLICLY (the Vercel deployment: the web app calls the API on its own origin) the
+    # public host serves everything, like any other host.
+    if settings.public_host is not None and not settings.serve_api_publicly:
         app.add_middleware(PublicHostGuard, host=settings.public_host)
+    # Outermost of all, so the rate limits (and anything else reading request.client) see the real client.
+    if settings.client_ip_header is not None:
+        app.add_middleware(ClientAddressHeader, header=settings.client_ip_header)
 
     # A request waits pool_timeout seconds for a free connection, then gets a 503 rather than a 500.
     @app.exception_handler(PoolTimeout)
