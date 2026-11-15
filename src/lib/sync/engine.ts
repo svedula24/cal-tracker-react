@@ -11,6 +11,11 @@
 // after `retryMs[attempt]`. A 401 registers again and uploads everything to the
 // new account. Nothing is ever thrown to the caller.
 //
+// `relink` switches this install to another account (Link another device): it
+// waits for the request in flight, stores an empty outbox, no cursor and primed,
+// then lets the caller clear the local data and store the new token (last), so
+// the next sync uploads nothing and pulls the account from the start.
+//
 // Stored (JSON): `sync:outbox` the outbox object, `sync:cursor` a number or
 // null, `sync:primed` '1' once the rows that existed before sync were queued.
 import { SyncUnauthorized } from './types.ts';
@@ -68,6 +73,14 @@ export function createSync(opts: {
   markDirty(table: Table, key: string, deleted?: boolean): void;
   /** Sync now (app start, app came to the foreground). Also resets the retry delay. */
   kick(): void;
+  /**
+   * Moves this install onto another account. Sync pauses and the request in flight ends first (it
+   * used the old token). Then the outbox is emptied, the cursor cleared and the install marked
+   * primed, and those are STORED; only then does `change` run (clear the local data, then store the
+   * new token, last). So nothing local is uploaded, and the next sync, started at once, pulls
+   * everything from the start, with whichever token is stored. Rejections are passed on.
+   */
+  relink(change: () => Promise<void>): Promise<void>;
   dispose(): void;
 } {
   const { push, register, hasToken, read, tombstone, keyOf, all, apply, storage, now = Date.now, pushDelayMs = 2000, batchSize = 400 } = opts;
@@ -80,6 +93,8 @@ export function createSync(opts: {
   let disposed = false;
 
   let running = false; // a sync is in progress
+  let finished: Promise<void> = Promise.resolve(); // resolves when the sync in progress ends
+  let held = false; // relink() is switching accounts: no sync starts
   let again = false; // kick() arrived meanwhile: sync once more afterwards
   let attempt = 0; // failures in a row
   // The one pending timer: the push delay, or (`waiting`) the retry after a failure.
@@ -89,27 +104,23 @@ export function createSync(opts: {
   // One write at a time per storage key, always of the latest value: a change
   // made during a write is written when that write ends. Nothing before the
   // stored state is loaded (it would overwrite it) and nothing after dispose.
+  // Returns the write that will hold the current value: relink() awaits it (and
+  // its failure); everyone else ignores it (a failed write is redone by the next change).
   const saver = (key: string, value: () => string) => {
-    let state: 'idle' | 'queued' | 'writing' = 'idle';
-    let stale = false;
-    const save = () => {
-      if (disposed || !loaded || state === 'queued') return;
-      if (state === 'writing') return void (stale = true);
-      state = 'queued';
-      Promise.resolve()
-        .then(() => {
-          if (disposed) return;
-          state = 'writing';
-          return storage.set(key, value());
-        })
-        .catch(() => {}) // not saved: the next change writes it again
-        .then(() => {
-          state = 'idle';
-          if (stale) {
-            stale = false;
-            save();
-          }
-        });
+    let last: Promise<void> = Promise.resolve(); // the latest write, settled either way
+    let queued: Promise<void> | null = null; // a write not started yet: it reads the value when it starts
+    const save = (): Promise<void> => {
+      if (disposed || !loaded) return Promise.resolve();
+      if (queued) return queued;
+      const write = last.then(() => {
+        queued = null;
+        if (disposed) return;
+        return storage.set(key, value());
+      });
+      write.catch(() => {}); // a caller that does not await it
+      queued = write;
+      last = write.catch(() => {});
+      return write;
     };
     return save;
   };
@@ -236,7 +247,7 @@ export function createSync(opts: {
     const bad = new Set<string>();
     let reauthed = false; // the previous request was a 401
     for (;;) {
-      if (disposed) return true;
+      if (disposed || held) return true;
       if (!primed) {
         markAll();
         primed = true;
@@ -279,16 +290,19 @@ export function createSync(opts: {
   };
 
   const run = async () => {
-    if (disposed) return;
+    if (disposed || held) return;
     if (running) return void (again = true);
     running = true;
+    let end!: () => void;
+    finished = new Promise((resolve) => (end = resolve));
     again = false;
     clearTimeout(timer);
     timer = undefined;
     waiting = false;
     const ok = await cycle().catch(() => false);
     running = false;
-    if (disposed) return;
+    end();
+    if (disposed || held) return;
     if (!ok) {
       again = false;
       arm(retryMs[Math.min(attempt, retryMs.length - 1)], true);
@@ -310,6 +324,37 @@ export function createSync(opts: {
       if (disposed) return;
       attempt = 0;
       void run();
+    },
+    async relink(change) {
+      if (disposed) return;
+      await ready;
+      while (running) await finished;
+      // A last push of what is waiting, to the account being left (if it can be reached): the
+      // reset below drops whatever is still unsent.
+      if (outbox.size > 0 && !disposed && (await hasToken().catch(() => false))) {
+        void run();
+        while (running) await finished;
+      }
+      held = true;
+      clearTimeout(timer);
+      timer = undefined;
+      waiting = false;
+      try {
+        while (running) await finished;
+        // The new account starts from nothing: stored BEFORE `change` (which stores the token last),
+        // so a crash or failure in between never pairs the new token with this install's old outbox
+        // or cursor. If it fails, `change` does not run and the install keeps its token.
+        outbox.clear();
+        cursor = null;
+        primed = true;
+        await Promise.all([saveOutbox(), saveCursor(), savePrimed()]);
+        await change();
+      } finally {
+        held = false;
+        again = false;
+        attempt = 0;
+        void run();
+      }
     },
     dispose() {
       disposed = true;

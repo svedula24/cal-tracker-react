@@ -126,10 +126,12 @@ export class Collection<T extends WithId> {
 
   // Functional updates read `this.items` at call time (not a captured closure),
   // so rapid successive writes never drop each other.
-  private commit(next: T[]) {
+  private commit(next: T[]): Promise<void> {
     this.items = next;
-    void writeCollection(this.key, next);
+    const write = writeCollection(this.key, next);
+    write.catch(() => {}); // most callers do not wait for the write
     this.emit();
+    return write;
   }
 
   private apply(op: (items: T[]) => T[]) {
@@ -143,6 +145,14 @@ export class Collection<T extends WithId> {
   update = (id: string, patch: Partial<T>) =>
     this.apply((items) => items.map((i) => (i.id === id ? { ...i, ...patch } : i)));
   remove = (id: string) => this.apply((items) => items.filter((i) => i.id !== id));
+  /**
+   * Removes every item, saved as an empty list so the seed does not come back. Resolves once that
+   * is stored (after loading, if the stored data has not loaded yet); rejects if it cannot be.
+   */
+  clear = async (): Promise<void> => {
+    await this.hydrated;
+    return this.commit([]);
+  };
   /** Replaces the item with this id, or appends it. Unlike `update`, nothing of the old item is kept. */
   put = (item: T) =>
     this.apply((items) => (items.some((i) => i.id === item.id) ? items.map((i) => (i.id === item.id ? item : i)) : [...items, item]));

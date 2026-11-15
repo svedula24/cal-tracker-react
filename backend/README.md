@@ -264,6 +264,39 @@ curl -X PATCH localhost:8000/api/v1/me -H 'Authorization: Bearer kalo_…' \
   limit counts. Default `true`. Tokens already issued keep working.
 - To revoke a token, set `user_tokens.revoked_at`. There is no endpoint for it yet.
 
+#### Link another device
+
+A second install (another phone, the home-screen web app) joins an existing user instead of
+registering: the signed-in install shows a one-time code (Goals → Link another device), the new
+one enters it and gets a token of its own for the same user.
+
+```sh
+curl -X POST localhost:8000/api/v1/link-codes -H 'Authorization: Bearer kalo_…'
+# 201 {"code": "K7QM-4XPA", "expires_at": "…"}      (10 minutes, once; 429 over 10 an hour per user)
+
+curl -X POST localhost:8000/api/v1/devices/link -H 'Content-Type: application/json' \
+  -d '{"code": "K7QM-4XPA", "platform": "web"}'
+# 201 {"user_id": "3f0e6c0a-…", "token": "kalo_…", "timezone": "America/New_York"}
+# 400 {"detail": "invalid or expired code"}           (wrong, expired or already used)
+```
+
+- Codes are pairing codes (8 Crockford base32 characters; case, spaces and dashes ignored),
+  stored only as SHA-256 in `link_codes`, apart from the ChatGPT pairing codes: neither works
+  as the other. A new code replaces the user's earlier one.
+- The answer has registration's shape. `timezone` is the user's (the one sent is not applied).
+  The token is a `user_tokens` row labelled `<platform> (linked)`, revoked like any other.
+- Works with `ALLOW_REGISTRATION=false`: no user is created.
+- `/devices/link` needs no token, so it is limited like the ChatGPT sign-in page: 10 tries per
+  client address per 15 minutes, and 1000 wrong codes an hour from everyone (429 with
+  `Retry-After`). The limiters are `app.state.link_codes`, `link_attempts` and
+  `link_attempts_overall` (`app/api/v1/link.py` `register_limits`).
+- In the app, linking replaces the install's data with the user's: what is waiting is pushed to the
+  old account if it can be, then the sync state is reset and stored, the local data cleared (not
+  sent anywhere), the old token kept (`kalo.token.previous`, for "Switch back to the previous
+  account" on the Link another device screen) and the new token stored last; sync then pulls
+  everything from the start. A new install offers it on Home and holds off registering until the
+  offer is answered. An install with data of its own is told what it leaves behind first.
+
 In the code, services write into the request's session and never commit; a route
 that writes ends with one `session.commit()` (`app/api/deps.py`).
 

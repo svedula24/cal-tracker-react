@@ -246,6 +246,7 @@ def test_db_window_concurrent_calls_never_exceed_the_limit(engine):
 def test_rate_limits_db_puts_every_limiter_in_postgres(migrated_url):
     names = ("registrations", "pairing_codes", "pairing_attempts", "pairing_attempts_overall")
     names += ("barcode_lookups", "off_reads", "food_searches")
+    names += ("link_codes", "link_attempts", "link_attempts_overall")
     with TestClient(create_app(migrated_url)) as memory:
         assert all(isinstance(getattr(memory.app.state, n), SlidingWindow) for n in names)
     with TestClient(create_app(migrated_url, settings=Settings(rate_limits="db"))) as client:

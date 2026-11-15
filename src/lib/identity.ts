@@ -43,3 +43,17 @@ export async function clearToken(): Promise<void> {
     await (web ? AsyncStorage.removeItem(KEY) : SecureStore.deleteItemAsync(KEY));
   } catch {}
 }
+
+// The token this install had before it was linked to another account (src/lib/sync linkThisDevice),
+// kept in the same storage so that account can be opened again ("Switch back"). One, the latest.
+const PREVIOUS = 'kalo.token.previous';
+
+/** The token from before the last link, or null. Rejects when the storage cannot be read. */
+export async function loadPreviousToken(): Promise<string | null> {
+  return (await (web ? AsyncStorage.getItem(PREVIOUS) : SecureStore.getItemAsync(PREVIOUS))) || null;
+}
+
+/** Keeps `token` as the previous one. Rejects when it cannot be stored: the caller must not switch accounts then. */
+export async function savePreviousToken(token: string): Promise<void> {
+  await (web ? AsyncStorage.setItem(PREVIOUS, token) : SecureStore.setItemAsync(PREVIOUS, token));
+}

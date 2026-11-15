@@ -29,6 +29,8 @@ from app.api.v1.foods import BARCODE_LOOKUPS_PER_HOUR, FOOD_SEARCHES_PER_HOUR, O
 from app.api.v1.foods import router as foods_router
 from app.api.v1.goals import daily_activity_router, goals_router
 from app.api.v1.integrations import router as integrations_router
+from app.api.v1.link import register_limits as register_link_limits
+from app.api.v1.link import router as link_router
 from app.api.v1.nutrition import router as nutrition_router
 from app.api.v1.sync import router as sync_router
 from app.db.session import make_engine, make_limits_engine
@@ -147,6 +149,7 @@ def create_app(url: str | None = None, settings: Settings | None = None, token_v
     app.include_router(integrations_router)
     # The app asks for pairing codes before a tunnel is up, so these exist with or without PUBLIC_URL.
     app.include_router(connections_router)
+    app.include_router(link_router)  # linking another install to the same user
     if settings.public_url is not None:
         from app.mcp import server as mcp_server  # the SDK is only imported when it is used
         from app.mcp.auth import KaloVerifier
@@ -177,6 +180,8 @@ def create_app(url: str | None = None, settings: Settings | None = None, token_v
     # Food search and lookup need no token, so they are limited per address (generous: the app searches
     # as the user types, debounced).
     limit("food_searches", FOOD_SEARCHES_PER_HOUR, per_seconds=3600)
+    # Linking another install (app/api/v1/link.py): link_codes, link_attempts, link_attempts_overall.
+    register_link_limits(app, lambda name, count, per_seconds: make_limiter(app, name, count, per_seconds))
     # Refused by its declared size, before any of it is read. Added before the CORS middleware, which
     # therefore wraps it: the 413 is readable cross-origin.
     app.add_middleware(BodyLimit, max_bytes=MAX_BODY_BYTES)

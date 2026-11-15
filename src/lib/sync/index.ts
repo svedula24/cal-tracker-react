@@ -5,16 +5,23 @@
 // The phone comes first: nothing here is awaited by a screen, nothing throws or rejects, and
 // without EXPO_PUBLIC_API_URL nothing is created or stored. (deviceToken() is the exception a screen
 // may await: the Connect ChatGPT screen, which needs the server anyway.)
+//
+// Linking (the Link another device screen): `linkThisDevice` swaps this install onto another
+// device's account through the engine's `relink`. On a new install the first-run offer to link
+// (`useLinkOffer`) holds sync back, so no account is registered for an install about to be linked;
+// any local write, a screen asking for the token, or "Not now" ends it.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
+import { useSyncExternalStore } from 'react';
 import { AppState, Platform } from 'react-native';
 
 import { loadFoods } from '@/data/foods';
 import { API_URL } from '@/lib/config';
 import { patchMe, Unprocessable } from '@/lib/connectionsApi';
-import { syncStores } from '@/lib/data';
+import { clearLocalData, ownData, syncStores } from '@/lib/data';
 import { ApiUnavailable } from '@/lib/foodsApi';
-import { loadToken, saveToken } from '@/lib/identity';
+import { loadPreviousToken, loadToken, savePreviousToken, saveToken } from '@/lib/identity';
+import { linkDevice, shouldOfferLink } from '@/lib/linkApi';
 import { createZoneSender, currentTimezone, zoneToRecord } from '@/lib/timezone';
 
 import { postSync, registerDevice } from './api';
@@ -48,6 +55,20 @@ const TZ_SENT = 'kalo.tz.sent';
 // and two registrations would make two accounts.
 let registering: Promise<void> | null = null;
 
+/**
+ * Keeps a token for another account than the one before (a registration, or a link). The zone is
+ * recorded only when that account has it (`stored`, its zone); otherwise cleared, since what is
+ * recorded was sent to the account before this one. (The server stores UTC for a zone it does not
+ * know: the zone sender then PATCHes it later, refused until the server knows it.) Done before the
+ * token is usable, so the zone sender never pairs the new token with the old account's record.
+ */
+async function adoptToken(token: string, sent: string | null, stored: string | null): Promise<void> {
+  zoneSender.forget(); // a zone the old account's server refused may be taken now
+  const record = zoneToRecord(sent, stored);
+  await (record ? AsyncStorage.setItem(TZ_SENT, record) : AsyncStorage.removeItem(TZ_SENT)).catch(() => {});
+  await saveToken(token);
+}
+
 /** Registers this install (a new, empty account) with its timezone and keeps the token. Rejects when it cannot. */
 function register(url: string): Promise<void> {
   registering ??= (async () => {
@@ -55,14 +76,7 @@ function register(url: string): Promise<void> {
     const { token, timezone: stored } = await withTimeout((signal) =>
       registerDevice(url, { platform, appVersion: Constants.expoConfig?.version, timezone }, { signal }),
     );
-    // Recorded only when the server took it; otherwise cleared, since what is recorded was sent to the
-    // account before this one. (The server stores UTC for a zone it does not know: the zone sender then
-    // PATCHes it later, refused until the server knows it.) Done before the token is usable, so
-    // the zone sender never pairs the new token with the old account's record.
-    zoneSender.forget(); // a zone the old account's server refused may be taken now
-    const record = zoneToRecord(timezone, stored);
-    await (record ? AsyncStorage.setItem(TZ_SENT, record) : AsyncStorage.removeItem(TZ_SENT)).catch(() => {});
-    await saveToken(token);
+    await adoptToken(token, timezone, stored);
   })().finally(() => {
     registering = null;
   });
@@ -75,6 +89,7 @@ function register(url: string): Promise<void> {
  */
 export async function deviceToken(): Promise<string> {
   if (!API_URL) throw new ApiUnavailable('No API URL');
+  answerLinkOffer(); // a screen that needs an account: this install is not waiting to be linked
   // A registration under way (say, sync's after a 401) replaces the stored token: wait for it, so
   // the old, revoked one is not handed out. If it fails, whatever is stored is still the answer.
   if (registering) await registering.catch(() => {});
@@ -102,6 +117,101 @@ const zoneSender = createZoneSender({
 let started = false;
 let kick: (() => void) | null = null;
 
+type Engine = ReturnType<typeof createSync>;
+let engineCreated!: (engine: Engine) => void;
+let engineFailed!: () => void;
+/** The engine, once startSync has made it; rejects when sync could not start this session. */
+const engineReady = new Promise<Engine>((resolve, reject) => {
+  engineCreated = resolve;
+  engineFailed = () => reject(new ApiUnavailable('Sync is not running'));
+});
+engineReady.catch(() => {}); // nobody may be waiting
+
+// ── The first-run offer to link ("Already use Kalo on another device?") ──────
+// Answered once (stored), by "Not now", by linking, by any local write or by a screen asking for
+// the token. While it is open, sync does not run (`kick` below): no registration, no upload.
+const OFFER_ANSWERED = 'kalo.link.offer';
+let offer = false;
+const offerListeners = new Set<() => void>();
+const setOffer = (open: boolean) => {
+  if (offer === open) return;
+  offer = open;
+  for (const listener of offerListeners) listener();
+};
+
+/** Whether Home shows the first-run offer to link this install to another device's account. */
+export function useLinkOffer(): boolean {
+  return useSyncExternalStore(
+    (listener) => {
+      offerListeners.add(listener);
+      return () => offerListeners.delete(listener);
+    },
+    () => offer,
+    () => false,
+  );
+}
+
+/** Closes the first-run offer for good ("Not now", or the install is being used on its own); sync starts. */
+export function answerLinkOffer(): void {
+  if (!offer) return;
+  setOffer(false);
+  void AsyncStorage.setItem(OFFER_ANSWERED, '1').catch(() => {});
+  kick?.();
+}
+
+/**
+ * Moves this install onto the account `token` opens. In this order, each step awaited: the engine
+ * stores an empty outbox, no cursor and primed (relink); the local data is cleared (nothing is sent);
+ * the current token is kept as the previous one (so its account can be opened again); the new token
+ * is stored, LAST. A failure before that leaves the install on its own token, with nothing local,
+ * pulling its account again. Then sync pulls the account from the start.
+ */
+async function switchAccount(token: string, sent: string | null, stored: string | null): Promise<void> {
+  const engine = await engineReady;
+  // A registration under way would store its token over this one.
+  if (registering) await registering.catch(() => {});
+  await engine.relink(async () => {
+    await clearLocalData();
+    const current = await loadToken();
+    if (current && current !== token) await savePreviousToken(current);
+    await adoptToken(token, sent, stored);
+  });
+  setOffer(false);
+  void AsyncStorage.setItem(OFFER_ANSWERED, '1').catch(() => {});
+  void zoneSender.send();
+}
+
+/**
+ * Links this install to the account of the device that showed `code` (POST /api/v1/devices/link)
+ * and switches to it (switchAccount: the data on this install is replaced by that account's).
+ * Rejects with linkApi's errors (BadRequest for a wrong, expired or used code); nothing on the
+ * install changes then.
+ */
+export async function linkThisDevice(code: string): Promise<void> {
+  if (!API_URL) throw new ApiUnavailable('No API URL');
+  await engineReady;
+  const timezone = currentTimezone();
+  const linked = await linkDevice(API_URL, { code, platform, appVersion: Constants.expoConfig?.version, timezone });
+  await switchAccount(linked.token, timezone, linked.timezone);
+}
+
+/** Whether this install was linked away from an account it can switch back to. */
+export async function hasPreviousAccount(): Promise<boolean> {
+  return (await loadPreviousToken().catch(() => null)) !== null;
+}
+
+/**
+ * Opens again the account this install had before its last link (its token was kept), replacing
+ * the data on this install with that account's. The account being left becomes the previous one,
+ * so this can be undone the same way. Rejects when there is none.
+ */
+export async function switchToPreviousAccount(): Promise<void> {
+  if (!API_URL) throw new ApiUnavailable('No API URL');
+  const previous = await loadPreviousToken();
+  if (!previous) throw new ApiUnavailable('No previous account');
+  await switchAccount(previous, null, null);
+}
+
 /** Syncs now (when sync is running): after a 401 elsewhere, this registers again the way sync does. */
 export function syncNow(): void {
   kick?.();
@@ -123,6 +233,14 @@ export function startSync(): void {
       // The bundled database is loaded only when a pulled bookmark needs its food.
       findFood: async (id) => (await loadFoods()).foods.find((food) => food.id === id) ?? null,
     });
+    const [hasToken, primed, answered] = await Promise.all([
+      loadToken().then((t) => t !== null, () => true), // unreadable: not a new install
+      AsyncStorage.getItem('sync:primed').catch(() => '1'),
+      AsyncStorage.getItem(OFFER_ANSWERED).catch(() => '1'),
+    ]);
+    const own = ownData();
+    setOffer(shouldOfferLink({ hasToken, primed: primed === '1', ownData: own.entries > 0 || own.other, answered: answered !== null }));
+
     const engine = createSync({
       ...local,
       push: async (body) => {
@@ -138,14 +256,21 @@ export function startSync(): void {
       storage: { get: (key) => AsyncStorage.getItem(key), set: (key, value) => AsyncStorage.setItem(key, value) },
     });
 
-    attachEngine(engine.markDirty); // replays what was written while the data was loading
-    kick = engine.kick;
-    engine.kick();
+    kick = () => {
+      if (!offer) engine.kick();
+    };
+    // Replays what was written while the data was loading. A local write answers the offer to link.
+    attachEngine((table, key, deleted) => {
+      answerLinkOffer();
+      engine.markDirty(table, key, deleted);
+    });
+    engineCreated(engine);
+    kick();
     void zoneSender.send();
     AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
-      engine.kick();
+      kick?.();
       void zoneSender.send(); // the phone may have changed zone while away
     });
-  })().catch(() => {}); // sync is not running this session; the app is unaffected
+  })().catch(() => engineFailed()); // sync is not running this session; the app is unaffected
 }

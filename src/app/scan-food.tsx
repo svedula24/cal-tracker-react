@@ -14,7 +14,7 @@ import { ComingSoon, goBack, PushedScreen } from '@/components/Screen';
 import type { Food } from '@/data/foods';
 import { isUpcE, lookupBarcode, upcEToUpcA } from '@/lib/barcodeApi';
 import { API_URL } from '@/lib/config';
-import { loadToken } from '@/lib/identity';
+import { deviceToken } from '@/lib/sync';
 import { tokens } from '@/lib/tokens';
 import type { CameraProblem } from '@/lib/webBarcode';
 
@@ -80,8 +80,10 @@ function useLookup(baseUrl: string) {
       setPhase({ kind: 'looking', code });
       let next: Phase;
       try {
-        // The app registers with the server in the background (src/lib/sync); until then there is no token.
-        const token = await loadToken();
+        // This install's token, registering now if it has none (a new install holds off registering
+        // while it offers to link to another device: scanning means it is used on its own). Null when
+        // the server cannot be reached to register.
+        const token = await deviceToken().catch(() => null);
         if (!token) {
           next = { kind: 'no_token', code };
         } else {

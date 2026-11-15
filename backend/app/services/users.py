@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import uuid
 from datetime import timedelta
 
 from sqlalchemy import func, or_, select, update
@@ -52,12 +53,18 @@ def register_device(session: Session, label: str | None, timezone: str | None = 
     `timezone`: an IANA name. None or a name this server does not know is UTC.
     """
     user = User(timezone=timezone if timezone is not None and known_timezone(timezone) else "UTC")
-    token = new_token()
     session.add(user)
     session.flush()  # inserts the user, so its generated id can go in the token row
-    session.add(UserToken(user_id=user.id, token_hash=hash_token(token), label=label))
+    return user, issue_token(session, user.id, label)
+
+
+def issue_token(session: Session, user_id: uuid.UUID, label: str | None) -> str:
+    """A new device token for the user (returned in the clear, stored hashed). Revocable like any other:
+    set revoked_at on its user_tokens row. Does not commit."""
+    token = new_token()
+    session.add(UserToken(user_id=user_id, token_hash=hash_token(token), label=label))
     session.flush()
-    return user, token
+    return token
 
 
 def is_integration(label: str | None) -> bool:

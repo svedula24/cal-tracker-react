@@ -1,5 +1,5 @@
 import { router } from 'expo-router';
-import { ChevronRight, Footprints, MessageSquare, Sparkles } from 'lucide-react-native';
+import { ChevronRight, Footprints, MessageSquare, Smartphone, Sparkles } from 'lucide-react-native';
 import { useState } from 'react';
 import { ScrollView, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -207,6 +207,18 @@ function GoalsForm({ goals }: { goals: Goals }) {
               <View className="ml-3 flex-1">
                 <Text className="text-[16px] font-semibold text-foreground">Apple Health steps</Text>
                 <Text className="mt-[2px] text-[13px] text-muted">Send your steps with an iPhone Shortcut</Text>
+              </View>
+              <ChevronRight size={20} color={c.muted} />
+            </Card>
+          </Press>
+        ) : null}
+        {API_URL ? (
+          <Press accessibilityRole="button" accessibilityLabel="Link another device" onPress={() => router.push('/link-device')} scale={0.98}>
+            <Card className="flex-row items-center px-5 py-4">
+              <Smartphone size={18} color={c.foreground} />
+              <View className="ml-3 flex-1">
+                <Text className="text-[16px] font-semibold text-foreground">Link another device</Text>
+                <Text className="mt-[2px] text-[13px] text-muted">Use Kalo on another phone or the web app</Text>
               </View>
               <ChevronRight size={20} color={c.muted} />
             </Card>

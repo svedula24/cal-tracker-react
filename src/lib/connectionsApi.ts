@@ -36,6 +36,14 @@ export class TooManyRequests extends ApiUnavailable {
   }
 }
 
+/** 400: the server refused the request (for linking a device, a wrong, expired or used code). */
+export class BadRequest extends ApiUnavailable {
+  constructor() {
+    super('The server answered 400');
+    this.name = 'BadRequest';
+  }
+}
+
 /** 422: the server refused the request's content (for patchMe, a timezone it does not know). */
 export class Unprocessable extends ApiUnavailable {
   constructor() {
@@ -62,13 +70,13 @@ const abortError = (signal: AbortSignal): unknown =>
   signal.reason ?? Object.assign(new Error('The operation was aborted'), { name: 'AbortError' });
 
 /**
- * One request with the bearer token; the parsed JSON body of a 2xx answer (null for a 204 or when
- * `allow404` lets a 404 through). A request still running after `timeoutMs` is ApiUnavailable.
- * Also used by src/lib/integrationsApi.ts.
+ * One request with the bearer token (null: without one); the parsed JSON body of a 2xx answer (null
+ * for a 204 or when `allow404` lets a 404 through). A request still running after `timeoutMs` is
+ * ApiUnavailable. Also used by ./linkApi.ts and ./integrationsApi.ts.
  */
 export async function call(
   baseUrl: string,
-  token: string,
+  token: string | null,
   method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   path: string,
   payload: unknown,
@@ -82,7 +90,8 @@ export async function call(
   const stop = () => timeout.abort();
   signal?.addEventListener('abort', stop);
   try {
-    const headers: Record<string, string> = { Accept: 'application/json', Authorization: `Bearer ${token}` };
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (token !== null) headers.Authorization = `Bearer ${token}`;
     if (payload !== undefined) headers['Content-Type'] = 'application/json';
     // `fetch` is looked up at call time, so a missing global fetch is ApiUnavailable too.
     const res = await (opts.fetch ?? fetch)(`${baseUrl.replace(/\/+$/, '')}${path}`, {
@@ -92,6 +101,7 @@ export async function call(
       body: payload === undefined ? undefined : JSON.stringify(payload),
     });
     if (res.status === 401) throw new SyncUnauthorized();
+    if (res.status === 400) throw new BadRequest();
     if (res.status === 429) throw new TooManyRequests();
     if (res.status === 422) throw new Unprocessable();
     if (res.status === 409) throw new Conflict();
