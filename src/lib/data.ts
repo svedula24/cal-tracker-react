@@ -48,7 +48,7 @@ export type Entry = {
   foodId?: string;
   foodName?: string; // the database name, even after the entry is renamed
   photo?: string;
-  // Demo data created at first launch: never synced or shown under "Recent".
+  // Demo data created at first launch: never synced.
   // Cleared by any edit (the entry is then the user's); never set by `add`.
   seed?: boolean;
   // `seed` was set by migrateEntries' guess (stored before the flag existed), not by the seeding:
