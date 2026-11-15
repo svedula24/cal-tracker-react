@@ -150,7 +150,7 @@ function replaceWarning(): string {
 }
 
 function EnterCode() {
-  // A new install waiting on the first-run offer has only demo data: nothing to warn about.
+  // A new install waiting on the first-run offer has no data of its own: nothing to warn about.
   const fresh = useLinkOffer();
   const [typed, setTyped] = useState('');
   const [state, setState] = useState<LinkState>({ kind: 'idle' });

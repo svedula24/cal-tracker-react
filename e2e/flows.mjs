@@ -1,8 +1,14 @@
 // Kalo verification spec, consumed by e2e/verify.mjs (`npm run verify`).
-// Flows share one browser page and run in order: Home's seed checks first (the
-// first launch must match the reference screenshots), then the logging screens.
+// Flows share one browser page and run in order, on test data (e2e/fixture.mjs, written before
+// the app loads: `setup`): Home's checks first (the test data's day matches the reference
+// screenshots), then the logging screens. The app itself starts empty: the first flow checks that
+// on a page of its own, without the test data.
+import { DEFAULT_GOAL, PAST_DAYS, referenceDay } from './fixture.mjs';
 import * as goals from './flows/goals.mjs';
 import * as logging from './flows/logging.mjs';
+
+/** Called by e2e/verify.mjs once, before the shared page loads anything. */
+export const setup = (page) => referenceDay(page);
 
 const go = async (page, url, wait) => {
   await page.goto(url, { waitUntil: 'networkidle' });
@@ -20,13 +26,89 @@ const yesterday = () => {
   return `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${d.getDate()}`;
 };
 
+const stored = (page, key) => page.evaluate((k) => JSON.parse(localStorage.getItem(k) ?? 'null'), key);
+
 const home = [
   {
-    name: 'home: first launch matches the reference numbers',
+    name: 'a new install starts empty: no entries, saved foods or day logs, only the default goal',
+    run: async (page, base, { wait }) => {
+      const fresh = await page.context().browser().newPage({ viewport: { width: 402, height: 874 }, serviceWorkers: 'block' });
+      try {
+        await go(fresh, base + '/', wait);
+        await must(fresh, 'Tap + to log your first meal of the day.', 'empty today');
+        await must(fresh, '/3027', "the default goal's budget");
+        await fresh.getByLabel('0 day streak', { exact: true }).waitFor({ timeout: 3000 });
+        await go(fresh, base + '/saved-foods', wait); // loads the saved foods too (Home does not)
+        if ((await fresh.getByRole('button', { name: /^Remove .+/ }).count()) > 0) throw new Error('a new install has saved foods');
+        for (const key of ['entries', 'savedFoods', 'dayLogs']) {
+          const items = await stored(fresh, key);
+          if (!Array.isArray(items) || items.length) throw new Error(`stored ${key} is ${JSON.stringify(items)?.slice(0, 200)}, not []`);
+        }
+        const rows = await stored(fresh, 'goals');
+        if (JSON.stringify(rows) !== JSON.stringify([DEFAULT_GOAL])) throw new Error(`stored goals are ${JSON.stringify(rows)}`);
+      } finally {
+        await fresh.close();
+      }
+    },
+  },
+  {
+    name: "an older version's demo entries are dropped at load (guessed ones while they still look like the demo); the user's are kept",
+    run: async (page, base, { wait }) => {
+      const old = await page.context().browser().newPage({ viewport: { width: 402, height: 874 }, serviceWorkers: 'block' });
+      try {
+        await go(old, base + '/', wait);
+        const mine = await old.evaluate(() => {
+          const now = new Date();
+          const p = (n) => String(n).padStart(2, '0');
+          const date = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
+          const at = (h) => new Date(`${date}T${p(h)}:00:00`).toISOString();
+          const nutrients = { calories: 100, protein: 1, carbs: 1, fat: 1, fiber: 0, sugar: 0, sodium: 0 };
+          const entry = (name, h, flags) => ({ id: crypto.randomUUID(), date, time: at(h), name, servings: 1, nutrients, ...flags });
+          const mine = [
+            entry('My soup', 12, { seed: false }),
+            // Guessed demo at an earlier load, but renamed since: it may be the user's, so it is kept.
+            entry('Grandma soup', 13, { seed: true, seedGuessed: true }),
+          ];
+          const demo = [
+            entry('Honey', 8, { seed: true }), // seeded by an older version
+            entry('Sandwich', 9, { seed: true, seedGuessed: true }), // tagged by the guess at an earlier load
+            entry('Whole Milk Latte', 10, {}), // from before the flag: no food, so guessed demo now
+          ];
+          localStorage.setItem('entries', JSON.stringify([...demo, ...mine]));
+          return mine;
+        });
+        await go(old, base + '/', wait);
+        await btn(old, 'Edit My soup').waitFor({ timeout: 5000 });
+        await btn(old, 'Edit Grandma soup').waitFor({ timeout: 5000 });
+        await old.getByLabel('1 day streak', { exact: true }).waitFor({ timeout: 3000 }); // the demo entries do not count
+        for (const name of ['Honey', 'Sandwich', 'Whole Milk Latte']) if ((await btn(old, `Edit ${name}`).count()) > 0) throw new Error(`demo entry ${name} still shown`);
+        const left = await stored(old, 'entries');
+        if (JSON.stringify(left) !== JSON.stringify(mine)) throw new Error(`stored entries are ${JSON.stringify(left).slice(0, 300)}`);
+        // Editing the kept guessed entry makes it the user's: no longer flagged, so it syncs, and it is
+        // never taken for demo again, even when renamed to a demo name with one serving.
+        await btn(old, 'Edit Grandma soup').click();
+        await old.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+        await old.getByLabel('Food name').fill('Honey');
+        await btn(old, 'Done').click();
+        await old.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+        await old.reload({ waitUntil: 'networkidle' });
+        await wait(800);
+        await btn(old, 'Edit Honey').waitFor({ timeout: 5000 });
+        const edited = (await stored(old, 'entries')).find((e) => e.name === 'Honey');
+        if (!edited || edited.seed !== false || 'seedGuessed' in edited) throw new Error(`the edited entry is still flagged: ${JSON.stringify(edited)}`);
+      } finally {
+        await old.close();
+      }
+    },
+  },
+  {
+    name: "home: the test data's day matches the reference numbers",
     run: async (page, base, { wait }) => {
       await go(page, base + '/', wait);
-      for (const t of ['2543', '/3429', '+200', '+202', '174', '322', '/433g', '59', 'Honey']) await must(page, t, 'seed');
+      for (const t of ['2543', '/3429', '+200', '+202', '174', '322', '/433g', '59', 'Honey']) await must(page, t, 'reference day');
       await btn(page, 'Daily score 89').waitFor({ timeout: 3000 });
+      // The streak is computed from the entries: the test data logs today and the PAST_DAYS before it.
+      await page.getByLabel(`${PAST_DAYS + 1} day streak`, { exact: true }).waitFor({ timeout: 3000 });
     },
   },
   {
@@ -193,7 +275,6 @@ const home = [
     },
   },
   {
-    // Must stay after the fresh-install check: it logs (and then deletes) a food of the user's own.
     name: "home: switching days shows each day's entries; a food logged on a past day appears there",
     run: async (page, base, { wait }) => {
       await go(page, base + '/', wait);
@@ -243,8 +324,7 @@ const home = [
         await wait(500);
         await expectDay('Banana, raw', 'Honey', 'back on yesterday');
       } finally {
-        // Delete it again, also after a failed check: a user entry would drop the demo data the
-        // later flows expect.
+        // Delete it again, also after a failed check, so the later flows see the test data as it was.
         await past.click();
         await wait(400);
         if ((await count('Banana, raw')) > 0) {

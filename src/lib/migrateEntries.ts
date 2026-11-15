@@ -3,6 +3,7 @@
 import type { Entry } from '@/lib/data';
 
 // Relative with the .ts extension so Node's test runner can import it as well.
+import { looksLikeDemoEntry } from './demoData.ts';
 import { isUuid, uuid } from './uuid.ts';
 
 /**
@@ -11,15 +12,12 @@ import { isUuid, uuid } from './uuid.ts';
  * travels in the Nutrition route's `id` parameter, so the one stale reference
  * possible is a web URL opened before the upgrade, which shows "Entry not found".
  *
- * (2) An entry from before the `seed` flag is tagged: demo data when it has no
- * food or is not measured in grams, else the user's. This is a guess from the
- * entry's shape, since older data did not record where an entry came from:
- * - every entry logged from a food uses the gram measure, and so does a demo
- *   entry of a past day once it was edited (Done rewrites its measure to grams),
- *   so both are the user's;
- * - a hand-written entry has no food, and those exist only as demo data. One
- *   the user edited before this flag existed is still tagged demo, until it is
- *   edited again.
+ * (2) An entry from before the `seed` flag is tagged: demo data (which older
+ * versions seeded at first launch) when it has no food or is not measured in
+ * grams, else the user's. A guess from the entry's shape, since older data did
+ * not record where an entry came from: every entry logged from a food uses the
+ * gram measure, and a hand-written entry existed only as demo data. Every entry
+ * written since carries the flag (false), so the guess only sees old data.
  *
  * Returns the same array when nothing changes, so storage isn't rewritten.
  */
@@ -35,7 +33,7 @@ export function migrateEntries(items: Entry[]): Entry[] {
       ...e,
       id: reId ? uuid() : e.id,
       seed,
-      // Only a guess: it may be a hand-written entry the user edited, so dropDemoEntries keeps it.
+      // Recorded as a guess: dropDemoEntries drops it only while it still looks like the demo.
       ...(tag && seed ? { seedGuessed: true } : {}),
     };
   });
@@ -43,15 +41,15 @@ export function migrateEntries(items: Entry[]): Entry[] {
 }
 
 /**
- * Demo entries are dropped once the user has any entry of their own (logged on the phone, or pulled
- * from the server, such as an import): from then on they only add made-up food to real days. They
- * were never sent, so there is nothing to delete on the server. Only entries the app seeded as demo
- * are dropped, never one tagged by migrateEntries' guess (`seedGuessed`), which may be the user's.
- * The trade-off: an install from before the flag keeps its old demo entries (the user can delete them).
- * Runs at load, after migrateEntries, so the list is saved once. Same array when nothing changes.
+ * Drops the demo entries: the user decided that an install shows only their own data, the same as
+ * the server. Every entry the app seeded (`seed` true) goes; one migrateEntries only guessed was
+ * demo (`seedGuessed`) goes only while it still looks like the demo (a demo name and the seed's
+ * servings: looksLikeDemoEntry), so one the user renamed or changed is kept. Demo entries were never
+ * sent (entryToLog returns null for them), so there is nothing to delete on the server, and this
+ * reports nothing to sync. Runs at load, after migrateEntries, so the list is saved once. Same array
+ * when nothing changes.
  */
 export function dropDemoEntries(items: Entry[]): Entry[] {
-  const isDemo = (e: Entry) => e.seed === true && e.seedGuessed !== true;
-  if (!items.some(isDemo) || !items.some((e) => e.seed !== true)) return items;
-  return items.filter((e) => !isDemo(e));
+  const isDemo = (e: Entry) => e.seed === true && (e.seedGuessed !== true || looksLikeDemoEntry(e));
+  return items.some(isDemo) ? items.filter((e) => !isDemo(e)) : items;
 }

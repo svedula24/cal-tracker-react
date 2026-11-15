@@ -73,9 +73,8 @@ export function createLocal(deps: {
     }
   };
 
-  // Demo ENTRIES are left out (entryToLog returns null for them). The seeded goals, day logs
-  // (steps) and saved foods are sent on purpose: the user chose to sync them now although they
-  // still hold the demo values (Architecture Decision Log, record 22).
+  // Demo entries an older version seeded are left out (entryToLog returns null for them; they are
+  // dropped at load anyway). A new install's default goal is sent like any goal row.
   const all = (): { table: Table; key: string }[] => {
     const out: { table: Table; key: string }[] = [];
     for (const e of entries.items) if (entryToLog(e)) out.push({ table: 'food_logs', key: e.id });

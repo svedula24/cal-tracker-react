@@ -234,22 +234,9 @@ export const flows = [
   {
     name: 'nutrition (edit): rename Honey -> "Raw Honey" persists',
     run: async (page, base, { wait }) => {
-      // A hand-written entry in servings, the user's (as a synced or imported one is). Not the demo
-      // Honey: demo entries are dropped at load once the user has entries, as earlier flows made.
+      // Today's Honey in the test data (e2e/fixture.mjs): a hand-written entry in servings, as a
+      // synced or imported one is.
       await go(page, base + '/', wait);
-      await page.evaluate(() => {
-        const now = new Date();
-        const p = (n) => String(n).padStart(2, '0');
-        const date = `${now.getFullYear()}-${p(now.getMonth() + 1)}-${p(now.getDate())}`;
-        const entries = JSON.parse(localStorage.getItem('entries') ?? '[]');
-        entries.push({
-          id: crypto.randomUUID(), date, time: now.toISOString(), name: 'Honey', servings: 1, seed: false,
-          nutrients: { calories: 64, protein: 0, carbs: 17, fat: 0, fiber: 0, sugar: 17, sodium: 1 },
-        });
-        localStorage.setItem('entries', JSON.stringify(entries));
-      });
-      await page.reload({ waitUntil: 'networkidle' });
-      await wait(600);
       await page.getByText('Honey', { exact: true }).first().click();
       await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
       // Opened by URL: the form must wait for storage, not start from empty defaults.
@@ -415,7 +402,8 @@ export const flows = [
       await page.getByText('1 banana = 126 g · 252 g in all', { exact: true }).waitFor({ timeout: 2000 });
       await btn(page, 'Done').click();
 
-      // Logged as 2 bananas; marked the user's, so the load-time guess cannot take it for demo data.
+      // Logged as 2 bananas; marked the user's (seed false), so the load-time guess for entries from
+      // before that flag cannot take it for old demo data.
       await btn(page, `Edit ${NAME}`).waitFor({ timeout: 5000 });
       await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
       const card = btn(page, `Edit ${NAME}`);

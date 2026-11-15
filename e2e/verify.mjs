@@ -19,7 +19,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { flows, routes } from './flows.mjs';
+import { flows, routes, setup } from './flows.mjs';
 
 const OUT = path.resolve('e2e/shots');
 fs.mkdirSync(OUT, { recursive: true });
@@ -77,6 +77,8 @@ try {
   process.exit(2);
 }
 const page = await browser.newPage({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, serviceWorkers: 'block' });
+// The clone's own test data, written before the app loads (optional).
+if (setup) await setup(page);
 page.on('pageerror', (e) => errors.push(`[${where}] pageerror: ${e.message}`));
 page.on('console', (m) => {
   // Resource errors carry the failing URL in location(), not in the text.

@@ -63,7 +63,7 @@ export const flows = [
     run: async (page, base, { wait }) => {
       await go(page, base + '/goals', wait);
       await field(page, 'Calories').waitFor({ timeout: 5000 });
-      if ((await page.getByLabel('Goal source: manual').count()) === 0) throw new Error('the seeded goal is not shown as manual');
+      if ((await page.getByLabel('Goal source: manual').count()) === 0) throw new Error('the default goal is not shown as manual');
       // Values the server would reject (and sync would drop) can't be saved: steps a whole number up
       // to 2^31 - 1, every amount up to 1e9. "82,5" is 82.5, not 825.
       const saveDisabled = async () => (await btn(page, 'Save goals').getAttribute('aria-disabled')) === 'true';
@@ -142,17 +142,7 @@ export const flows = [
     name: "goals: a change today leaves yesterday's budget and week-strip ring as they were",
     run: async (page, base, { wait }) => {
       const y = yesterday();
-      // Food eaten yesterday, the user's own: the demo entries are dropped at load once the user has
-      // entries (earlier flows logged some), so this flow brings its own.
-      await go(page, base + '/', wait);
-      await page.evaluate((date) => {
-        const entries = JSON.parse(localStorage.getItem('entries') ?? '[]');
-        entries.push({
-          id: crypto.randomUUID(), date, time: new Date(`${date}T12:30:00`).toISOString(), name: 'Lentil soup',
-          servings: 1, seed: false, nutrients: { calories: 1200, protein: 60, carbs: 150, fat: 30, fiber: 20, sugar: 10, sodium: 900 },
-        });
-        localStorage.setItem('entries', JSON.stringify(entries));
-      }, y.key);
+      // Food eaten yesterday: the test data's (e2e/fixture.mjs).
       await go(page, base + '/', wait);
       await btn(page, y.label).click();
       await wait(400);

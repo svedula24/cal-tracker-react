@@ -67,7 +67,7 @@ export function normaliseCode(typed: string): string | null {
 /**
  * Whether a new install should offer "Already use Kalo on another device?" at its first launch:
  * it has no token (has not registered), has never synced (`primed`), has no data of its own (entries,
- * or goals, day logs or saved foods changed from the demo), and the offer was not answered. While
+ * saved foods, day logs, or goals other than the default), and the offer was not answered. While
  * offered, sync holds off registering (src/lib/sync/index.ts), and linking wipes without asking.
  */
 export function shouldOfferLink(state: { hasToken: boolean; primed: boolean; ownData: boolean; answered: boolean }): boolean {

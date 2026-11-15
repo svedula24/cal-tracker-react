@@ -20,7 +20,7 @@ import { Text, TextInput, View } from 'react-native';
 import { Press } from '@/components/Press';
 import { Ring } from '@/components/Ring';
 import { Card, cardShadow } from '@/components/Screen';
-import { STREAK_DAYS } from '@/lib/data';
+import { useStreak } from '@/lib/data';
 import { createDraftBox, parseWhole, stepsToSave, workoutToSave } from '@/lib/dayDraft';
 import { type DayType, type Nutrients, roundHalfAway } from '@/lib/nutrition';
 import { tokens } from '@/lib/tokens';
@@ -43,14 +43,15 @@ export function ScorePill({ score }: { score: number }) {
 }
 
 export function StreakPill() {
+  const days = useStreak();
   return (
     <View
-      accessibilityLabel={`${STREAK_DAYS} day streak`}
+      accessibilityLabel={`${days} day streak`}
       className="ml-2 h-[33px] flex-row items-center rounded-full bg-card px-[13px]"
       style={cardShadow}
     >
       <Flame size={19} color="#F59E2D" fill="#F7A33A" />
-      <Text className="ml-[6px] text-[18px] font-semibold text-foreground">{STREAK_DAYS}</Text>
+      <Text className="ml-[6px] text-[18px] font-semibold text-foreground">{days}</Text>
     </View>
   );
 }

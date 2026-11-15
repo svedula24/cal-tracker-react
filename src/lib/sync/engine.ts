@@ -55,7 +55,7 @@ export function createSync(opts: {
   tombstone: (table: Table, key: string) => object;
   /** The key of a pulled row. */
   keyOf: (table: Table, row: object) => string;
-  /** Every local row that should be on the server (no demo entries). */
+  /** Every local row that should be on the server (no old demo entries). */
   all: () => { table: Table; key: string }[];
   /** Writes pulled rows into the local store. Must not mark them dirty. */
   apply: (changes: SyncChanges) => void;

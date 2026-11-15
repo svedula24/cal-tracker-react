@@ -300,7 +300,6 @@ const iso = (s) => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(s) && !Nu
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const NUTRIENTS = 'calories,carbs_g,fat_g,fiber_g,protein_g,sodium_mg,sugar_g';
 const LOG_KEYS = 'deleted_at,fdc_id,food_name,food_values,id,log_date,logged_at,name,quantity,unit,updated_at,values';
-const SEED_SAVED = '169640,170894,2708118'; // src/lib/seedIds.ts: honey, Greek yogurt, Clif Bar
 const savedIds = (list) => list.map((r) => r.fdc_id).sort((a, b) => a - b).join(',');
 const show = (x) => JSON.stringify(x);
 const nutrition = () => page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
@@ -342,19 +341,13 @@ try {
     first.body.changes.goals?.length === 1 && goal.effective_date === '2020-01-01' && goal.calories === 3027 && goal.protein_g === 182 && goal.steps === 10000 && goal.goal === 'gain' &&
       goal.source === 'manual' && goal.workout_kcal === 0 && goal.active_rest_kcal === 0 &&
       keys(goal) === 'active_rest_kcal,calories,carbs_g,deleted_at,effective_date,fat_g,fiber_g,goal,protein_g,sodium_mg,source,steps,sugar_g,updated_at,workout_kcal' && iso(goal.updated_at) && goal.deleted_at === null,
-    `it uploads the goals as one row in force since 2020-01-01`, `sent: ${show(first.body.changes.goals)}`,
+    `a new install uploads the default goal as one row in force since 2020-01-01`, `sent: ${show(first.body.changes.goals)}`,
   );
-  const steps = first.body.changes.daily_activity ?? [];
   check(
-    steps.length === 6 && steps.find((r) => r.activity_date === today)?.steps === 5782 && steps.every((r) => keys(r) === 'activity_date,day_type,deleted_at,steps,updated_at,workout_kcal' && r.day_type === null && r.workout_kcal === null && iso(r.updated_at) && r.deleted_at === null),
-    `it uploads the six day logs as daily_activity (steps, no day type or workout calories), without the rollover`, `sent: ${show(steps)}`,
+    (first.body.changes.daily_activity ?? []).length === 0 && (first.body.changes.saved_foods ?? []).length === 0 && (first.body.changes.food_logs ?? []).length === 0,
+    'and nothing else: a new install has no entries, day logs or saved foods (no demo data)', `sent: ${show(first.body.changes)}`,
   );
-  const saved = first.body.changes.saved_foods ?? [];
-  check(
-    savedIds(saved) === SEED_SAVED && saved.every((r) => keys(r) === 'deleted_at,fdc_id,saved_at,updated_at' && iso(r.saved_at) && iso(r.updated_at) && r.deleted_at === null),
-    `it uploads the three demo saved foods`, `sent: ${show(saved)}`,
-  );
-  check((first.body.changes.food_logs ?? []).length === 0, `it uploads no demo entries`, `sent: ${(first.body.changes.food_logs ?? []).length} food logs`);
+  check((await stored('entries')) === '[]' && (await stored('savedFoods')) === '[]' && (await stored('dayLogs')) === '[]', 'a new install stores no entries, saved foods or day logs');
   check((await stored('sync:primed')) === '1', 'the first upload is recorded (sync:primed), so it happens once');
 
   await page.getByLabel('Search foods').pressSequentially('banana', { delay: 30 });
@@ -424,36 +417,116 @@ try {
   const deleted = await pushed('the deleted banana to be pushed', 'food_logs', (r) => r.id === logged.id, from);
   check(keys(deleted) === 'deleted_at,id,updated_at' && iso(deleted.deleted_at) && iso(deleted.updated_at), `deleting the entry sends a tombstone: its id, updated_at and deleted_at`, `sent: ${show(deleted)}`);
 
-  // ── Sync: demo entries. Deleting one sends nothing; editing one makes it the user's, and it is sent ──
+  // ── Old demo entries (seeded by an older version, never sent) are dropped at load and never sent ──
   await settled();
+  const demoIds = await page.evaluate((date) => {
+    const n = { calories: 64, protein: 0, carbs: 17, fat: 0, fiber: 0, sugar: 17, sodium: 1 };
+    const time = new Date().toISOString();
+    const legacy = [
+      { id: crypto.randomUUID(), date, time, name: 'Honey', servings: 1, nutrients: n, seed: true },
+      { id: crypto.randomUUID(), date, time, name: 'Sandwich', servings: 1, nutrients: n, seed: true, seedGuessed: true },
+      { id: crypto.randomUUID(), date, time, name: 'Whole Milk Latte', servings: 1, nutrients: n }, // no flag: guessed demo at load
+    ];
+    // The user's own entry typed in by hand (no food), as an import would store it: kept.
+    const mine = { id: crypto.randomUUID(), date, time, name: 'My oatmeal', servings: 1, nutrients: n, seed: false };
+    localStorage.setItem('entries', JSON.stringify([...JSON.parse(localStorage.getItem('entries') ?? '[]'), legacy[0], mine, ...legacy.slice(1)]));
+    return legacy.map((e) => e.id);
+  }, today);
+  const entriesBefore = JSON.parse(await stored('entries')).filter((e) => !demoIds.includes(e.id)).map((e) => e.id).join();
+  check(entriesBefore !== '', 'the device has an entry of the user\'s next to the old demo ones');
   from = api.requests.length;
-  await btn('Edit Honey').click(); // a demo entry: the server never had it
-  await nutrition();
-  await btn('More options').click();
-  await btn('Delete entry').click();
-  await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+  await open('/');
   await wait(3500); // longer than the 2 s push delay: proving that nothing is sent needs a wait
-  check(rows('food_logs', from).length === 0 && (await stored('sync:outbox')) === '{}', 'deleting a demo entry sends nothing to the server', `sent: ${show(rows('food_logs', from))}`);
-
-  from = api.requests.length;
-  await btn('Edit Sandwich').click(); // another demo entry, hand-written: no database food
-  await nutrition();
-  await btn('Done').click();
-  await home('Sandwich');
-  const mine = await pushed('the edited demo entry to be pushed', 'food_logs', (r) => r.name === 'Sandwich', from);
   check(
-    keys(mine) === LOG_KEYS && mine.fdc_id === null && mine.unit === 'serving' && mine.food_values === null && mine.deleted_at === null,
-    'a demo entry the user edits becomes theirs and is sent, as a custom entry in servings', `sent: ${show(mine)}`,
+    (await btn('Edit My oatmeal').count()) === 1 && (await btn('Edit Honey').count()) === 0 && (await btn('Edit Sandwich').count()) === 0 && (await btn('Edit Whole Milk Latte').count()) === 0,
+    'old demo entries in storage (seeded, guessed or untagged) are not shown on Home; the user\'s entry is',
   );
-  // Removed again, so the user's entries are as they were for the checks below.
+  const afterLoad = JSON.parse(await stored('entries'));
+  check(
+    afterLoad.every((e) => !demoIds.includes(e.id)) && afterLoad.map((e) => e.id).join() === entriesBefore,
+    'they are dropped from the device at load; every other entry is kept', `stored: ${show(afterLoad.map((e) => e.name))}`,
+  );
+  check(
+    rows('food_logs', from).every((r) => !demoIds.includes(r.id)) && (await stored('sync:outbox')) === '{}',
+    'dropping them sends nothing to the server (no tombstone, nothing queued)', `sent: ${show(rows('food_logs', from))}`,
+  );
+
+  // ── Old demo day logs and bookmarks (seeded by an older version, and synced) are removed once, with tombstones ──
+  await settled();
+  const demoDays = await page.evaluate(() => {
+    const pad = (x) => String(x).padStart(2, '0');
+    const key = (back) => {
+      const d = new Date();
+      d.setHours(12);
+      d.setDate(d.getDate() - back);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    };
+    // The seed of an install 20 days ago: 5,782 steps + 200 rollover that day, 4000 + b × 950 steps b days before.
+    const day = (back, steps, rollover = 0, extra = {}) => ({ id: key(back), steps, rollover, dayType: null, workoutKcal: null, ...extra });
+    const logs = [
+      day(19, 4950), // the user's: a seed value, but not on a seeded day
+      day(20, 5782, 200), // demo
+      day(21, 4950), // demo
+      day(22, 5900, 0, { dayType: 'workout' }), // demo steps on a day the user gave a day type: cleared, kept
+      day(23, 6850), // demo
+      day(24, 7801), // the user's: 7,800 would be the seed's
+    ];
+    localStorage.setItem('dayLogs', JSON.stringify([...JSON.parse(localStorage.getItem('dayLogs') ?? '[]'), ...logs]));
+    const food = (fdc, name, calories, portion) => ({
+      id: `usda:${fdc}`, name, per100g: { calories, protein: 1, carbs: 1, fat: 1, fiber: 0, sugar: 0, sodium: 0 }, portions: [portion],
+    });
+    const saved = [
+      { id: 'usda:169640', food: food(169640, 'Honey', 304, { label: '1 tbsp', grams: 21 }) }, // demo: no savedAt
+      { id: 'usda:170894', food: food(170894, 'Yogurt, Greek, plain, nonfat', 59, { label: '1 container', grams: 170 }) }, // demo
+      { id: 'usda:2708118', food: food(2708118, 'Nutrition bar (Clif Bar)', 346, { label: '1 bar', grams: 68 }), savedAt: new Date().toISOString() }, // saved by the user
+    ];
+    localStorage.setItem('savedFoods', JSON.stringify([...JSON.parse(localStorage.getItem('savedFoods') ?? '[]'), ...saved]));
+    localStorage.removeItem('kalo.demo.cleaned'); // as on an install from before the clean-up
+    return { kept: key(19), removed: [key(20), key(21), key(23)], cleared: key(22), nearMiss: key(24) };
+  });
   from = api.requests.length;
-  await btn('Edit Sandwich').click();
-  await nutrition();
-  await btn('More options').click();
-  await btn('Delete entry').click();
-  await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
-  const unmine = await pushed('its deletion to be pushed', 'food_logs', (r) => r.id === mine.id, from);
-  check(unmine.deleted_at !== null, 'once it is the user\'s, deleting it sends a tombstone');
+  await open('/');
+  await until('the demo day logs and bookmarks to be tombstoned', () => rows('daily_activity', from).filter((r) => r.deleted_at).length >= 3 && rows('saved_foods', from).filter((r) => r.deleted_at).length >= 2);
+  await settled();
+  const activity = rows('daily_activity', from);
+  const savedSent = rows('saved_foods', from);
+  check(
+    demoDays.removed.every((d) => activity.some((r) => r.activity_date === d && r.deleted_at)) && activity.filter((r) => r.deleted_at).length === 3,
+    'the old demo day logs are removed with a tombstone each, sent in the next sync', `sent: ${show(activity)}`,
+  );
+  const clearedRow = activity.find((r) => r.activity_date === demoDays.cleared);
+  check(
+    clearedRow && clearedRow.deleted_at === null && clearedRow.steps === 0 && clearedRow.day_type === 'workout',
+    "a demo day the user gave a day type is kept with its demo steps cleared (0), and sent so", `sent: ${show(clearedRow)}`,
+  );
+  check(
+    !activity.some((r) => r.activity_date === demoDays.kept || r.activity_date === demoDays.nearMiss) && !savedSent.some((r) => r.fdc_id === 2708118),
+    "the user's day logs (a seed value on another day, 7,801 steps) and the bookmark they saved are not touched", `sent: ${show({ activity, savedSent })}`,
+  );
+  check(
+    savedIds(savedSent.filter((r) => r.deleted_at)) === '169640,170894' && savedSent.length === 2,
+    'the two demo bookmarks (no savedAt) are removed with a tombstone each', `sent: ${show(savedSent)}`,
+  );
+  const logsNow = JSON.parse(await stored('dayLogs'));
+  const savedNow = JSON.parse(await stored('savedFoods'));
+  check(
+    demoDays.removed.every((d) => !logsNow.some((l) => l.id === d)) &&
+      logsNow.some((l) => l.id === demoDays.cleared && l.steps === 0 && l.rollover === 0 && l.dayType === 'workout') &&
+      logsNow.some((l) => l.id === demoDays.kept && l.steps === 4950) && logsNow.some((l) => l.id === demoDays.nearMiss && l.steps === 7801) &&
+      !savedNow.some((x) => x.id === 'usda:169640' || x.id === 'usda:170894') && savedNow.some((x) => x.id === 'usda:2708118') &&
+      (await stored('kalo.demo.cleaned')) === '1',
+    'on the device too: the demo rows are gone, the rest kept, and the clean-up is recorded (kalo.demo.cleaned)', `stored: ${show({ logsNow, saved: savedNow.map((x) => x.id) })}`,
+  );
+  await open('/saved-foods');
+  check(
+    (await btn('Remove Honey').count()) === 0 && (await btn('Remove Yogurt, Greek, plain, nonfat').count()) === 0 && (await btn('Remove Nutrition bar (Clif Bar)').count()) === 1,
+    'Saved foods no longer lists the demo bookmarks; the user\'s is still there',
+  );
+  from = api.requests.length;
+  await open('/');
+  await request('a sync after the reload', from);
+  await wait(2500);
+  check(rows('daily_activity', from).length === 0 && rows('saved_foods', from).length === 0, 'it runs once: the next start removes and sends nothing more');
 
   // ── Sync: a reload neither registers again nor uploads everything again ──
   await settled();
@@ -560,6 +633,22 @@ try {
 
   // ── Sync: a 401 (the server no longer knows the token) registers again and uploads everything ──
   await settled();
+  // Data the server does not have yet, written straight to the device (nothing reports it to sync):
+  // the upload after registering again must carry it, as it carries everything.
+  await page.evaluate(() => {
+    const pad = (x) => String(x).padStart(2, '0');
+    const key = (back) => {
+      const d = new Date();
+      d.setDate(d.getDate() - back);
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    };
+    const logs = [1, 2, 3].map((b) => ({ id: key(b), steps: 4000 + b * 950, rollover: 0, dayType: null, workoutKcal: null }));
+    localStorage.setItem('dayLogs', JSON.stringify([...JSON.parse(localStorage.getItem('dayLogs') ?? '[]'), ...logs]));
+    const honey = { id: 'usda:169640', name: 'Honey', per100g: { calories: 304, protein: 0.3, carbs: 82.4, fat: 0, fiber: 0.2, sugar: 82.1, sodium: 4 }, portions: [{ label: '1 tbsp', grams: 21 }] };
+    const yogurt = { id: 'usda:170894', name: 'Yogurt, Greek, plain, nonfat', per100g: { calories: 59, protein: 10.2, carbs: 3.6, fat: 0.39, fiber: 0, sugar: 3.24, sodium: 36 }, portions: [{ label: '1 container', grams: 170 }] };
+    localStorage.setItem('savedFoods', JSON.stringify([...JSON.parse(localStorage.getItem('savedFoods') ?? '[]'), { id: honey.id, food: honey }, { id: yogurt.id, food: yogurt }]));
+  });
+  const local = { dayLogs: JSON.parse(await stored('dayLogs')), saved: JSON.parse(await stored('savedFoods')) };
   from = api.requests.length;
   revoke();
   api.unknownZone = true; // and this time the server does not know the zone: it stores UTC
@@ -569,13 +658,25 @@ try {
   check(api.refused === 1 && api.devices.length === 2 && full.token === api.tokens[1], `a 401 from /sync makes the app register again and sync with the new token (401s: ${api.refused}, registrations: ${api.devices.length})`);
   const demo = new Set(JSON.parse(await stored('entries')).filter((e) => e.seed === true).map((e) => e.id));
   const logs = full.body.changes.food_logs ?? [];
+  const sentDays = (full.body.changes.daily_activity ?? []).map((r) => r.activity_date).sort().join();
+  const localSaved = local.saved.map((s) => Number(s.id.replace('usda:', ''))).sort((a, b) => a - b).join(',');
   check(
-    full.body.cursor === null && full.body.changes.goals.length === 1 && (full.body.changes.daily_activity ?? []).length === 6 && savedIds(full.body.changes.saved_foods ?? []) === SEED_SAVED,
+    full.body.cursor === null && full.body.changes.goals.length === 1 && local.dayLogs.length >= 3 && sentDays === local.dayLogs.map((d) => d.id).sort().join() &&
+      local.saved.length >= 2 && savedIds(full.body.changes.saved_foods ?? []) === localSaved,
     `it then uploads everything from the start: the goals, the day logs and the saved foods`, `sent: cursor ${show(full.body.cursor)}, ${show(Object.fromEntries(TABLES.map((t) => [t, full.body.changes[t]?.length ?? 0])))}`,
   );
-  // The demo entries were dropped at this load (the user has entries of their own); that they are
-  // never sent is checked above, on the first upload and on deleting one.
-  check(logs.length === 1 && logs[0].id === late.id && demo.size === 0, `with the user's one entry; no demo entries are left to send (${demo.size})`, `sent: ${logs.length} food logs`);
+  check(
+    (full.body.changes.daily_activity ?? []).every((r) => keys(r) === 'activity_date,day_type,deleted_at,steps,updated_at,workout_kcal' && iso(r.updated_at) && r.deleted_at === null) &&
+      (full.body.changes.saved_foods ?? []).every((r) => keys(r) === 'deleted_at,fdc_id,saved_at,updated_at' && iso(r.saved_at) && iso(r.updated_at) && r.deleted_at === null),
+    'day logs go as daily_activity (steps, day type, workout calories), without the rollover; saved foods as fdc_id and saved_at',
+    `sent: ${show({ daily_activity: full.body.changes.daily_activity, saved_foods: full.body.changes.saved_foods })}`,
+  );
+  // That demo entries are never sent is checked above, on the first upload and on dropping old ones.
+  const mineIds = JSON.parse(await stored('entries')).map((e) => e.id).sort().join();
+  check(
+    logs.length === 2 && logs.some((l) => l.id === late.id) && logs.map((l) => l.id).sort().join() === mineIds && demo.size === 0,
+    `with the user's entries (all that is stored); no demo entries are left to send (${demo.size})`, `sent: ${show(logs.map((l) => l.name))}`,
+  );
   await settled();
   const afterFull = api.requests.length;
   await open('/');
@@ -598,7 +699,7 @@ try {
   await btn('Connect ChatGPT').click();
   await page.getByText('Nothing is connected yet.').waitFor({ timeout: 5000 });
   check(api.listed.length >= 1 && api.listed.every((t) => t === token), 'the Goals row opens Connect ChatGPT, which lists the connections with the device token');
-  check((await page.getByTestId('demo-goals-note').count()) === 1, 'it says the goals are still the demo ones');
+  check((await page.getByTestId('demo-goals-note').count()) === 0 && (await page.getByText(/demo/).count()) === 0, 'it says nothing about demo goals (there is no demo data)');
   check((await page.getByText('not in the ChatGPT iPhone app', { exact: false }).count()) === 1, 'it says it works on ChatGPT web, not the iPhone app');
   await btn('Get code').click();
   await page.getByLabel('Code K7QM-4XPA').waitFor({ timeout: 5000 });
@@ -738,7 +839,7 @@ try {
   await web.getByText(/That code didn't work/).waitFor({ timeout: 5000 });
   check(api.links.length === 1 && api.links[0].code === 'ZZZZ-ZZZZ', 'a wrong code is sent once (normalised) and the screen says it did not work');
   await web.getByLabel('Link code').fill(LINK_CODES[0].toLowerCase().replace('-', ' '));
-  await btn('Link', web).click(); // a new install: no confirmation, it has only demo data
+  await btn('Link', web).click(); // a new install: no confirmation, it has no data of its own
   await web.getByText('Linked', { exact: true }).waitFor({ timeout: 10000 });
   const linkedToken = api.tokens.at(-1);
   const sentLink = api.links.at(-1);
@@ -748,12 +849,16 @@ try {
   );
   check(((await webStored('kalo.token')) ?? '').replace(/^"|"$/g, '') === linkedToken, 'the new install keeps the token the link answered with');
   const webSync = await until('the new install\'s first sync', () => api.requests.slice(syncsBefore).find((r) => r.token === linkedToken));
-  check(webSync.body.cursor === null && count(webSync.body.changes) === 0, 'its first sync pulls from the start and uploads nothing (no demo goals, steps or saved foods)', `sent: ${show(webSync.body)}`);
+  check(webSync.body.cursor === null && count(webSync.body.changes) === 0, 'its first sync pulls from the start and uploads nothing (not even the default goal)', `sent: ${show(webSync.body)}`);
   check(api.devices.length === devicesBefore, 'and it never registered an account of its own', `registrations: ${api.devices.length - devicesBefore}`);
   await btn('Done', web).click();
   await btn('Edit Server stew', web).waitFor({ timeout: 10000 });
-  check((await btn('Edit Whole Milk Latte', web).count()) === 0, "Home shows the account's food log, without the demo entries");
-  check(JSON.parse(await webStored('entries')).every((e) => e.id === stew.id), 'the demo data is gone from the device: only pulled entries are stored');
+  const webEntries = JSON.parse(await webStored('entries'));
+  check(
+    (await btn('Edit Server stew', web).count()) === 1 && (await web.getByText('Tap + to log your first meal of the day.').count()) === 0,
+    "Home shows the account's food log",
+  );
+  check(webEntries.length === 1 && webEntries[0].id === stew.id, "only the account's pulled entry is stored on the device, nothing else", `stored: ${show(webEntries.map((e) => e.name))}`);
   check((await btn('Not now', web).count()) === 0, 'the offer to link is gone');
   check((await webStored('kalo.token.previous')) === null, 'a new install had no account, so none is kept to switch back to');
   await web.close();

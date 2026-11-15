@@ -18,7 +18,7 @@ import { AppState, Platform } from 'react-native';
 import { loadFoods } from '@/data/foods';
 import { API_URL } from '@/lib/config';
 import { patchMe, Unprocessable } from '@/lib/connectionsApi';
-import { clearLocalData, ownData, syncStores } from '@/lib/data';
+import { clearLocalData, markDemoCleaned, ownData, removeDemoDataOnce, syncStores } from '@/lib/data';
 import { ApiUnavailable } from '@/lib/foodsApi';
 import { loadPreviousToken, loadToken, savePreviousToken, saveToken } from '@/lib/identity';
 import { linkDevice, shouldOfferLink } from '@/lib/linkApi';
@@ -217,16 +217,26 @@ export function syncNow(): void {
   kick?.();
 }
 
-/** Call once at app start (the root layout). Does nothing without an API URL. */
+/**
+ * Call once at app start (the root layout). Removes an older version's demo data once (with or
+ * without an API URL); syncs only with one.
+ */
 export function startSync(): void {
-  if (!API_URL || started) return;
+  if (started) return;
   started = true;
+  if (!API_URL) {
+    void removeDemoDataOnce().then((ran) => (ran ? markDemoCleaned() : undefined));
+    return;
+  }
   const url = API_URL;
   void (async () => {
     // Every collection loaded first: the first sync queues the rows that exist, once, and data
     // still being read from storage would be left out of that upload for good.
     const stores = syncStores();
     await Promise.all(Object.values(stores).map((store) => store.whenReady()));
+    // Before the first sync: its tombstones are reported now, kept until the engine exists, and
+    // go up with the first push (or stay in the stored outbox while offline).
+    const cleaned = await removeDemoDataOnce();
 
     const local = createLocal({
       ...stores,
@@ -265,6 +275,7 @@ export function startSync(): void {
       engine.markDirty(table, key, deleted);
     });
     engineCreated(engine);
+    if (cleaned) void markDemoCleaned(); // its tombstones are in the engine's outbox now
     kick();
     void zoneSender.send();
     AppState.addEventListener('change', (state) => {
