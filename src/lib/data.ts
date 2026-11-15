@@ -300,10 +300,18 @@ export function dayBudget(goal: Goals, log: DayLog | undefined) {
   return dayTarget(goal, log).calories + (log?.rollover ?? 0);
 }
 
-/** For the week strip: each date's budget under the goal in force on that date. */
+/** Every day log by its date, built once per change to the logs (the strip pages share it). */
+const logsById = new WeakMap<readonly DayLog[], Map<string, DayLog>>();
+function logIndex(logs: readonly DayLog[]): Map<string, DayLog> {
+  let index = logsById.get(logs);
+  if (!index) logsById.set(logs, (index = new Map(logs.map((l) => [l.id, l]))));
+  return index;
+}
+
+/** For the week strip: each date's budget under the goal in force on that date. Pass only the days on screen. */
 export function useDayBudgets(dates: readonly string[]): Record<string, number> {
   const rows = useGoalRows();
-  const logs = useDayLogs().items;
-  return Object.fromEntries(dates.map((d) => [d, dayBudget(goalFor(rows, d), logs.find((l) => l.id === d))]));
+  const logs = logIndex(useDayLogs().items);
+  return Object.fromEntries(dates.map((d) => [d, dayBudget(goalFor(rows, d), logs.get(d))]));
 }
 

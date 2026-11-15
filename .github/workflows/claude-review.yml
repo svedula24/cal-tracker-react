@@ -36,6 +36,8 @@ jobs:
       contents: read
       pull-requests: write # the posting step + inline comments
       id-token: write # the action exchanges an OIDC token for its GitHub App token
+    outputs:
+      verdict: ${{ steps.gate.outputs.verdict }} # "pass", or empty (failed or skipped)
     env:
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: 1
     steps:
@@ -81,10 +83,15 @@ jobs:
             2. Write the merged report, as Markdown, to the file `review.md` at the
                repository root (the Write tool). Write only that file. Do not post it:
                a later workflow step posts review.md as the PR's single report comment.
+            3. Return the structured verdict: must_fix and should_fix are the numbers of
+               Must fix and Should fix items in review.md; verdict is "pass" only when
+               both are 0, otherwise "fail". Nice to have items do not count. The check
+               fails, and the PR is not merged, unless the verdict is "pass".
 
             Only list findings. Do not change code or push commits.
           claude_args: |
             --permission-mode default
+            --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["pass","fail"]},"must_fix":{"type":"integer","minimum":0},"should_fix":{"type":"integer","minimum":0}},"required":["verdict","must_fix","should_fix"],"additionalProperties":false}'
             --allowedTools "Skill,Read(~/.claude/projects/**),Edit(/review.md),mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments --jq '[.[] | select(.user.login == \"claude[bot]\" or .user.login == \"${{ github.repository_owner }}\")]'),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
             --disallowedTools "Read(//proc/**),Read(//sys/**),Read(//etc/**),Read(//root/**),Read(~/work/_temp/**),Read(./.git/**),Bash(git *--no-index*),Bash(git *--output*)"
 
@@ -106,6 +113,62 @@ jobs:
             exit 1
           fi
           gh pr comment "$PR_NUMBER" --edit-last --create-if-none --body-file review.md
+
+      # The check passes only on a "pass" verdict with no Must fix or Should fix item. A run that
+      # returns no verdict fails too. (A skipped review, above, has no verdict and passes, but
+      # merge-control below never auto-merges it.)
+      - name: Gate on the review's verdict
+        id: gate
+        if: steps.claude.outputs.conclusion != ''
+        env:
+          RESULT: ${{ steps.claude.outputs.structured_output }}
+        run: |
+          verdict=$(jq -r '.verdict // empty' <<<"$RESULT" 2>/dev/null || true)
+          must=$(jq -r '.must_fix // empty' <<<"$RESULT" 2>/dev/null || true)
+          should=$(jq -r '.should_fix // empty' <<<"$RESULT" 2>/dev/null || true)
+          if [ -z "$verdict" ] || [ -z "$must" ] || [ -z "$should" ]; then
+            echo "::error::The review returned no verdict."
+            exit 1
+          fi
+          if [ "$verdict" = "pass" ] && [ "$must" = "0" ] && [ "$should" = "0" ]; then
+            echo "Review passed."
+            echo "verdict=pass" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Review failed: $must Must fix, $should Should fix (see the PR comment)."
+            exit 1
+          fi
+
+  # Auto-merge follows the review: on, when it passed; off otherwise (failed, cancelled by a
+  # newer push, or skipped because the PR changes this workflow, which then needs a manual merge).
+  # A separate job, so the review agent's job never holds a token that can merge. GitHub merges
+  # once every required check on main's ruleset (pr-review, backend, build) has passed.
+  merge-control:
+    needs: pr-review
+    if: >-
+      always() &&
+      needs.pr-review.result != 'cancelled' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Turn auto-merge on or off
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          VERDICT: ${{ needs.pr-review.outputs.verdict }}
+        run: |
+          if [ "$VERDICT" = "pass" ]; then
+            # Only the commit that was reviewed: a newer push gets its own review first.
+            gh pr merge "$PR_NUMBER" --auto --merge --match-head-commit "$HEAD_SHA"
+          else
+            gh pr merge "$PR_NUMBER" --disable-auto || true
+          fi
 
   push-review:
     if: github.event_name == 'push'
