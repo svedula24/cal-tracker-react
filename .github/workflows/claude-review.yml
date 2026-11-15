@@ -37,7 +37,8 @@ jobs:
       pull-requests: write # the posting step + inline comments
       id-token: write # the action exchanges an OIDC token for its GitHub App token
     outputs:
-      verdict: ${{ steps.gate.outputs.verdict }} # "pass", or empty (failed or skipped)
+      verdict: ${{ steps.gate.outputs.verdict }} # pass, fail or skipped
+      human: ${{ steps.gate.outputs.human }} # true when a person must look before merging
     env:
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: 1
     steps:
@@ -45,6 +46,22 @@ jobs:
         with:
           fetch-depth: 0 # the review reads connected code, not only the diff
           persist-credentials: false
+
+      # Changes to these paths always need a person, whatever the review says. Checked here, not
+      # by the model, so nothing in the PR can talk its way past it: CI and review workflows,
+      # database migrations, and the code that decides who can access what (auth, OAuth,
+      # pairing, account linking, integrations, MCP, settings and the app's middleware).
+      # Written to $RUNNER_TEMP, outside the checkout, which the review agent cannot read or write.
+      - name: Flag sensitive paths for human review
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SENSITIVE: '^(\.github/|backend/migrations/|backend/app/mcp/|backend/app/api/(deps|oauth)\.py$|backend/app/api/v1/(devices|connections|link|integrations)\.py$|backend/app/services/(users|oauth|pairing|linking|integrations)\.py$|backend/app/(settings|main)\.py$)'
+        run: |
+          git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -E "$SENSITIVE" > "$RUNNER_TEMP/sensitive.txt" || true
+          if [ -s "$RUNNER_TEMP/sensitive.txt" ]; then
+            echo "Sensitive paths changed:"; cat "$RUNNER_TEMP/sensitive.txt"
+          fi
 
       - name: Clear any review.md from the checkout
         run: rm -f review.md
@@ -87,59 +104,110 @@ jobs:
                Must fix and Should fix items in review.md; verdict is "pass" only when
                both are 0, otherwise "fail". Nice to have items do not count. The check
                fails, and the PR is not merged, unless the verdict is "pass".
+               Set needs_human_review to true, with one short reason per item in
+               human_review_reasons, when a person should look before this merges even
+               if you found nothing to fix: security or access control; secrets or
+               personal data; anything that deletes or rewrites stored data; calculations
+               users rely on (calories, targets, nutrients); a change you could not verify
+               from the code (it needs a device, the live server or credentials); or a
+               change too large or risky to approve with confidence. Otherwise set it to
+               false with an empty list. A flagged PR is never merged automatically.
 
             Only list findings. Do not change code or push commits.
           claude_args: |
             --permission-mode default
-            --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["pass","fail"]},"must_fix":{"type":"integer","minimum":0},"should_fix":{"type":"integer","minimum":0}},"required":["verdict","must_fix","should_fix"],"additionalProperties":false}'
+            --json-schema '{"type":"object","properties":{"verdict":{"type":"string","enum":["pass","fail"]},"must_fix":{"type":"integer","minimum":0},"should_fix":{"type":"integer","minimum":0},"needs_human_review":{"type":"boolean"},"human_review_reasons":{"type":"array","items":{"type":"string","maxLength":300},"maxItems":10}},"required":["verdict","must_fix","should_fix","needs_human_review","human_review_reasons"],"additionalProperties":false}'
             --allowedTools "Skill,Read(~/.claude/projects/**),Edit(/review.md),mcp__github_inline_comment__create_inline_comment,Bash(gh pr diff:*),Bash(gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/comments --jq '[.[] | select(.user.login == \"claude[bot]\" or .user.login == \"${{ github.repository_owner }}\")]'),Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
             --disallowedTools "Read(//proc/**),Read(//sys/**),Read(//etc/**),Read(//root/**),Read(~/work/_temp/**),Read(./.git/**),Bash(git *--no-index*),Bash(git *--output*)"
 
-      # The action skips itself (and sets no conclusion) when this workflow file differs from the
-      # default branch's, e.g. on a PR that changes it. Then there is no review to post.
+      # Decide: verdict (pass, fail, or skipped when the action skipped itself, which it does on a
+      # PR that changes this workflow) and whether a person must look first. Runs even when the
+      # action failed, so a broken run is never mistaken for a pass.
+      - name: Decide the verdict and whether a person must review
+        id: gate
+        if: ${{ !cancelled() }}
+        env:
+          RESULT: ${{ steps.claude.outputs.structured_output }}
+          CONCLUSION: ${{ steps.claude.outputs.conclusion }}
+        run: |
+          human="$RUNNER_TEMP/human.md"
+          : > "$human"
+          if [ -z "$CONCLUSION" ]; then
+            verdict=skipped
+            echo "- The Claude review did not run (the action skips a PR that changes its own workflow)." >> "$human"
+          else
+            v=$(jq -r '.verdict // empty' <<<"$RESULT" 2>/dev/null || true)
+            must=$(jq -r '.must_fix // empty' <<<"$RESULT" 2>/dev/null || true)
+            should=$(jq -r '.should_fix // empty' <<<"$RESULT" 2>/dev/null || true)
+            if [ "$v" = "pass" ] && [ "$must" = "0" ] && [ "$should" = "0" ]; then
+              verdict=pass
+            else
+              verdict=fail
+              if [ -z "$v" ]; then echo "::error::The review returned no verdict."; fi
+            fi
+            if [ "$(jq -r '.needs_human_review // false' <<<"$RESULT" 2>/dev/null)" = "true" ]; then
+              jq -r '.human_review_reasons[]? | "- " + gsub("[\\r\\n]+"; " ")' <<<"$RESULT" >> "$human" 2>/dev/null || true
+              [ -s "$human" ] || echo "- Claude asked for a human review." >> "$human"
+            fi
+          fi
+          if [ -s "$RUNNER_TEMP/sensitive.txt" ]; then
+            echo "- It changes files that always need a person:" >> "$human"
+            sed 's/^/  - `/; s/$/`/' "$RUNNER_TEMP/sensitive.txt" >> "$human"
+          fi
+          if [ -s "$human" ]; then h=true; else h=false; fi
+          echo "verdict=$verdict" >> "$GITHUB_OUTPUT"
+          echo "human=$h" >> "$GITHUB_OUTPUT"
+          echo "verdict=$verdict human=$h"
+
       - name: Post the review
-        if: steps.claude.outputs.conclusion != ''
+        if: ${{ !cancelled() && steps.gate.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          VERDICT: ${{ steps.gate.outputs.verdict }}
+          HUMAN: ${{ steps.gate.outputs.human }}
         run: |
-          if [ ! -f review.md ] || [ -L review.md ] || [ ! -s review.md ]; then
-            echo "::error::The review agent did not write review.md; nothing was posted."
+          body="$RUNNER_TEMP/body.md"
+          : > "$body"
+          if [ "$VERDICT" != "skipped" ]; then
+            if [ ! -f review.md ] || [ -L review.md ] || [ ! -s review.md ]; then
+              echo "::error::The review agent did not write review.md; nothing was posted."
+              exit 1
+            fi
+            cat review.md >> "$body"
+          fi
+          if [ "$HUMAN" = "true" ]; then
+            printf '\n\n## Needs human review\n\nThis PR will not merge automatically. The check stays red until you have looked and merged it yourself (admin bypass):\n\n' >> "$body"
+            cat "$RUNNER_TEMP/human.md" >> "$body"
+          fi
+          [ -s "$body" ] || exit 0
+          if grep -E -q 'sk-ant-|gh[opsur]_[A-Za-z0-9]{20,}|github_pat_' "$body"; then
+            echo "::error::The review looks like it contains a credential; not posting it."
             exit 1
           fi
-          if grep -E -q 'sk-ant-|gh[opsur]_[A-Za-z0-9]{20,}|github_pat_' review.md; then
-            echo "::error::review.md looks like it contains a credential; not posting it."
-            exit 1
-          fi
-          gh pr comment "$PR_NUMBER" --edit-last --create-if-none --body-file review.md
+          gh pr comment "$PR_NUMBER" --edit-last --create-if-none --body-file "$body"
 
-      # The check passes only on a "pass" verdict with no Must fix or Should fix item. A run that
-      # returns no verdict fails too. (A skipped review, above, has no verdict and passes, but
-      # merge-control below never auto-merges it.)
-      - name: Gate on the review's verdict
-        id: gate
-        if: steps.claude.outputs.conclusion != ''
+      # The check passes only on a "pass" verdict with nothing for a person to look at.
+      - name: Pass only a clean review that needs no person
+        if: ${{ !cancelled() && steps.gate.outcome == 'success' }}
         env:
-          RESULT: ${{ steps.claude.outputs.structured_output }}
+          VERDICT: ${{ steps.gate.outputs.verdict }}
+          HUMAN: ${{ steps.gate.outputs.human }}
         run: |
-          verdict=$(jq -r '.verdict // empty' <<<"$RESULT" 2>/dev/null || true)
-          must=$(jq -r '.must_fix // empty' <<<"$RESULT" 2>/dev/null || true)
-          should=$(jq -r '.should_fix // empty' <<<"$RESULT" 2>/dev/null || true)
-          if [ -z "$verdict" ] || [ -z "$must" ] || [ -z "$should" ]; then
-            echo "::error::The review returned no verdict."
+          if [ "$VERDICT" = "fail" ]; then
+            echo "::error::The review found Must fix or Should fix items (see the PR comment)."
             exit 1
           fi
-          if [ "$verdict" = "pass" ] && [ "$must" = "0" ] && [ "$should" = "0" ]; then
-            echo "Review passed."
-            echo "verdict=pass" >> "$GITHUB_OUTPUT"
-          else
-            echo "::error::Review failed: $must Must fix, $should Should fix (see the PR comment)."
+          if [ "$HUMAN" = "true" ]; then
+            echo "::error::Needs human review (see the PR comment). Merge it yourself after looking."
             exit 1
           fi
+          echo "Review passed."
 
-  # Auto-merge follows the review: on, when it passed; off otherwise (failed, cancelled by a
-  # newer push, or skipped because the PR changes this workflow, which then needs a manual merge).
+  # Auto-merge follows the review: on, when it passed and nothing needs a person; off otherwise
+  # (failed, needs human review, or skipped because the PR changes this workflow). A cancelled run
+  # (superseded by a newer push) changes nothing.
   # A separate job, so the review agent's job never holds a token that can merge. GitHub merges
   # once every required check on main's ruleset (pr-review, backend, build) has passed.
   merge-control:
@@ -154,15 +222,25 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      issues: write # the needs-human-review label
     steps:
-      - name: Turn auto-merge on or off
+      - name: Label, and turn auto-merge on or off
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           VERDICT: ${{ needs.pr-review.outputs.verdict }}
+          HUMAN: ${{ needs.pr-review.outputs.human }}
         run: |
+          label=needs-human-review
+          if [ "$HUMAN" = "true" ]; then
+            gh label create "$label" --color D93F0B --description "Claude or the path list wants a person to look before merging" 2>/dev/null || true
+            gh pr edit "$PR_NUMBER" --add-label "$label"
+            gh pr merge "$PR_NUMBER" --disable-auto || true
+            exit 0
+          fi
+          gh pr edit "$PR_NUMBER" --remove-label "$label" 2>/dev/null || true
           if [ "$VERDICT" = "pass" ]; then
             # Only the commit that was reviewed: a newer push gets its own review first.
             gh pr merge "$PR_NUMBER" --auto --merge --match-head-commit "$HEAD_SHA"
