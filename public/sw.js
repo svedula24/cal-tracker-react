@@ -45,8 +45,10 @@ self.addEventListener('install', (event) => {
     (async () => {
       const cache = await caches.open(VERSION);
       let files = [PAGE];
-      const list = await fetch('/sw-files.json', { cache: 'no-cache' }).catch(() => null);
-      if (list && list.ok && !isHtml(list)) files = await list.json(); // no list: a dev build, the page only
+      // A failed request (offline, a timeout) fails the install, so the old, complete cache stays. Only
+      // a list the server says isn't there (404, or the SPA fallback's HTML) means a dev build: the page only.
+      const list = await fetch('/sw-files.json', { cache: 'no-cache' });
+      if (list.ok && !isHtml(list)) files = await list.json();
       for (let i = 0; i < files.length; i += BATCH) {
         await Promise.all(
           files.slice(i, i + BATCH).map(async (path) => {
