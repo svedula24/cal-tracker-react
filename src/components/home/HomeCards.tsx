@@ -14,13 +14,14 @@ import {
   Target,
   Wheat,
 } from 'lucide-react-native';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 
 import { Press } from '@/components/Press';
 import { Ring } from '@/components/Ring';
 import { Card, cardShadow } from '@/components/Screen';
 import { STREAK_DAYS } from '@/lib/data';
+import { createDraftBox, parseWhole, stepsToSave, workoutToSave } from '@/lib/dayDraft';
 import { type DayType, type Nutrients, roundHalfAway } from '@/lib/nutrition';
 import { tokens } from '@/lib/tokens';
 
@@ -158,12 +159,6 @@ export function HealthScoreCard({ value, text }: { value: number; text: string }
 }
 
 // ── Page 3: activity ─────────────────────────────────────────────────────────
-/** A typed whole number (commas allowed); null when it is not one. */
-const parseWhole = (t: string): number | null => {
-  const s = t.replace(/,/g, '').trim();
-  return /^\d{1,7}$/.test(s) ? Number(s) : null;
-};
-
 /**
  * A draft typed into a card, dropped when the card moves to another day (Home keeps the cards
  * mounted across day switches).
@@ -175,35 +170,45 @@ function useDayDraft(day: string) {
     setDraftDay(day);
     setDraft(null);
   }
-  return [draft, setDraft] as const;
+  // The latest text, set in the event that changes it: Enter and blur read it from here (see
+  // src/lib/dayDraft.ts), since they can run before the render that holds it in `draft`.
+  const box = useRef<ReturnType<typeof createDraftBox>>(null);
+  box.current ??= createDraftBox();
+  const edit = (text: string) => {
+    box.current?.set(day, text);
+    setDraft(text);
+  };
+  /** The text to save, once: null when nothing was typed (or it was already saved). Ends the edit. */
+  const take = () => {
+    const text = box.current?.take(day) ?? null;
+    setDraft(null);
+    return text;
+  };
+  return [draft, edit, take] as const;
 }
 
 /** The day's steps: tap the number to type it (Enter or leaving the field saves; anything else is dropped). */
 export function StepsCard({ day, steps, goal, onSteps }: { day: string; steps: number; goal: number; onSteps: (steps: number) => void }) {
-  const [draft, setDraft] = useDayDraft(day);
-  // `typed`: the field's text from the submit event. Enter can arrive before the render that holds
-  // the last keystroke's draft, so the event's text is the source of truth when there is one.
-  const save = (typed?: string) => {
-    const text = typed ?? draft;
-    const n = text === null ? null : parseWhole(text);
-    if (n !== null && n !== steps) onSteps(n);
-    setDraft(null);
+  const [draft, edit, take] = useDayDraft(day);
+  const save = () => {
+    const n = stepsToSave(take(), steps);
+    if (n !== null) onSteps(n);
   };
   return (
     <Card className="h-[216px] flex-1 px-[16px] pt-[16px]">
       <Text className="text-[13.5px] text-muted">Steps</Text>
       <View className="h-[32px] flex-row items-end">
         {draft === null ? (
-          <Press accessibilityRole="button" accessibilityLabel="Edit steps" onPress={() => setDraft(String(steps))}>
+          <Press accessibilityRole="button" accessibilityLabel="Edit steps" onPress={() => edit(String(steps))}>
             <Text className="text-[24px] font-bold text-foreground">{steps.toLocaleString('en-US')}</Text>
           </Press>
         ) : (
           <TextInput
             accessibilityLabel="Steps"
             value={draft}
-            onChangeText={setDraft}
-            onSubmitEditing={(e) => save(e.nativeEvent.text)}
-            onBlur={() => save()}
+            onChangeText={edit}
+            onSubmitEditing={save}
+            onBlur={save}
             autoFocus
             selectTextOnFocus
             keyboardType="number-pad"
@@ -249,20 +254,12 @@ export function DayTypeCard({
   onWorkoutKcal: (kcal: number | null) => void;
 }) {
   const shown = workoutKcal === null ? '' : String(workoutKcal);
-  const [draft, setDraft] = useDayDraft(day);
+  const [draft, edit, take] = useDayDraft(day);
   const text = draft ?? shown;
   const invalid = draft !== null && draft.trim() !== '' && parseWhole(draft) === null;
-  // `typed`: the field's text from the submit event (see StepsCard.save): Enter right after a change
-  // must not save the previous draft, or nothing at all.
-  const save = (typed?: string) => {
-    if (draft === null && (typed === undefined || typed === shown)) return; // nothing was typed
-    const value = typed ?? draft ?? '';
-    const next = value.trim() === '' ? null : parseWhole(value);
-    // Saved even when it equals `workoutKcal`: the draft exists only after typing, and the prop can
-    // lag a moment behind the store (an emptied field then compared null with a stale null and was
-    // dropped). Writing an unchanged value is harmless.
-    if (value.trim() === '' || next !== null) onWorkoutKcal(next);
-    setDraft(null);
+  const save = () => {
+    const next = workoutToSave(take());
+    if (next !== null) onWorkoutKcal(next.kcal);
   };
   return (
     <Card className="mt-[10px] px-[16px] pb-[14px] pt-[14px]">
@@ -294,9 +291,9 @@ export function DayTypeCard({
             value={text}
             placeholder={String(goalKcal)}
             placeholderTextColor={c.faint}
-            onChangeText={setDraft}
-            onSubmitEditing={(e) => save(e.nativeEvent.text)}
-            onBlur={() => save()}
+            onChangeText={edit}
+            onSubmitEditing={save}
+            onBlur={save}
             keyboardType="number-pad"
             returnKeyType="done"
             className={`text-right text-[15px] font-semibold ${invalid ? 'text-bad' : 'text-foreground'}`}
