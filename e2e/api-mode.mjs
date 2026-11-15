@@ -481,7 +481,7 @@ try {
       { id: 'usda:2708118', food: food(2708118, 'Nutrition bar (Clif Bar)', 346, { label: '1 bar', grams: 68 }), savedAt: new Date().toISOString() }, // saved by the user
     ];
     localStorage.setItem('savedFoods', JSON.stringify([...JSON.parse(localStorage.getItem('savedFoods') ?? '[]'), ...saved]));
-    localStorage.removeItem('kalo.demo.cleaned'); // as on an install from before the clean-up
+    localStorage.removeItem('kalo.demo.cleaned.v2'); // as on an install from before the clean-up
     return { kept: key(19), removed: [key(20), key(21), key(23)], cleared: key(22), nearMiss: key(24) };
   });
   from = api.requests.length;
@@ -514,8 +514,8 @@ try {
       logsNow.some((l) => l.id === demoDays.cleared && l.steps === 0 && l.rollover === 0 && l.dayType === 'workout') &&
       logsNow.some((l) => l.id === demoDays.kept && l.steps === 4950) && logsNow.some((l) => l.id === demoDays.nearMiss && l.steps === 7801) &&
       !savedNow.some((x) => x.id === 'usda:169640' || x.id === 'usda:170894') && savedNow.some((x) => x.id === 'usda:2708118') &&
-      (await stored('kalo.demo.cleaned')) === '1',
-    'on the device too: the demo rows are gone, the rest kept, and the clean-up is recorded (kalo.demo.cleaned)', `stored: ${show({ logsNow, saved: savedNow.map((x) => x.id) })}`,
+      (await stored('kalo.demo.cleaned.v2')) === '1',
+    'on the device too: the demo rows are gone, the rest kept, and the clean-up is recorded (kalo.demo.cleaned.v2)', `stored: ${show({ logsNow, saved: savedNow.map((x) => x.id) })}`,
   );
   await open('/saved-foods');
   check(

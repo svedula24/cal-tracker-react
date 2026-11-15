@@ -88,5 +88,13 @@ export function demoDayLogs(logs: readonly DayLog[]): { remove: string[]; clear:
 /** The demo bookmarks' ids: Clif Bar, Greek yogurt, honey. */
 export const DEMO_SAVED_IDS: readonly string[] = ['usda:2708118', 'usda:170894', 'usda:169640'];
 
-/** A demo bookmark: one of those foods, never saved by the user (no `savedAt`: the seed had none). */
-export const isDemoSaved = (s: Pick<SavedFood, 'id' | 'savedAt'>): boolean => DEMO_SAVED_IDS.includes(s.id) && s.savedAt == null;
+// What the server holds for a bookmark uploaded without savedAt (src/lib/sync/local.ts), so a
+// demo bookmark pulled onto another device (the web app) carries this date instead of none.
+const SAVED_AT_UNKNOWN_MS = Date.UTC(2020, 0, 1);
+
+/**
+ * A demo bookmark: one of those foods, never saved by the user: no `savedAt` (the seed had none), or
+ * the server's stand-in for none.
+ */
+export const isDemoSaved = (s: Pick<SavedFood, 'id' | 'savedAt'>): boolean =>
+  DEMO_SAVED_IDS.includes(s.id) && (s.savedAt == null || Date.parse(s.savedAt) === SAVED_AT_UNKNOWN_MS);

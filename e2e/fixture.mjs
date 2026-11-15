@@ -104,7 +104,7 @@ export async function referenceDay(target) {
         for (const [key, value] of Object.entries(data)) localStorage.setItem(key, JSON.stringify(value));
         // The test data copies what older versions seeded (the same day logs), but stands for the
         // user's own: mark the one-time demo clean-up (src/lib/data.ts removeDemoDataOnce) as done.
-        localStorage.setItem('kalo.demo.cleaned', '1');
+        localStorage.setItem('kalo.demo.cleaned.v2', '1');
         localStorage.setItem('e2e:fixture', '1');
       } catch {} // a page without storage (about:blank) has nothing to fill
     },
