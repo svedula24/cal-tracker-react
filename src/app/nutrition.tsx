@@ -35,7 +35,7 @@ const MICROS = [
  * keeps the typed value for this amount and scales it if the amount changes.
  */
 export default function Nutrition() {
-  const { id, food: foodParam, grams: gramsParam } = useLocalSearchParams<{ id?: string; food?: string; grams?: string }>();
+  const { id, food: foodParam } = useLocalSearchParams<{ id?: string; food?: string }>();
   const entries = useEntries();
   const found = id ? entries.items.find((e) => e.id === id) : undefined;
   // Keep showing an entry seen earlier: after Delete the screen is still on its
@@ -47,10 +47,8 @@ export default function Nutrition() {
   // The form mounts only once its data exists, so its state is never seeded
   // from an entry that hasn't loaded from storage yet.
   if (entry) return <NutritionForm key={entry.id} entry={entry} base={foodOfEntry(entry)} />;
-  // `grams` (Recent on the + menu): the amount a new food starts at. Never for an entry opened by `id`.
-  const grams = (!id && typeof gramsParam === 'string' && parseQty(gramsParam)) || undefined;
   // Keyed by the amount too: the same food opened again at another amount starts from that amount.
-  if (food) return <NutritionForm key={`${food.id}:${grams ?? ''}`} base={food} grams={grams} />;
+  if (food) return <NutritionForm key={food.id} base={food} />;
   const loading = !!id && !entries.ready;
   return (
     <SafeAreaView className="flex-1 items-center justify-center bg-background px-10">
@@ -66,9 +64,9 @@ export default function Nutrition() {
 
 /**
  * `entry`: the logged entry being edited. `base`: the database food behind it (null for hand-written
- * entries), or the food being added. `grams`: the amount a food being added starts at, instead of its serving.
+ * entries), or the food being added.
  */
-function NutritionForm({ entry, base, grams }: { entry?: Entry; base: Food | null; grams?: number }) {
+function NutritionForm({ entry, base }: { entry?: Entry; base: Food | null }) {
   const entries = useEntries();
   const saved = useSavedFoods();
   const [day] = useSelectedDay();
@@ -79,7 +77,7 @@ function NutritionForm({ entry, base, grams }: { entry?: Entry; base: Food | nul
 
   const [name, setName] = useState(entry?.name ?? base?.name ?? '');
   // For a food: grams, whatever unit the field shows. For a hand-written entry: servings.
-  const initial = base ? (grams ?? entryGrams(entry, base)) : (entry?.servings ?? 1);
+  const initial = base ? entryGrams(entry, base) : (entry?.servings ?? 1);
   const [qty, setQty] = useState(initial);
   // The unit the amount is typed in (grams, ounces or one of the food's portions). The field shows
   // qty / unit.grams; `qty` itself stays in grams, so switching units never changes the amount.
