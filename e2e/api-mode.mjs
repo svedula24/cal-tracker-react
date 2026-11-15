@@ -567,6 +567,7 @@ try {
   const lookedUp = barcodes.at(-1);
   check(barcodes.length === 1 && lookedUp.code === '0737628064502' && lookedUp.token === api.tokens.at(-1), 'one lookup of the typed code, with Authorization: Bearer <the token>', `sent: ${show(barcodes)}`);
   check((await page.getByLabel('Food name').inputValue()) === 'Simply Asia Thai Peanut Noodle Kit', 'Nutrition shows the product with its brand');
+  check((await page.getByText('Product data from Open Food Facts (ODbL)', { exact: true }).count()) === 1, 'Nutrition credits Open Food Facts for a scanned product');
   check((await page.getByLabel('Grams').inputValue()) === '52' && (await page.getByText('0.333 PACKAGE (52 g) = 52 g').count()) === 1, 'Nutrition starts at the product\'s serving, 52 g');
   check((await page.getByLabel('Calories', { exact: true }).inputValue()) === '200' && (await page.getByLabel('Sugar', { exact: true }).inputValue()) === '0', 'the nutrients are per serving (385 kcal/100 g -> 200), a null nutrient is 0');
   await btn('Done').click();
