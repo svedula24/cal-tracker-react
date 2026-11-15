@@ -261,6 +261,14 @@ export function DayTypeCard({
     const next = workoutToSave(take());
     if (next !== null) onWorkoutKcal(next.kcal);
   };
+  // Enter saves and leaves the field at once (blurOnSubmit={false} turns off react-native-web's own
+  // blur, which waits for a 0 ms timer: landing inside the next edit, after its select-all and
+  // before its Delete, it dropped that edit's keystrokes).
+  const input = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const submit = () => {
+    save();
+    input.current?.blur();
+  };
   return (
     <Card className="mt-[10px] px-[16px] pb-[14px] pt-[14px]">
       <Text className="text-[13.5px] text-muted">Day type</Text>
@@ -292,8 +300,10 @@ export function DayTypeCard({
             placeholder={String(goalKcal)}
             placeholderTextColor={c.faint}
             onChangeText={edit}
-            onSubmitEditing={save}
+            ref={input}
+            onSubmitEditing={submit}
             onBlur={save}
+            blurOnSubmit={false}
             keyboardType="number-pad"
             returnKeyType="done"
             className={`text-right text-[15px] font-semibold ${invalid ? 'text-bad' : 'text-foreground'}`}
