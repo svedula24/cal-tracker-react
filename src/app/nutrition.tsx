@@ -47,7 +47,6 @@ export default function Nutrition() {
   // The form mounts only once its data exists, so its state is never seeded
   // from an entry that hasn't loaded from storage yet.
   if (entry) return <NutritionForm key={entry.id} entry={entry} base={foodOfEntry(entry)} />;
-  // Keyed by the amount too: the same food opened again at another amount starts from that amount.
   if (food) return <NutritionForm key={food.id} base={food} />;
   const loading = !!id && !entries.ready;
   return (
