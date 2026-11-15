@@ -84,6 +84,18 @@ const home = [
         for (const name of ['Honey', 'Sandwich', 'Whole Milk Latte']) if ((await btn(old, `Edit ${name}`).count()) > 0) throw new Error(`demo entry ${name} still shown`);
         const left = await stored(old, 'entries');
         if (JSON.stringify(left) !== JSON.stringify(mine)) throw new Error(`stored entries are ${JSON.stringify(left).slice(0, 300)}`);
+        // Editing the kept guessed entry makes it the user's: no longer flagged, so it syncs, and it is
+        // never taken for demo again, even when renamed to a demo name with one serving.
+        await btn(old, 'Edit Grandma soup').click();
+        await old.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+        await old.getByLabel('Food name').fill('Honey');
+        await btn(old, 'Done').click();
+        await old.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+        await old.reload({ waitUntil: 'networkidle' });
+        await wait(800);
+        await btn(old, 'Edit Honey').waitFor({ timeout: 5000 });
+        const edited = (await stored(old, 'entries')).find((e) => e.name === 'Honey');
+        if (!edited || edited.seed !== false || 'seedGuessed' in edited) throw new Error(`the edited entry is still flagged: ${JSON.stringify(edited)}`);
       } finally {
         await old.close();
       }

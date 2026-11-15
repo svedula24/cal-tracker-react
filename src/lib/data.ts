@@ -116,8 +116,10 @@ const addEntry = (entry: Entry) => {
   entriesStore().add({ ...entry, seed: false });
   markDirty('food_logs', entry.id);
 };
+// Any edit makes an entry the user's: an old one the app only guessed was demo (kept because the user
+// had renamed it) then syncs, and can never be taken for demo again, even if edited back to a demo name.
 const updateEntry = (id: string, patch: Partial<Entry>) => {
-  entriesStore().update(id, patch);
+  entriesStore().update(id, { ...patch, seed: false, seedGuessed: undefined });
   markDirty('food_logs', id);
 };
 const removeEntry = (id: string) => {
