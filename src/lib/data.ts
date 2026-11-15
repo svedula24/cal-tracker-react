@@ -145,6 +145,39 @@ const dayLogsStore = () => getCollection<DayLog>('dayLogs', dayLogSeed);
 /** The collections sync reads and writes (src/lib/sync/index.ts): the same instances the hooks use. */
 export const syncStores = () => ({ entries: entriesStore(), saved: savedStore(), goals: goalsStore(), dayLogs: dayLogsStore() });
 
+/**
+ * Empties the synced collections, demo data included, without reporting anything to sync: for an
+ * install that is being linked to another account (src/lib/sync/index.ts linkThisDevice), whose
+ * data then arrives from the server. Resolves once all four are stored empty (so the seed does not
+ * come back); rejects if one cannot be.
+ */
+export const clearLocalData = async (): Promise<void> => {
+  await Promise.all(Object.values(syncStores()).map((store) => store.clear()));
+};
+
+// A day log without its date: the seed's are dated from the first launch, which may not be today's.
+const logShape = (d: DayLog) => JSON.stringify([d.steps, d.rollover, d.dayType ?? null, d.workoutKcal ?? null]);
+
+/**
+ * How much of this install's data is the user's own rather than the first-launch demo: entries not
+ * seeded, and whether any goal, day log or saved food differs from the seed. For the first-run offer
+ * to link (only an install with nothing of its own is wiped without asking) and its confirmation.
+ */
+export function ownData(): { entries: number; other: boolean } {
+  const { entries, goals, dayLogs, saved } = syncStores();
+  const seededLogs = dayLogSeed.map(logShape).sort().join();
+  const seededSaved = new Set(savedSeed.map((s) => s.id));
+  return {
+    entries: entries.items.filter((e) => e.seed !== true).length,
+    other:
+      goals.items.length !== goalsSeed.length ||
+      goals.items.some((g) => g.id !== FIRST_GOAL_DATE || !isDemoGoal(g)) ||
+      dayLogs.items.map(logShape).sort().join() !== seededLogs ||
+      saved.items.length !== savedSeed.length ||
+      saved.items.some((s) => !seededSaved.has(s.id)),
+  };
+}
+
 const addEntry = (entry: Entry) => {
   // Marked as the user's from the start: an entry without the flag is guessed at the next load
   // (migrateEntries), and that guess takes one that is not measured in grams for demo data.

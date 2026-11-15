@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from app.db.session import make_engine, sqlalchemy_url
 from app.models.barcodes import BarcodeProduct
 from app.models.foods import Base, Food, FoodPortion
+from app.models.linking import LinkCode
 from app.models.oauth import OAuthCode, OAuthGrant, OAuthToken, PairingCode
 from app.models.user_data import DailyActivity, FoodLog, SavedFood, User, UserGoal, UserToken
 from kalo.db import alembic_config
@@ -27,7 +28,8 @@ FOODS_TABLES = {"foods", "food_portions", "alembic_version"}  # what revision 00
 SYNCED_TABLES = ("food_logs", "user_goals", "daily_activity", "saved_foods")
 OAUTH_TABLES = ("pairing_codes", "oauth_grants", "oauth_codes", "oauth_tokens")  # revision 0004
 BARCODE_TABLE = "barcode_products"  # revision 0005
-TABLES = FOODS_TABLES | {"users", "user_tokens", *SYNCED_TABLES, *OAUTH_TABLES, BARCODE_TABLE}
+LINK_TABLE = "link_codes"  # revision 0007
+TABLES = FOODS_TABLES | {"users", "user_tokens", *SYNCED_TABLES, *OAUTH_TABLES, BARCODE_TABLE, LINK_TABLE}
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
 FOOD_LOGS_INDEXES = {
     "food_logs_pkey": "UNIQUE btree (id)",
@@ -218,6 +220,7 @@ def test_each_scratch_schema_gets_its_own_version_table(migrated_url):
         *(Food, FoodPortion, User, UserToken, FoodLog, UserGoal, DailyActivity, SavedFood),
         *(PairingCode, OAuthGrant, OAuthCode, OAuthToken),
         BarcodeProduct,
+        LinkCode,
     ],
 )
 def test_models_match_the_migrated_tables(migrated_url, model):
@@ -359,9 +362,9 @@ def test_user_data_columns(migrated_url):
         rows = conn.execute(
             "SELECT table_name, column_name, data_type, is_nullable, column_default, is_generated"
             " FROM information_schema.columns WHERE table_schema = current_schema()"
-            " AND table_name NOT IN ('foods', 'food_portions', 'alembic_version', %s, %s, %s, %s, %s)"
+            " AND table_name NOT IN ('foods', 'food_portions', 'alembic_version', %s, %s, %s, %s, %s, %s)"
             " ORDER BY table_name, ordinal_position",
-            (*OAUTH_TABLES, BARCODE_TABLE),
+            (*OAUTH_TABLES, BARCODE_TABLE, LINK_TABLE),
         ).fetchall()
     by_table = {}
     for table, column, data_type, nullable, default, generated in rows:
@@ -374,7 +377,8 @@ def test_user_data_columns(migrated_url):
         "deleted_at": "timestamp with time zone NULL",
         "rev": "bigint",
     }
-    assert set(by_table) == TABLES - FOODS_TABLES - set(OAUTH_TABLES) - {BARCODE_TABLE}  # tested on their own
+    # The OAuth, barcode and link tables are tested on their own.
+    assert set(by_table) == TABLES - FOODS_TABLES - set(OAUTH_TABLES) - {BARCODE_TABLE, LINK_TABLE}
     assert by_table["users"] == {
         "id": "uuid DEFAULT gen_random_uuid()",
         "email": "text NULL",
@@ -516,8 +520,8 @@ def test_user_data_indexes(migrated_url):
     with psycopg.connect(migrated_url) as conn:
         rows = conn.execute(
             "SELECT indexname, indexdef FROM pg_indexes WHERE schemaname = current_schema()"
-            " AND tablename NOT IN ('foods', 'food_portions', 'alembic_version', %s, %s, %s, %s, %s)",
-            (*OAUTH_TABLES, BARCODE_TABLE),
+            " AND tablename NOT IN ('foods', 'food_portions', 'alembic_version', %s, %s, %s, %s, %s, %s)",
+            (*OAUTH_TABLES, BARCODE_TABLE, LINK_TABLE),
         ).fetchall()
     indexes = {}
     for name, definition in rows:
@@ -1041,7 +1045,7 @@ def test_deleting_a_user_deletes_their_connections(conn):
 def test_downgrade_to_0003_drops_only_the_oauth_tables(conn, migrated_url):
     schema = schema_of(migrated_url)
     command.downgrade(alembic_config(migrated_url), "0003")
-    assert tables_in(migrated_url, schema) == TABLES - set(OAUTH_TABLES) - {BARCODE_TABLE}
+    assert tables_in(migrated_url, schema) == TABLES - set(OAUTH_TABLES) - {BARCODE_TABLE, LINK_TABLE}
     command.upgrade(alembic_config(migrated_url), "head")
     assert tables_in(migrated_url, schema) == TABLES
 
@@ -1134,7 +1138,60 @@ def test_downgrade_to_0004_drops_only_the_barcode_cache(conn, migrated_url):
     schema = schema_of(migrated_url)
     insert(conn, "barcode_products", **FOUND_PRODUCT)
     command.downgrade(alembic_config(migrated_url), "0004")
-    assert tables_in(migrated_url, schema) == TABLES - {BARCODE_TABLE}
+    assert tables_in(migrated_url, schema) == TABLES - {BARCODE_TABLE, LINK_TABLE}
     command.upgrade(alembic_config(migrated_url), "head")
     assert tables_in(migrated_url, schema) == TABLES
     assert conn.execute("SELECT count(*) FROM barcode_products").fetchone()[0] == 0
+
+
+# ---- Revision 0007: link codes ----
+
+
+def test_link_codes_table(migrated_url):
+    schema = schema_of(migrated_url)
+    with psycopg.connect(migrated_url) as conn:
+        columns = conn.execute(
+            "SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns"
+            " WHERE table_schema = current_schema() AND table_name = 'link_codes' ORDER BY ordinal_position"
+        ).fetchall()
+        constraints = conn.execute(
+            "SELECT c.conname, pg_get_constraintdef(c.oid) FROM pg_constraint c"
+            " JOIN pg_namespace n ON n.oid = c.connamespace"
+            " WHERE n.nspname = current_schema() AND c.conrelid::regclass::text = 'link_codes'"
+        ).fetchall()
+        indexes = conn.execute(
+            "SELECT indexname, indexdef FROM pg_indexes"
+            " WHERE schemaname = current_schema() AND tablename = 'link_codes'"
+        ).fetchall()
+    assert columns == [
+        ("code_hash", "bytea", "NO", None),
+        ("user_id", "uuid", "NO", None),
+        ("created_at", "timestamp with time zone", "NO", "now()"),
+        ("expires_at", "timestamp with time zone", "NO", None),
+        ("used_at", "timestamp with time zone", "YES", None),
+    ]
+    assert dict(constraints) == {
+        "link_codes_pkey": "PRIMARY KEY (code_hash)",
+        "link_codes_code_hash_check": "CHECK ((octet_length(code_hash) = 32))",
+        "link_codes_user_id_fkey": "FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE",
+    }
+    assert {name: d.partition(f" ON {schema}.")[2] for name, d in indexes} == {
+        "link_codes_pkey": "link_codes USING btree (code_hash)",
+        "link_codes_user_id_idx": "link_codes USING btree (user_id)",
+    }
+
+
+def test_deleting_a_user_deletes_their_link_codes(conn):
+    kept, gone = add_user(conn), add_user(conn)
+    for user_id, mark in ((kept, b"k"), (gone, b"g")):
+        insert(conn, "link_codes", code_hash=mark * 32, user_id=user_id, expires_at=NOW)
+    conn.execute("DELETE FROM users WHERE id = %s", (gone,))
+    assert conn.execute("SELECT count(*) FROM link_codes").fetchone()[0] == 1
+
+
+def test_downgrade_to_0005_drops_only_the_link_codes(conn, migrated_url):
+    schema = schema_of(migrated_url)
+    command.downgrade(alembic_config(migrated_url), "0005")
+    assert tables_in(migrated_url, schema) == TABLES - {LINK_TABLE}
+    command.upgrade(alembic_config(migrated_url), "head")
+    assert tables_in(migrated_url, schema) == TABLES

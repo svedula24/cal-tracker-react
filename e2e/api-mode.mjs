@@ -10,7 +10,8 @@
 // app sends (below), then every request aborted to stand for an unreachable
 // API, and a revoked token (401). `npm run verify:sync` (e2e/sync-real.mjs)
 // is the same idea against the real backend. Last, the Connect ChatGPT screen
-// against mocked pairing-code and connection endpoints.
+// against mocked pairing-code and connection endpoints, and Link another device:
+// a code shown here, entered on a second, new install (a fresh browser context).
 // ────────────────────────────────────────────────────────────────────────────
 import { chromium } from 'playwright';
 import { randomUUID } from 'node:crypto';
@@ -55,15 +56,19 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const browser = await chromium.launch();
 // A fixed zone, so the checks know what the app sends as its timezone; the clipboard, for Copy.
 const ZONE = 'America/Los_Angeles';
-const page = await browser.newPage({ viewport: { width: 390, height: 844 }, timezoneId: ZONE, permissions: ['clipboard-read', 'clipboard-write'] });
-const btn = (name) => page.getByRole('button', { name, exact: true });
+const newPage = () => browser.newPage({ viewport: { width: 390, height: 844 }, timezoneId: ZONE, permissions: ['clipboard-read', 'clipboard-write'] });
+const page = await newPage();
+const btn = (name, on = page) => on.getByRole('button', { name, exact: true });
 const errors = [];
-page.on('pageerror', (e) => errors.push(String(e)));
-// The app's own console errors. The browser logs every failed or 401 request itself
-// ("Failed to load resource"), which the unreachable and 401 cases cause on purpose.
-page.on('console', (m) => {
-  if (m.type() === 'error' && !/^Failed to load resource/.test(m.text())) errors.push(`console.error: ${m.text().slice(0, 200)}`);
-});
+const watch = (p) => {
+  p.on('pageerror', (e) => errors.push(String(e)));
+  // The app's own console errors. The browser logs every failed, 400 or 401 request itself
+  // ("Failed to load resource"), which the unreachable, wrong-code and 401 cases cause on purpose.
+  p.on('console', (m) => {
+    if (m.type() === 'error' && !/^Failed to load resource/.test(m.text())) errors.push(`console.error: ${m.text().slice(0, 200)}`);
+  });
+};
+watch(page);
 const searches = []; // the q of every API request
 let bundle = 0; // requests for the bundled list's chunk
 page.on('request', (r) => {
@@ -90,7 +95,10 @@ const api = {
   connections: [], // what GET /api/v1/connections lists
   listed: [], // the token of every GET /api/v1/connections
   deleted: [], // the id of every DELETE /api/v1/connections/{id}
+  linkCodes: [], // every POST /api/v1/link-codes: { token, code, used }
+  links: [], // the body of every POST /api/v1/devices/link
 };
+const LINK_CODES = ['H4XR-9TWB', 'M3NP-7QKD'];
 /** A row changes on the server: the app gets it on its next sync, as from another client. */
 const serve = (table, row) => api.rows.push({ rev: ++api.rev, table, row });
 /** Revokes the app's current token: its next sync is answered 401. */
@@ -103,14 +111,19 @@ const count = (changes) => TABLES.reduce((n, t) => n + (changes?.[t]?.length ?? 
 const CORS = { 'access-control-allow-origin': '*' };
 const PREFLIGHT = { ...CORS, 'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS', 'access-control-allow-headers': 'authorization, content-type' };
 const json = (route, status, body, headers = {}) => route.fulfill({ status, contentType: 'application/json', headers: { ...CORS, ...headers }, body: JSON.stringify(body) });
-const mock = (pattern, method, answer) =>
-  page.route(pattern, async (route) => {
+// Every mocked endpoint, kept so a second page (another install) can be given the same API.
+const mocks = [];
+const mock = (pattern, method, answer) => {
+  const handler = async (route) => {
     const request = route.request();
     if (api.down) return route.abort();
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: PREFLIGHT });
     if (request.method() !== method) return json(route, 405, { detail: 'Method Not Allowed' });
     await answer(route, request);
-  });
+  };
+  mocks.push([pattern, handler]);
+  return page.route(pattern, handler);
+};
 
 await page.route('**/api/v1/foods/search*', async (route) => {
   const q = new URL(route.request().url()).searchParams.get('q');
@@ -202,6 +215,26 @@ await mock('**/api/v1/connections/*', 'DELETE', async (route, request) => {
   return api.connections.length < before ? route.fulfill({ status: 204, headers: CORS }) : json(route, 404, { detail: 'connection not found' });
 });
 
+// Link another device: a code for the signed-in install; another install sends it and gets a
+// token of its own for the same account (the server's rows are the same).
+await mock('**/api/v1/link-codes', 'POST', async (route, request) => {
+  const token = await bearer(request);
+  if (!token) return refuse(route);
+  const code = LINK_CODES[api.linkCodes.length];
+  api.linkCodes.push({ token, code, used: false });
+  return json(route, 201, { code, expires_at: new Date(Date.now() + 10 * 60_000).toISOString() });
+});
+await mock('**/api/v1/devices/link', 'POST', async (route, request) => {
+  const body = request.postDataJSON();
+  api.links.push(body);
+  const hit = api.linkCodes.find((c) => c.code === body?.code && !c.used);
+  if (!hit) return json(route, 400, { detail: 'invalid or expired code' });
+  hit.used = true;
+  const token = `kalo_e2e_linked_${api.links.length}`;
+  api.tokens.push(token);
+  return json(route, 201, { user_id: randomUUID(), token, timezone: ZONE });
+});
+
 let failed = 0;
 // `detail` (what the app sent) is printed only when the check fails.
 const check = (ok, what, detail) => {
@@ -250,6 +283,15 @@ const home = async (name) => {
 };
 
 try {
+  // ── A new install offers to link to another device first, and syncs nothing until answered ──
+  await open('/');
+  await btn('Already use Kalo? Link this device').waitFor({ timeout: 5000 });
+  await wait(3000); // longer than the push delay: proving that nothing is sent needs a wait
+  check(api.devices.length === 0 && api.requests.length === 0, 'a new install shows "Already use Kalo on another device?" and neither registers nor syncs meanwhile');
+  await btn('Not now').click();
+  await until('the offer to close', async () => (await btn('Not now').count()) === 0, 3000);
+  check((await stored('kalo.link.offer')) === '1', '"Not now" closes the offer for good (kalo.link.offer)');
+
   await open();
   check((await page.getByPlaceholder('Search foods', { exact: true }).count()) === 1, 'the placeholder has no food count');
   check((await page.getByText('Search USDA FoodData Central.', { exact: true }).count()) === 1, 'the empty prompt names the source');
@@ -598,6 +640,93 @@ try {
   await btn('Try again').click();
   await nutrition();
   check(true, 'an unreachable server offers Try again, which looks the code up again');
+
+  // ── Link another device: a code here, entered on a new install, which then has this account's data ──
+  await settled();
+  const phoneToken = api.tokens.at(-1);
+  const devicesBefore = api.devices.length;
+  await open('/goals');
+  await btn('Link another device').click();
+  await btn('Get code').click();
+  await page.getByLabel(`Code ${LINK_CODES[0]}`).waitFor({ timeout: 5000 });
+  check(api.linkCodes.length === 1 && api.linkCodes[0].token === phoneToken, 'Goals → Link another device → Get code asks for a link code with the device token');
+  const linkLeft = await page.getByText(/Expires in \d+:\d\d/).textContent();
+  check(/Expires in (10:00|9:5\d)/.test(linkLeft) && (await page.getByText(/Already use Kalo\? Link this device/).count()) === 1, `the code shows with a countdown (${linkLeft}) and says what to tap on the other device`);
+
+  const stew = {
+    id: randomUUID(), fdc_id: null, log_date: today, logged_at: new Date().toISOString(), name: 'Server stew', food_name: null, unit: 'serving', quantity: 1,
+    values: { calories: 410, protein_g: 30, carbs_g: 35, fat_g: 14, fiber_g: 6, sugar_g: 4, sodium_mg: 700 }, food_values: null, updated_at: new Date().toISOString(), deleted_at: null,
+  };
+  serve('food_logs', stew); // the account's data, on the server
+
+  const web = await newPage(); // a second install: nothing stored
+  watch(web);
+  for (const [pattern, handler] of mocks) await web.route(pattern, handler);
+  const webStored = (key) => web.evaluate((k) => localStorage.getItem(k), key);
+  const syncsBefore = api.requests.length;
+  await web.goto(base + '/', { waitUntil: 'networkidle' });
+  await btn('Already use Kalo? Link this device', web).click();
+  await web.getByLabel('Link code').waitFor({ timeout: 5000 });
+  check(await btn('Link', web).isDisabled(), 'Link is disabled until a whole code is typed');
+  await web.getByLabel('Link code').fill('zzzz-zzzz');
+  await btn('Link', web).click();
+  await web.getByText(/That code didn't work/).waitFor({ timeout: 5000 });
+  check(api.links.length === 1 && api.links[0].code === 'ZZZZ-ZZZZ', 'a wrong code is sent once (normalised) and the screen says it did not work');
+  await web.getByLabel('Link code').fill(LINK_CODES[0].toLowerCase().replace('-', ' '));
+  await btn('Link', web).click(); // a new install: no confirmation, it has only demo data
+  await web.getByText('Linked', { exact: true }).waitFor({ timeout: 10000 });
+  const linkedToken = api.tokens.at(-1);
+  const sentLink = api.links.at(-1);
+  check(
+    sentLink.code === LINK_CODES[0] && sentLink.platform === 'web' && sentLink.timezone === ZONE && linkedToken.startsWith('kalo_e2e_linked_'),
+    'the code is sent to POST /api/v1/devices/link with the platform and timezone', `sent: ${show(sentLink)}`,
+  );
+  check(((await webStored('kalo.token')) ?? '').replace(/^"|"$/g, '') === linkedToken, 'the new install keeps the token the link answered with');
+  const webSync = await until('the new install\'s first sync', () => api.requests.slice(syncsBefore).find((r) => r.token === linkedToken));
+  check(webSync.body.cursor === null && count(webSync.body.changes) === 0, 'its first sync pulls from the start and uploads nothing (no demo goals, steps or saved foods)', `sent: ${show(webSync.body)}`);
+  check(api.devices.length === devicesBefore, 'and it never registered an account of its own', `registrations: ${api.devices.length - devicesBefore}`);
+  await btn('Done', web).click();
+  await btn('Edit Server stew', web).waitFor({ timeout: 10000 });
+  check((await btn('Edit Whole Milk Latte', web).count()) === 0, "Home shows the account's food log, without the demo entries");
+  check(JSON.parse(await webStored('entries')).every((e) => e.id === stew.id), 'the demo data is gone from the device: only pulled entries are stored');
+  check((await btn('Not now', web).count()) === 0, 'the offer to link is gone');
+  check((await webStored('kalo.token.previous')) === null, 'a new install had no account, so none is kept to switch back to');
+  await web.close();
+
+  // ── "Link this device instead" on an install with data of its own: asks first, then replaces it ──
+  await open('/goals');
+  await btn('Link another device').click();
+  await btn('Link this device instead').click();
+  const fromPhone = api.requests.length;
+  api.linkCodes.push({ token: phoneToken, code: LINK_CODES[1], used: false }); // as if shown by another device
+  await page.getByLabel('Link code').fill(LINK_CODES[1]);
+  await btn('Link').click();
+  const warning = await page.getByText(/This device's [\d,]+ entr(y belongs|ies belong) to its own account/).textContent({ timeout: 5000 });
+  check(
+    api.links.length === 2 && /no device will open it until you switch back/.test(warning),
+    'on an install with its own data, Link first says how many entries are left behind on its account, and sends nothing', `shown: ${warning}`,
+  );
+  await btn('Replace and link').click();
+  await page.getByText('Linked', { exact: true }).waitFor({ timeout: 10000 });
+  const relinkedToken = api.tokens.at(-1);
+  const relinked = await until('the sync after linking', () => api.requests.slice(fromPhone).find((r) => r.token === relinkedToken));
+  check(relinked.body.cursor === null && count(relinked.body.changes) === 0, 'after linking it pulls from the start with the new token and uploads none of its old data', `sent: ${show(relinked.body)}`);
+  await settled();
+  check(JSON.parse(await stored('entries')).map((e) => e.id).join() === stew.id, "its entries are now the account's", `stored: ${(await stored('entries')).slice(0, 200)}`);
+  check((await stored('kalo.token.previous')) === phoneToken, 'the token of the account it left is kept (kalo.token.previous)');
+
+  // ── Switch back: the account left behind opens again ──
+  await open('/link-device');
+  await btn('Switch back to the previous account').click();
+  const beforeBack = api.requests.length;
+  await btn('Confirm switch back').click();
+  await page.getByText(/opens its previous account again/).waitFor({ timeout: 10000 });
+  const back = await until('the sync after switching back', () => api.requests.slice(beforeBack).find((r) => r.token === phoneToken));
+  check(back.body.cursor === null && count(back.body.changes) === 0, 'switching back syncs with the previous token, from the start, uploading nothing', `sent: ${show(back.body)}`);
+  check(
+    ((await stored('kalo.token')) ?? '').replace(/^"|"$/g, '') === phoneToken && (await stored('kalo.token.previous')) === relinkedToken,
+    'the tokens swap places, so the switch can be undone the same way',
+  );
 
   check(errors.length === 0, `no page errors and no console errors of the app's ${show(errors.slice(0, 3))}`);
 } catch (e) {

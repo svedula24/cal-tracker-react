@@ -170,3 +170,13 @@ test('whenReady resolves even when a subscriber throws during hydration', async 
   assert.equal(c.ready, true);
   assert.deepEqual(c.items, [{ id: 'stored' }]);
 });
+
+test('clear empties the collection and stores it empty, so the seed does not come back at the next load', async () => {
+  const seed = [{ id: 'demo' }];
+  const c = await hydrated(new Collection('clearme', seed));
+  await c.clear();
+  assert.deepEqual(c.items, []);
+  assert.equal(disk.get('clearme'), '[]');
+  const again = await hydrated(new Collection('clearme', seed));
+  assert.deepEqual(again.items, []);
+});

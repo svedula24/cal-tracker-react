@@ -8,6 +8,7 @@ import { KaloLogo } from '@/components/KaloMark';
 import { AddMenu } from '@/components/AddMenu';
 import { BOTTOM_SPACE, Fab, fabBottom } from '@/components/Fab';
 import { EntryCard } from '@/components/home/EntryCard';
+import { LinkOffer } from '@/components/home/LinkOffer';
 import {
   BurnedCard,
   DayTypeCard,
@@ -66,6 +67,7 @@ export default function Home() {
               <StreakPill />
             </View>
           </View>
+          <LinkOffer />
 
           <View className="mt-[15px]">
             <WeekStrip

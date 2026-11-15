@@ -802,3 +802,106 @@ test('scenario: first run in two batches, an edit in flight, a paged pull, a fai
   assert.deepEqual(t.outbox(), {});
   assert.deepEqual([t.disk.get('sync:cursor'), t.disk.get('sync:primed'), t.registers, t.applied.length], ['3', '1', 2, 2]);
 });
+
+// ── relink (Link another device) ──────────────────────────────────────────────
+
+test('relink: waits for the request in flight, pushes what is still waiting to the old account, then pulls from the start and uploads nothing', async () => {
+  const t = setup({ rows: { 'food_logs:a': 1, 'food_logs:b': 2 }, stored: { ...PRIMED, 'sync:cursor': '41' } });
+  t.sync.markDirty('food_logs', 'a');
+  await t.tick(2000);
+  assert.equal(t.pushes.length, 1); // in flight, with the old token
+  const order = [];
+  const relinked = t.sync.relink(async () => {
+    order.push('change');
+    t.rows.clear(); // the caller clears the local data
+  });
+  t.sync.markDirty('food_logs', 'b'); // written before the switch: still the old account's
+  await flush();
+  assert.deepEqual(order, []); // not before the request in flight ends
+  await t.answer({ cursor: 42 });
+  assert.equal(t.pushes.length, 2); // the last push, to the account being left
+  assert.deepEqual(t.pushes[1].body.changes.food_logs, [row('b', 2, T0)]);
+  assert.deepEqual(order, []);
+  await t.answer({ cursor: 43 });
+  await relinked;
+  await flush();
+  assert.deepEqual(order, ['change']);
+  assert.equal(t.pushes.length, 3);
+  assert.deepEqual(t.pushes[2].body, { cursor: null, changes: {} });
+  assert.deepEqual(t.outbox(), {});
+  assert.equal(t.registers, 0);
+  await t.answer({ cursor: 7, changes: { food_logs: [row('z', 9, T0)] } });
+  assert.deepEqual(t.applied.at(-1).food_logs, [row('z', 9, T0)]);
+  assert.equal(t.disk.get('sync:cursor'), '7');
+});
+
+test('relink: when the last push fails, the switch still happens (what was unsent is dropped)', async () => {
+  const t = setup({ rows: { 'food_logs:a': 1 } });
+  t.sync.markDirty('food_logs', 'a');
+  let changed = false;
+  const relinked = t.sync.relink(async () => {
+    changed = true;
+  });
+  await flush();
+  assert.equal(t.pushes.length, 1);
+  await t.fail();
+  await relinked;
+  await flush();
+  assert.equal(changed, true);
+  assert.deepEqual(t.pushes[1].body, { cursor: null, changes: {} });
+});
+
+test('relink on a never-synced install: the local rows are not uploaded (it stays primed)', async () => {
+  const t = setup({ rows: { 'goals:2020-01-01': 1 }, stored: {}, token: false });
+  await t.sync.relink(async () => {
+    t.token = true;
+  });
+  await flush();
+  assert.equal(t.registers, 0);
+  assert.deepEqual(t.bodies(), [{ cursor: null, changes: {} }]);
+});
+
+test('relink: the reset is stored before the change runs; no sync starts meanwhile; a rejected change is passed on', async () => {
+  const t = setup({ rows: { 'food_logs:a': 1 }, stored: { ...PRIMED, 'sync:cursor': '41' } });
+  const gate = deferred();
+  let seen;
+  const relinked = t.sync.relink(() => {
+    seen = ['sync:outbox', 'sync:cursor', 'sync:primed'].map((k) => t.disk.get(k));
+    return gate.promise;
+  });
+  await flush();
+  t.sync.markDirty('food_logs', 'a'); // written during the switch: kept, sent once sync resumes
+  await t.tick(60_000); // the push delay passes, and kick() too
+  t.sync.kick();
+  await flush();
+  assert.deepEqual(seen, ['{}', 'null', '1']); // stored before the caller stores a token
+  assert.equal(t.pushes.length, 0);
+  gate.reject(new Error('storage'));
+  await assert.rejects(relinked, /storage/);
+  await flush();
+  // Whatever token is stored now (the old one), the install starts over: it pulls everything, and
+  // uploads only the write made during the switch (none of what came before it).
+  assert.deepEqual(t.bodies(), [{ cursor: null, changes: { food_logs: [row('a', 1, T0)] } }]);
+});
+
+test('relink: when the reset cannot be stored, the change (which stores the token) never runs', async () => {
+  const t = setup({ rows: { 'food_logs:a': 1 } });
+  t.sync.kick();
+  await flush();
+  await t.answer({ cursor: 5 });
+  const set = t.disk.set.bind(t.disk);
+  let fail = true;
+  t.disk.set = (k, v) => {
+    if (fail && k === 'sync:cursor') throw new Error('disk full');
+    return set(k, v);
+  };
+  let changed = false;
+  await assert.rejects(
+    t.sync.relink(async () => {
+      changed = true;
+    }),
+    /disk full/,
+  );
+  fail = false;
+  assert.equal(changed, false);
+});

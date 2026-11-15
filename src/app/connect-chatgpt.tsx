@@ -1,22 +1,18 @@
-import * as Clipboard from 'expo-clipboard';
-import { Check, Copy, MessageSquare } from 'lucide-react-native';
+import { MessageSquare } from 'lucide-react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AccessibilityInfo, ActivityIndicator, AppState, Platform, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, AppState, ScrollView, Text, View } from 'react-native';
 
+import { announce, OneTimeCode, Step } from '@/components/OneTimeCode';
 import { Press } from '@/components/Press';
 import { Card, PushedScreen } from '@/components/Screen';
 import { API_URL } from '@/lib/config';
-import { codeDeadline, type Connection, createPairingCode, disconnect, formatCountdown, listConnections, type ProblemContext, problemMessage } from '@/lib/connectionsApi';
+import { codeDeadline, type Connection, createPairingCode, disconnect, listConnections, type ProblemContext, problemMessage } from '@/lib/connectionsApi';
 import { isDemoGoal, useGoals } from '@/lib/data';
 import { deviceToken, syncNow } from '@/lib/sync';
 import { SyncUnauthorized } from '@/lib/sync/types';
 import { tokens } from '@/lib/tokens';
 
 const c = tokens.colors;
-const MONO = Platform.select({ ios: 'Menlo', android: 'monospace', default: 'ui-monospace, Menlo, Consolas, monospace' });
-
-/** Says `message` with VoiceOver / TalkBack (a changed Text is not read by itself on iOS). */
-const announce = (message: string) => AccessibilityInfo.announceForAccessibility(message);
 
 /** The message for a failed request; a 401 also has sync register this phone again (as after any 401). */
 function failed(e: unknown, context: ProblemContext): string {
@@ -208,46 +204,14 @@ function CodePanel({ state, now, onGet }: { state: CodeState; now: number; onGet
 }
 
 function LiveCode({ code, left }: { code: string; left: number }) {
-  const [copied, setCopied] = useState<boolean | null>(null);
-  const copy = async () => {
-    // On web the browser may refuse (it resolves false); native always copies.
-    const ok = await Clipboard.setStringAsync(code).catch(() => false);
-    setCopied(ok);
-    announce(ok ? 'Copied.' : "Couldn't copy: select the code instead.");
-  };
-  const countdown = formatCountdown(left);
   return (
     <View>
-      <View className="mt-3 flex-row items-center justify-between rounded-tile bg-chip px-4 py-3">
-        <Text accessibilityLabel={`Code ${code}`} selectable className="text-[30px] font-bold text-foreground" style={{ fontFamily: MONO, letterSpacing: 2 }}>
-          {code}
-        </Text>
-        <Press accessibilityRole="button" accessibilityLabel="Copy code" onPress={copy} className="h-10 w-10 items-center justify-center rounded-full bg-card">
-          {copied ? <Check size={18} color={c.good} /> : <Copy size={18} color={c.foreground} />}
-        </Press>
-      </View>
-      {copied === null ? null : (
-        <Text accessibilityLiveRegion="polite" className="mt-2 text-[13px] text-muted">
-          {copied ? 'Copied.' : "Couldn't copy: select the code instead."}
-        </Text>
-      )}
-      <Text className={`${copied === null ? 'mt-2' : 'mt-[2px]'} text-[13px] text-muted`}>Expires in {countdown}</Text>
+      <OneTimeCode code={code} left={left} />
       <View className="mt-4" style={{ gap: 8 }}>
         <Step n={1} text="In ChatGPT on the web: Settings → Apps & Connectors → add Kalo." />
         <Step n={2} text="Enter this code when Kalo asks you to sign in." />
         <Step n={3} text="Leave “also log, edit and delete” checked to let ChatGPT make changes, or clear it for read only." />
       </View>
-    </View>
-  );
-}
-
-function Step({ n, text }: { n: number; text: string }) {
-  return (
-    <View className="flex-row">
-      <View className="mr-3 mt-[1px] h-[20px] w-[20px] items-center justify-center rounded-full bg-foreground">
-        <Text className="text-[12px] font-semibold text-background">{n}</Text>
-      </View>
-      <Text className="flex-1 text-[14px] leading-[20px] text-foreground">{text}</Text>
     </View>
   );
 }
