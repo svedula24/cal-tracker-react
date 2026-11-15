@@ -1,5 +1,5 @@
-import { type Ref, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { type AccessibilityActionEvent, FlatList, type FlatListInstance, Text, useWindowDimensions, View } from 'react-native';
+import { memo, type Ref, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { type AccessibilityActionEvent, type AccessibilityActionInfo, FlatList, type FlatListInstance, Text, useWindowDimensions, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
 import { Press } from '@/components/Press';
@@ -58,11 +58,15 @@ export function WeekStrip({ ref, selected, onSelect, todayProgress, onAwayChange
     pageRef.current = p;
     setPage(p);
   };
-  const scrollTo = (p: number, animated: boolean) => {
-    const target = Math.max(0, Math.min(pages - 1, p));
-    list.current?.scrollToOffset({ offset: (pages - 1 - target) * width, animated });
-    show(target);
-  };
+  const scrollTo = useCallback(
+    (p: number, animated: boolean) => {
+      const target = Math.max(0, Math.min(pages - 1, p));
+      list.current?.scrollToOffset({ offset: (pages - 1 - target) * width, animated });
+      pageRef.current = target;
+      setPage(target);
+    },
+    [pages, width],
+  );
 
   // Keep the shown page in place when the width or the page count changes (and on mount).
   useLayoutEffect(() => {
@@ -87,10 +91,14 @@ export function WeekStrip({ ref, selected, onSelect, todayProgress, onAwayChange
   }));
 
   // Screen readers: each day offers "Previous week" / "Next week" instead of a swipe.
-  const onAction = (e: AccessibilityActionEvent) => {
-    if (e.nativeEvent.actionName === 'previousWeek') scrollTo(pageRef.current + 1, true);
-    else if (e.nativeEvent.actionName === 'nextWeek') scrollTo(pageRef.current - 1, true);
-  };
+  // Stable while the width and page count are, so the memoized day cells are not re-rendered for it.
+  const onAction = useCallback(
+    (e: AccessibilityActionEvent) => {
+      if (e.nativeEvent.actionName === 'previousWeek') scrollTo(pageRef.current + 1, true);
+      else if (e.nativeEvent.actionName === 'nextWeek') scrollTo(pageRef.current - 1, true);
+    },
+    [scrollTo],
+  );
 
   return (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ marginVertical: -SHADOW_ROOM }}>
@@ -147,57 +155,89 @@ function StripPage({ page, today, width, kcal, selected, onSelect, todayProgress
   const days = useMemo(() => stripPage(page, today), [page, today]);
   // Each day is judged against the goal in force on that day; only the rendered pages ask.
   const budgets = useDayBudgets(days.map((d) => d.key));
-  const actions = [
-    ...(isOldest ? [] : [{ name: 'previousWeek', label: 'Previous week' }]),
-    ...(page > 0 ? [{ name: 'nextWeek', label: 'Next week' }] : []),
-  ];
+  const actions = useMemo(
+    () => [
+      ...(isOldest ? [] : [{ name: 'previousWeek', label: 'Previous week' }]),
+      ...(page > 0 ? [{ name: 'nextWeek', label: 'Next week' }] : []),
+    ],
+    [isOldest, page],
+  );
   return (
     <View style={{ width, paddingVertical: SHADOW_ROOM }} className="flex-row justify-between px-[22px]">
-      {days.map((d) => {
-        const active = d.key === selected;
-        const status = dayStatus(kcal.get(d.key) ?? 0, budgets[d.key]);
-        return (
-          <Press
-            key={d.key}
-            disabled={d.isFuture}
-            accessibilityRole="button"
-            accessibilityLabel={`${d.label} ${d.day}`}
-            accessibilityState={{ selected: active, disabled: d.isFuture }}
-            accessibilityActions={actions}
-            onAccessibilityAction={onAction}
-            onPress={() => onSelect(d.key)}
-            className={`w-[49px] items-center rounded-[15px] pb-[7px] pt-[9px] ${active ? 'bg-card' : ''}`}
-            style={active ? cardShadow : undefined}
-          >
-            <Text className={`mb-[6px] text-[12.5px] ${d.isFuture ? 'text-faint' : active ? 'font-medium text-foreground' : 'text-muted'}`}>
-              {d.label}
-            </Text>
-            {d.isToday ? (
-              <Ring size={SIZE} stroke={1.8} progress={todayProgress} color={tokens.colors.foreground}>
-                <Text className="text-[15px] text-foreground">{d.day}</Text>
-              </Ring>
-            ) : (
-              <View style={{ width: SIZE, height: SIZE }} className="items-center justify-center">
-                <Svg width={SIZE} height={SIZE} style={{ position: 'absolute' }}>
-                  <Circle
-                    cx={SIZE / 2}
-                    cy={SIZE / 2}
-                    r={SIZE / 2 - 1}
-                    fill="none"
-                    strokeWidth={1.8}
-                    stroke={d.isFuture || status === 'none' ? tokens.colors.track : status === 'good' ? tokens.colors.good : tokens.colors.bad}
-                    strokeDasharray={!d.isFuture && status === 'none' ? '3 3' : undefined}
-                  />
-                </Svg>
-                <Text className={`text-[15px] ${d.isFuture ? 'text-faint' : 'text-foreground'}`}>{d.day}</Text>
-              </View>
-            )}
-          </Press>
-        );
-      })}
+      {days.map((d) => (
+        <DayCell
+          key={d.key}
+          dayKey={d.key}
+          label={d.label}
+          day={d.day}
+          isToday={d.isToday}
+          isFuture={d.isFuture}
+          active={d.key === selected}
+          status={dayStatus(kcal.get(d.key) ?? 0, budgets[d.key])}
+          todayProgress={d.isToday ? todayProgress : 0}
+          actions={actions}
+          onAction={onAction}
+          onSelect={onSelect}
+        />
+      ))}
     </View>
   );
 }
+
+type CellProps = {
+  dayKey: string;
+  label: string;
+  day: number;
+  isToday: boolean;
+  isFuture: boolean;
+  active: boolean;
+  status: ReturnType<typeof dayStatus>;
+  todayProgress: number;
+  actions: AccessibilityActionInfo[];
+  onAction: (e: AccessibilityActionEvent) => void;
+  onSelect: (key: string) => void;
+};
+
+/** One day. Memoized on plain props, so a new selection re-renders only the two days it changes. */
+const DayCell = memo(function DayCell({ dayKey, label, day, isToday, isFuture, active, status, todayProgress, actions, onAction, onSelect }: CellProps) {
+  return (
+    <Press
+      disabled={isFuture}
+      accessibilityRole="button"
+      accessibilityLabel={`${label} ${day}`}
+      accessibilityState={{ selected: active, disabled: isFuture }}
+      accessibilityActions={actions}
+      onAccessibilityAction={onAction}
+      onPress={() => onSelect(dayKey)}
+      className={`w-[49px] items-center rounded-[15px] pb-[7px] pt-[9px] ${active ? 'bg-card' : ''}`}
+      style={active ? cardShadow : undefined}
+    >
+      <Text className={`mb-[6px] text-[12.5px] ${isFuture ? 'text-faint' : active ? 'font-medium text-foreground' : 'text-muted'}`}>
+        {label}
+      </Text>
+      {isToday ? (
+        <Ring size={SIZE} stroke={1.8} progress={todayProgress} color={tokens.colors.foreground}>
+          <Text className="text-[15px] text-foreground">{day}</Text>
+        </Ring>
+      ) : (
+        <View style={{ width: SIZE, height: SIZE }} className="items-center justify-center">
+          <Svg width={SIZE} height={SIZE} style={{ position: 'absolute' }}>
+            <Circle
+              cx={SIZE / 2}
+              cy={SIZE / 2}
+              r={SIZE / 2 - 1}
+              fill="none"
+              strokeWidth={1.8}
+              stroke={isFuture || status === 'none' ? tokens.colors.track : status === 'good' ? tokens.colors.good : tokens.colors.bad}
+              strokeDasharray={!isFuture && status === 'none' ? '3 3' : undefined}
+            />
+          </Svg>
+          <Text className={`text-[15px] ${isFuture ? 'text-faint' : 'text-foreground'}`}>{day}</Text>
+        </View>
+      )}
+    </Press>
+  );
+});
 
 /** On Home's top bar while the strip is away from today: back to the first page, today selected. */
 export function TodayButton({ onPress }: { onPress: () => void }) {

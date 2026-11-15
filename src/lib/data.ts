@@ -3,6 +3,8 @@
 // background sync (src/lib/sync/), which copies it to the server later. First
 // launch is seeded so Home matches the reference screenshots exactly, until the
 // user has entries of their own (dropDemoEntries, at the next load).
+import { useMemo } from 'react';
+
 import { getCollection, makeId, useCollection } from '@/lib/store';
 import {
   addDays,
@@ -248,22 +250,28 @@ export const useGoalOn = (date: string): Goals => goalFor(useGoalRows(), date);
 /** Everything Home shows for one day, derived from the logs and the goal in force that day. */
 export function useDay(date: string) {
   const goals = useGoalOn(date);
-  const entries = useEntries().items.filter((e) => e.date === date).sort((a, b) => b.time.localeCompare(a.time));
-  const log: DayLog = useDayLogs().items.find((d) => d.id === date) ?? { id: date, steps: 0, rollover: 0, dayType: null, workoutKcal: null };
+  const all = useEntries().items;
+  const logs = useDayLogs().items;
+  // Memoized so a re-render with the same data hands Home's cards the same objects (they skip
+  // rendering).
+  return useMemo(() => {
+    const entries = all.filter((e) => e.date === date).sort((a, b) => b.time.localeCompare(a.time));
+    const log: DayLog = logs.find((d) => d.id === date) ?? { id: date, steps: 0, rollover: 0, dayType: null, workoutKcal: null };
 
-  const totals = sum(entries);
-  const target = dayTarget(goals, log);
-  const budget = target.calories + (log.rollover ?? 0);
-  // The steps' share of the adjustment, shown on its own on the activity page.
-  const stepsKcal = stepsToCalories(log.steps);
+    const totals = sum(entries);
+    const target = dayTarget(goals, log);
+    const budget = target.calories + (log.rollover ?? 0);
+    // The steps' share of the adjustment, shown on its own on the activity page.
+    const stepsKcal = stepsToCalories(log.steps);
 
-  return {
-    goals, target, entries, log, totals, stepsKcal, budget,
-    // Calories added for the day's activity (steps + workout / active recovery).
-    burned: target.adjustment,
-    score: dailyScore(totals, budget, target),
-    health: healthScore(totals, budget, { ...target, goal: goals.goal }),
-  };
+    return {
+      goals, target, entries, log, totals, stepsKcal, budget,
+      // Calories added for the day's activity (steps + workout / active recovery).
+      burned: target.adjustment,
+      score: dailyScore(totals, budget, target),
+      health: healthScore(totals, budget, { ...target, goal: goals.goal }),
+    };
+  }, [all, logs, goals, date]);
 }
 
 /** ISO timestamp for "now" moved onto `date` (logging to a selected day). */
