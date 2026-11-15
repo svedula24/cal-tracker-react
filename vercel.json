@@ -4,7 +4,7 @@
     "web": {
       "root": "./",
       "installCommand": "npm ci",
-      "buildCommand": "EXPO_PUBLIC_API_URL=\"${PUBLIC_URL:?Set PUBLIC_URL in the Vercel project settings}\" npx expo export --platform web && node scripts/sw-manifest.mjs dist",
+      "buildCommand": "EXPO_PUBLIC_API_URL=\"${PUBLIC_URL:?Set PUBLIC_URL in the Vercel project settings}\" npx expo export --platform web && if [ -f public/sw.js ]; then node scripts/sw-manifest.mjs dist; fi",
       "outputDirectory": "dist",
       "rewrites": [
         {

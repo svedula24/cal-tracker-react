@@ -575,8 +575,10 @@ Marketplace). The Mac stops being the server: no ngrok, no uvicorn, no docker.
 [Services](https://vercel.com/docs/services), in beta on all plans):
 
 - `web`: the repo root. Vercel runs `npm ci`, then `npx expo export --platform web` with
-  `EXPO_PUBLIC_API_URL` set to `PUBLIC_URL`, then `node scripts/sw-manifest.mjs dist` (writes
-  `dist/sw-files.json` and stamps a build id into `dist/sw.js`), and serves `dist/` from its CDN.
+  `EXPO_PUBLIC_API_URL` set to `PUBLIC_URL`, then, when the app has a service worker (`public/sw.js`, from the
+  home-screen web app change), `node scripts/sw-manifest.mjs dist` (writes `dist/sw-files.json` and stamps a
+  build id into `dist/sw.js`; the build fails if the worker exists but the script doesn't), and serves `dist/`
+  from its CDN.
   Without `PUBLIC_URL`, or if that script is missing or fails, the build fails rather than ship a
   web app without its API or with a stale service worker. Every path that is not
   a file gets `index.html` (the app is a single-page export, `app.json` `web.output: "single"`).
@@ -690,6 +692,7 @@ curl -s $U/.well-known/oauth-authorization-server             # "issuer" is $U
 curl -s $U/.well-known/oauth-protected-resource/mcp           # "resource" is $U/mcp
 curl -s -i -X POST $U/mcp | head -1                           # 401 (needs a ChatGPT token)
 curl -s -o /dev/null -w '%{http_code}\n' $U/docs              # 200 but the web app, not Swagger
+# The next two need the home-screen web app (service worker) change:
 curl -sI $U/sw.js | grep -iE '^(content-type|cache-control)'  # text/javascript, no-cache (not index.html)
 curl -sI $U/sw-files.json | grep -iE '^(content-type|cache-control)'  # application/json, no-cache
 curl -sI $U/manifest.json | grep -i '^content-type'          # application/manifest+json
