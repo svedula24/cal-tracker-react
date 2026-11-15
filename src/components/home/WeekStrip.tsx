@@ -92,6 +92,8 @@ export function WeekStrip({ ref, selected, onSelect, todayProgress, onAwayChange
     else if (e.nativeEvent.actionName === 'nextWeek') scrollTo(pageRef.current - 1, true);
   };
 
+  const extra = useMemo(() => ({ selected, todayProgress, width, pages, kcal }), [selected, todayProgress, width, pages, kcal]);
+
   return (
     <View onLayout={(e) => setWidth(e.nativeEvent.layout.width)} style={{ marginVertical: -SHADOW_ROOM }}>
       <FlatList
@@ -101,7 +103,9 @@ export function WeekStrip({ ref, selected, onSelect, todayProgress, onAwayChange
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         data={data}
-        extraData={`${selected}|${todayProgress}|${width}|${pages}`}
+        // Everything the pages draw from: a new value re-renders the mounted pages (FlatList otherwise
+        // keeps them as they are). `kcal` is new whenever an entry changes, so past rings follow edits.
+        extraData={extra}
         keyExtractor={(p) => String(p)}
         getItemLayout={(_, index) => ({ length: width, offset: width * index, index })}
         initialScrollIndex={pages - 1 - page}
