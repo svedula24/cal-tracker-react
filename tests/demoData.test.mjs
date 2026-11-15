@@ -66,6 +66,9 @@ test('saved foods: the three demo bookmarks without savedAt; one the user saved 
   for (const id of ['usda:2708118', 'usda:170894', 'usda:169640']) {
     assert.equal(isDemoSaved({ id }), true);
     assert.equal(isDemoSaved({ id, savedAt: '2026-11-12T10:00:00.000Z' }), false);
+    // pulled from the server, which stores a bookmark without savedAt as 2020-01-01
+    assert.equal(isDemoSaved({ id, savedAt: '2020-01-01T00:00:00.000Z' }), true);
+    assert.equal(isDemoSaved({ id, savedAt: '2020-01-01T00:00:00+00:00' }), true);
   }
   assert.equal(isDemoSaved({ id: 'usda:2709224' }), false);
 });

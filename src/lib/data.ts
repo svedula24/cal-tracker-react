@@ -184,7 +184,8 @@ export const useSavedFoods = () => ({
 // removed once per install, as the user's own deletions would be: tombstones go to the server, so
 // it and every linked device drop them too. Demo entries were never synced: dropped at load
 // (dropDemoEntries). Goals are left alone.
-const DEMO_CLEANED = 'kalo.demo.cleaned';
+// v2: runs once more, for demo bookmarks pulled from the server with its stand-in date (isDemoSaved).
+const DEMO_CLEANED = 'kalo.demo.cleaned.v2';
 let demoCleanup: Promise<boolean> | null = null;
 
 /**
