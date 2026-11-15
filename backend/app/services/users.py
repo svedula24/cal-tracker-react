@@ -22,6 +22,9 @@ from app.models.user_data import User, UserToken
 from app.timezones import known_timezone
 
 TOKEN_PREFIX = "kalo_"
+# The label of an integration token (app/services/integrations.py) starts with this. Such a token is
+# accepted only where a route asks for it (`integrations=True`): it can set a day's steps and nothing else.
+INTEGRATION_LABEL = "integration:"
 # last_used_at is rewritten at most this often, so an authenticated read is normally one SELECT.
 TOUCH_EVERY = timedelta(minutes=1)
 
@@ -57,8 +60,14 @@ def register_device(session: Session, label: str | None, timezone: str | None = 
     return user, token
 
 
-def user_for_token(session: Session, token: str) -> User | None:
+def is_integration(label: str | None) -> bool:
+    return label is not None and label.startswith(INTEGRATION_LABEL)
+
+
+def user_for_token(session: Session, token: str, *, integrations: bool = False) -> User | None:
     """The user a live (not revoked) token belongs to, or None. Does not commit.
+
+    An integration token counts only when `integrations` is true; otherwise it is None, like an unknown one.
 
     Records the use in last_used_at when the stored value is missing or older than TOUCH_EVERY (by
     the database's clock) and leaves that UPDATE pending, for the caller to commit (see
@@ -66,14 +75,16 @@ def user_for_token(session: Session, token: str) -> User | None:
     requests only one writes the row; a fresh token costs the one SELECT and no write.
     """
     stmt = (
-        select(User, UserToken.id, _STALE)
+        select(User, UserToken.id, UserToken.label, _STALE)
         .join(UserToken, UserToken.user_id == User.id)
         .where(UserToken.token_hash == hash_token(token), UserToken.revoked_at.is_(None))
     )
     row = session.execute(stmt).one_or_none()
     if row is None:
         return None
-    user, token_id, stale = row
+    user, token_id, label, stale = row
+    if is_integration(label) and not integrations:
+        return None
     if stale:
         session.execute(update(UserToken).where(UserToken.id == token_id, _STALE).values(last_used_at=func.now()))
     return user
