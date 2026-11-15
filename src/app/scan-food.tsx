@@ -1,4 +1,4 @@
-import { CameraView, type PermissionResponse, useCameraPermissions } from 'expo-camera';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
 import { router, useIsFocused } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
@@ -24,16 +24,6 @@ import { tokens } from '@/lib/tokens';
 const BARCODE_TYPES: ('ean13' | 'ean8' | 'upc_a' | 'upc_e')[] = ['ean13', 'ean8', 'upc_a', 'upc_e'];
 const LOOKUP_TIMEOUT_MS = 15_000;
 const native = Platform.OS !== 'web';
-
-// The permission hook only where there is a camera to ask for: chosen once, so every render calls
-// the same hook. Web never shows the camera.
-const noCamera = () => Promise.reject<PermissionResponse>(new Error('No camera on web'));
-const useWebPermission = (): [PermissionResponse | null, () => Promise<PermissionResponse>, () => Promise<PermissionResponse>] => [
-  null,
-  noCamera,
-  noCamera,
-];
-const usePermission = native ? useCameraPermissions : useWebPermission;
 
 type Phase =
   | { kind: 'idle' } // scanning (native) or waiting for a typed number (web)
@@ -135,7 +125,7 @@ type LookupState = ReturnType<typeof useLookup>;
 function CameraScanner({ phase, busy, lookup, scanAgain }: LookupState) {
   const focused = useIsFocused();
   const insets = useSafeAreaInsets();
-  const [permission, requestPermission, getPermission] = usePermission();
+  const [permission, requestPermission, getPermission] = useCameraPermissions();
 
   // The hook reads the permission once: read it again when the user comes back from Settings.
   useEffect(() => {
