@@ -101,6 +101,8 @@ test('searchFoodsApi: the cut counts code points, so an emoji at the limit is ke
 test('searchFoodsApi: an error status is ApiUnavailable', async () => {
   await unavailable(searchFoodsApi('http://api.test', 'banana', { fetch: fakeFetch({ detail: 'database unavailable' }, 503) }));
   await unavailable(searchFoodsApi('http://api.test', 'banana', { fetch: fakeFetch({ detail: 'oops' }, 500) }));
+  // Over the server's per-address search limit: the screen falls back to the bundled list like any outage.
+  await unavailable(searchFoodsApi('http://api.test', 'banana', { fetch: fakeFetch({ detail: 'too many food searches, try again later' }, 429) }));
   await unavailable(searchFoodsApi('http://api.test', 'banana', { fetch: fakeFetch({ detail: [{ msg: 'blank' }] }, 422) }));
   await unavailable(searchFoodsApi('http://api.test', 'banana', { fetch: fakeFetch('Not found', 404) }));
 });
