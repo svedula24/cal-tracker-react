@@ -14,9 +14,10 @@ from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from sqlalchemy.orm import Session, sessionmaker
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.api import oauth as oauth_api
 from app.api.limits import BodyLimit, SlidingWindow
@@ -24,12 +25,13 @@ from app.api.v1.connections import CODES_PER_HOUR
 from app.api.v1.connections import router as connections_router
 from app.api.v1.devices import router as devices_router
 from app.api.v1.food_logs import router as food_logs_router
+from app.api.v1.foods import BARCODE_LOOKUPS_PER_HOUR, OFF_READS_PER_MINUTE
 from app.api.v1.foods import router as foods_router
 from app.api.v1.goals import daily_activity_router, goals_router
 from app.api.v1.nutrition import router as nutrition_router
 from app.api.v1.sync import router as sync_router
 from app.db.session import make_engine
-from app.settings import Settings, get_settings
+from app.settings import Settings, get_settings, host_name
 from kalo.db import database_url, require_head
 
 # A household or office shares one address; an app registers once per install.
@@ -38,6 +40,44 @@ REGISTRATIONS_PER_HOUR = 20
 # The largest request body accepted. The biggest legitimate one is a sync push of 500 rows, about
 # 300 kB; without a limit the whole body is read and parsed before the 500-row check can refuse it.
 MAX_BODY_BYTES = 2 * 1024 * 1024
+
+
+def public_path(path: str) -> bool:
+    """Whether `path` may be served on the public host: /mcp, or anything under /mcp/, /oauth/ or /.well-known/.
+
+    The same paths as ops/ngrok-policy.yml (plus /mcp/...). Matched on the path as it is routed: Starlette
+    neither collapses "..", nor "." nor "//", so a path with such a segment is refused rather than trusted
+    to route where its prefix says.
+    """
+    if path != "/mcp" and not path.startswith(("/mcp/", "/oauth/", "/.well-known/")):
+        return False
+    return not any(segment in (".", "..") for segment in path.split("/")[1:]) and "//" not in path
+
+
+class PublicHostGuard:
+    """404 for every request on PUBLIC_URL's host whose path is not public (`public_path`).
+
+    The tunnel's traffic policy does the same at ngrok; this keeps the REST API, /docs and /openapi.json
+    off the public host even if the tunnel is started without that policy. Requests on any other host
+    (localhost, the Mac's LAN address the phone uses) pass untouched. The Host header is compared without
+    its port and case; a request with several Host headers is guarded if any of them is the public host.
+    Plain ASGI, like BodyLimit.
+    """
+
+    def __init__(self, app: ASGIApp, host: str) -> None:
+        self.app = app
+        self.host = host
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] in ("http", "websocket") and not public_path(scope["path"]):
+            hosts = (host_name(value.decode("latin-1")) for key, value in scope["headers"] if key == b"host")
+            if self.host in hosts:
+                if scope["type"] == "websocket":
+                    await send({"type": "websocket.close", "code": 1008})
+                else:
+                    await PlainTextResponse("Not found", status_code=404)(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def create_app(url: str | None = None, settings: Settings | None = None, token_verifier: Any = None) -> FastAPI:
@@ -98,6 +138,9 @@ def create_app(url: str | None = None, settings: Settings | None = None, token_v
     app.state.pairing_codes = SlidingWindow(CODES_PER_HOUR, per_seconds=3600)
     app.state.pairing_attempts = SlidingWindow(*oauth_api.ATTEMPTS_PER_ADDRESS)
     app.state.pairing_attempts_overall = SlidingWindow(*oauth_api.ATTEMPTS_OVERALL)
+    # Barcode lookups per user: they share the server's one Open Food Facts allowance.
+    app.state.barcode_lookups = SlidingWindow(BARCODE_LOOKUPS_PER_HOUR, per_seconds=3600)
+    app.state.off_reads = SlidingWindow(OFF_READS_PER_MINUTE, per_seconds=60)
     # Refused by its declared size, before any of it is read. Added before the CORS middleware, which
     # therefore wraps it: the 413 is readable cross-origin.
     app.add_middleware(BodyLimit, max_bytes=MAX_BODY_BYTES)
@@ -115,6 +158,11 @@ def create_app(url: str | None = None, settings: Settings | None = None, token_v
     # A page of 50 foods with their portions is 18 to 36 kB of JSON and gzips to about 3 kB (measured
     # on banana, rice, chicken breast): less for a phone to download. Small bodies are left alone.
     app.add_middleware(GZipMiddleware, minimum_size=1000)
+    # Added last, so it is the outermost: on the public host a hidden path is refused before CORS, the
+    # body limit, gzip or routing do any work. Its 404 carries no CORS headers (unlike the 413 above), as
+    # at ngrok: those paths are not served there to any origin, and a preflight to them fails too.
+    if settings.public_host is not None:
+        app.add_middleware(PublicHostGuard, host=settings.public_host)
 
     # A request waits pool_timeout seconds for a free connection, then gets a 503 rather than a 500.
     @app.exception_handler(PoolTimeout)

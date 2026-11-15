@@ -354,3 +354,20 @@ def test_registration_is_limited_per_address(client, monkeypatch):
     monkeypatch.setattr(limiter, "clock", lambda: limiter._events["testclient"][-1] + 3601)
     assert client.post("/api/v1/devices").status_code == 201
 
+
+def test_closed_registration_is_403_and_creates_nothing(migrated_url, db):
+    from app.settings import Settings
+
+    with TestClient(create_app(migrated_url, settings=Settings(allow_registration=False))) as closed:
+        refused = closed.post("/api/v1/devices", json={"platform": "ios"})
+        assert refused.status_code == 403
+        assert refused.json() == {"detail": "registration is closed on this server"}
+        # Refused before the body is validated and before the rate limit counts.
+        assert closed.post("/api/v1/devices", json={"platform": 7}).status_code == 403
+        assert closed.app.state.registrations._events == {}
+    assert db.execute("SELECT count(*) FROM users").fetchone()[0] == 0
+
+
+def test_open_registration_is_the_default(client):
+    assert client.app.state.settings.allow_registration is True
+    assert client.post("/api/v1/devices", json={}).status_code == 201

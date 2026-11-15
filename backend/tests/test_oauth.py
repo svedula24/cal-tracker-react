@@ -24,7 +24,7 @@ from app.main import create_app
 from app.services import oauth, pairing
 from app.settings import DEFAULT_CLIENT_IDS, DEFAULT_REDIRECT_URIS, Settings, get_settings
 
-PUBLIC = "https://kalo-test.ngrok.app"
+PUBLIC = "https://kalo.example"
 RESOURCE = f"{PUBLIC}/mcp"
 SECRET = b"s" * 32
 SETTINGS = Settings(public_url=PUBLIC, secret=SECRET)
@@ -212,6 +212,21 @@ def test_settings_from_the_environment():
         get_settings({"PUBLIC_URL": PUBLIC, "KALO_SECRET": "short"})
     with pytest.raises(ValueError, match="https"):
         get_settings({"PUBLIC_URL": "http://kalo.example", "KALO_SECRET": "k" * 32})
+
+
+@pytest.mark.parametrize(
+    ("value", "allowed"),
+    [(None, True), ("", True), (" ", True), ("true", True), ("1", True), ("On", True),
+     ("false", False), ("FALSE", False), ("0", False), ("no", False), (" off ", False)],
+)  # fmt: skip
+def test_allow_registration_from_the_environment(value, allowed):
+    env = {} if value is None else {"ALLOW_REGISTRATION": value}
+    assert get_settings(env).allow_registration is allowed
+
+
+def test_a_mistyped_allow_registration_is_refused():
+    with pytest.raises(ValueError, match="ALLOW_REGISTRATION"):
+        get_settings({"ALLOW_REGISTRATION": "flase"})
 
 
 # ---- Pairing codes (pure) ----
