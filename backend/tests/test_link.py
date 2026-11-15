@@ -218,8 +218,8 @@ def test_register_limits_takes_another_limiter():
     made = []
 
     class Limiter:
-        def __init__(self, limit, per_seconds):
-            made.append((limit, per_seconds))
+        def __init__(self, name, limit, per_seconds):
+            made.append((name, limit, per_seconds))
 
     from fastapi import FastAPI
 
@@ -227,9 +227,19 @@ def test_register_limits_takes_another_limiter():
 
     app = FastAPI()
     register_limits(app, Limiter)
-    assert made == [(10, 3600), (10, 900), (1000, 3600)]
-    names = ("link_codes", "link_attempts", "link_attempts_overall")
-    assert all(isinstance(getattr(app.state, name), Limiter) for name in names)
+    assert made == [("link_codes", 10, 3600), ("link_attempts", 10, 900), ("link_attempts_overall", 1000, 3600)]
+    assert all(isinstance(getattr(app.state, name), Limiter) for name, _, _ in made)
+
+
+def test_link_attempts_are_counted_in_postgres_with_rate_limits_db(migrated_url, db):
+    with TestClient(create_app(migrated_url, settings=Settings(rate_limits="db"))) as client:
+        for _ in range(10):
+            assert link(client, "ZZZZ-ZZZZ").status_code == 400
+    names = dict(db.execute("SELECT name, count(*) FROM rate_limits GROUP BY name").fetchall())
+    assert names["link_attempts"] == 1 and names["link_attempts_overall"] == 1
+    # Another instance (a new app) still refuses the address: the count is in the database.
+    with TestClient(create_app(migrated_url, settings=Settings(rate_limits="db"))) as again:
+        assert link(again, "ZZZZ-ZZZZ").status_code == 429
 
 
 def test_codes_and_tokens_are_not_logged_or_stored_in_the_clear(client, db, caplog):

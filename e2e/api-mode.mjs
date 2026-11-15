@@ -56,7 +56,9 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const browser = await chromium.launch();
 // A fixed zone, so the checks know what the app sends as its timezone; the clipboard, for Copy.
 const ZONE = 'America/Los_Angeles';
-const newPage = () => browser.newPage({ viewport: { width: 390, height: 844 }, timezoneId: ZONE, permissions: ['clipboard-read', 'clipboard-write'] });
+// (The service worker, public/sw.js, is left out here so every request reaches the routes above; e2e/pwa.mjs tests it.)
+const newPage = () =>
+  browser.newPage({ viewport: { width: 390, height: 844 }, timezoneId: ZONE, permissions: ['clipboard-read', 'clipboard-write'], serviceWorkers: 'block' });
 const page = await newPage();
 const btn = (name, on = page) => on.getByRole('button', { name, exact: true });
 const errors = [];
@@ -97,6 +99,9 @@ const api = {
   deleted: [], // the id of every DELETE /api/v1/connections/{id}
   linkCodes: [], // every POST /api/v1/link-codes: { token, code, used }
   links: [], // the body of every POST /api/v1/devices/link
+  healthTokens: [], // what GET /api/v1/integration-tokens lists
+  healthMade: [], // { token, body } of every POST /api/v1/integration-tokens
+  healthRevoked: [], // the id of every DELETE /api/v1/integration-tokens/{id}
 };
 const LINK_CODES = ['H4XR-9TWB', 'M3NP-7QKD'];
 /** A row changes on the server: the app gets it on its next sync, as from another client. */
@@ -233,6 +238,28 @@ await mock('**/api/v1/devices/link', 'POST', async (route, request) => {
   const token = `kalo_e2e_linked_${api.links.length}`;
   api.tokens.push(token);
   return json(route, 201, { user_id: randomUUID(), token, timezone: ZONE });
+});
+// GET and POST share the path, so one route answers both (a second `mock` on it would answer GET 405).
+await page.route('**/api/v1/integration-tokens', async (route) => {
+  const request = route.request();
+  if (api.down) return route.abort();
+  if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: PREFLIGHT });
+  const token = await bearer(request);
+  if (!token) return refuse(route);
+  if (request.method() === 'GET') return json(route, 200, { tokens: api.healthTokens });
+  if (request.method() !== 'POST') return json(route, 405, { detail: 'Method Not Allowed' });
+  api.healthMade.push({ token, body: request.postDataJSON() });
+  const made = { id: randomUUID(), label: request.postDataJSON()?.label ?? 'Apple Health', created_at: new Date().toISOString() };
+  api.healthTokens.unshift({ ...made, last_used_at: null });
+  return json(route, 201, { ...made, token: `kalo_health_${api.healthMade.length}` }, { 'cache-control': 'no-store' });
+});
+await mock('**/api/v1/integration-tokens/*', 'DELETE', async (route, request) => {
+  if (!(await bearer(request))) return refuse(route);
+  const id = decodeURIComponent(new URL(request.url()).pathname.split('/').pop());
+  api.healthRevoked.push(id);
+  const before = api.healthTokens.length;
+  api.healthTokens = api.healthTokens.filter((t) => t.id !== id);
+  return api.healthTokens.length < before ? route.fulfill({ status: 204, headers: CORS }) : json(route, 404, { detail: 'integration token not found' });
 });
 
 let failed = 0;
@@ -593,8 +620,46 @@ try {
   const gone = api.deleted.at(-1);
   check(api.deleted.length === 1 && api.connections.length === 0 && gone !== undefined, 'confirming sends DELETE /api/v1/connections/{id} and removes the row', `deleted: ${show(api.deleted)}`);
 
+  // ── Apple Health steps: create a token (shown once), the Shortcut's URL, Revoke ──
+  await open('/goals');
+  await btn('Apple Health steps').click();
+  await page.getByText('No tokens yet.').waitFor({ timeout: 5000 });
+  check(true, 'the Goals row opens Apple Health steps, which lists the Health tokens (none yet)');
+  check(
+    (await page.getByText('http://127.0.0.1:9/api/v1/daily-activity/{date}/steps', { exact: true }).count()) === 1 && (await page.getByText(/yyyy-MM-dd/).count()) >= 1,
+    'it shows the URL the Shortcut calls, with a {date} placeholder and the yyyy-MM-dd format',
+  );
+  await btn('Create token').click();
+  await page.getByText('kalo_health_1', { exact: true }).waitFor({ timeout: 5000 });
+  check(
+    api.healthMade.length === 1 && api.healthMade[0].token === token && api.healthMade[0].body?.label === 'Apple Health',
+    'Create token sends POST /api/v1/integration-tokens once, with the device token, and shows the new token',
+    `sent: ${show(api.healthMade)}`,
+  );
+  await btn('Copy token').click();
+  await page.getByText(/^Copied/).first().waitFor({ timeout: 3000 });
+  check((await page.evaluate(() => navigator.clipboard.readText())) === 'kalo_health_1', 'Copy puts the token on the clipboard');
+  await btn('Revoke Apple Health').waitFor({ timeout: 5000 });
+  check(true, 'the new token is listed, with Revoke');
+  await btn('Revoke Apple Health').click();
+  check(api.healthRevoked.length === 0, 'Revoke asks first and sends nothing yet');
+  await btn('Confirm revoke Apple Health').click();
+  await page.getByText('No tokens yet.').waitFor({ timeout: 5000 });
+  check(api.healthRevoked.length === 1 && api.healthTokens.length === 0, 'confirming sends DELETE /api/v1/integration-tokens/{id} and removes the row', `revoked: ${show(api.healthRevoked)}`);
+  check((await page.getByText('kalo_health_1').count()) === 0 && (await btn('Create token').count()) === 1, 'revoking the token just created also clears it from the panel');
+  await btn('Create token').click();
+  await page.getByText('kalo_health_2', { exact: true }).waitFor({ timeout: 5000 });
+  await open('/health-steps');
+  await btn('Revoke Apple Health').waitFor({ timeout: 5000 });
+  check((await page.getByText('kalo_health_2').count()) === 0 && (await btn('Create token').count()) === 1, 'the token is shown once: opening the screen again does not show it');
+  await btn('Revoke Apple Health').click();
+  await btn('Confirm revoke Apple Health').click();
+  await page.getByText('No tokens yet.').waitFor({ timeout: 5000 });
+  check(api.healthRevoked.length === 2, 'a token listed after reopening is revoked the same way');
+
   // ── Scan barcode: a typed code is looked up with the token; the product opens in Nutrition ──
-  // (the camera does not run in a headless browser; the typed code takes the same path)
+  // (headless Chromium has no camera, so the screen falls back to the typed number, which takes the
+  // same lookup path; e2e/pwa.mjs drives the camera itself with Chromium's fake camera)
   await settled();
   from = api.requests.length;
   await open('/');

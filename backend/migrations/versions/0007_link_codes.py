@@ -1,16 +1,13 @@
 """link_codes: one-time codes that link another install to the same user
 
 Revision ID: 0007
-Revises: 0005
-
-MERGE NOTE: chained after 0006 (rate limits, built in parallel) once both are on main: set
-down_revision = "0006" then. Until 0006 exists, it follows 0005.
+Revises: 0006
 """
 
 from alembic import op
 
 revision = "0007"
-down_revision = "0005"
+down_revision = "0006"
 branch_labels = None
 depends_on = None
 

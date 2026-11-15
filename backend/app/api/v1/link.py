@@ -32,17 +32,25 @@ router = APIRouter(prefix="/api/v1", tags=["devices"])
 CODES_PER_HOUR = 10  # per user, as for pairing codes
 
 
-def register_limits(app: FastAPI, make: Callable[[int, float], Any] = SlidingWindow) -> None:
-    """Puts this module's limiters on app.state (create_app calls it). `make(limit, per_seconds)` builds one;
-    anything with `retry_after(key, record=True)` will do (a shared, database-backed limiter, say).
+def _in_memory(name: str, limit: int, per_seconds: float) -> SlidingWindow:
+    return SlidingWindow(limit, per_seconds)
+
+
+def register_limits(app: FastAPI, make: Callable[[str, int, float], Any] = _in_memory) -> None:
+    """Puts this module's limiters on app.state, each under its name. create_app passes
+    app/services/limits.py `make_limiter` (in memory, or with RATE_LIMITS=db in Postgres under that name);
+    the default is in memory. Anything with `retry_after(key, record=True)` will do.
 
     - link_codes: POST /link-codes per user;
     - link_attempts: POST /devices/link per client address, every try;
     - link_attempts_overall: wrong codes from everyone (key "all"), a backstop against many addresses.
     """
-    app.state.link_codes = make(CODES_PER_HOUR, 3600)
-    app.state.link_attempts = make(*ATTEMPTS_PER_ADDRESS)
-    app.state.link_attempts_overall = make(*ATTEMPTS_OVERALL)
+    for name, (limit, per_seconds) in {
+        "link_codes": (CODES_PER_HOUR, 3600),
+        "link_attempts": ATTEMPTS_PER_ADDRESS,
+        "link_attempts_overall": ATTEMPTS_OVERALL,
+    }.items():
+        setattr(app.state, name, make(name, limit, per_seconds))
 
 
 class LinkCodeOut(BaseModel):

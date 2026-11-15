@@ -52,6 +52,14 @@ export class Unprocessable extends ApiUnavailable {
   }
 }
 
+/** 409: the request conflicts with what the server has (for integration tokens, too many live ones). */
+export class Conflict extends ApiUnavailable {
+  constructor() {
+    super('The server answered 409');
+    this.name = 'Conflict';
+  }
+}
+
 const TIMEOUT_MS = 15_000;
 
 const isObject = (x: unknown): x is Record<string, unknown> => typeof x === 'object' && x !== null && !Array.isArray(x);
@@ -64,7 +72,7 @@ const abortError = (signal: AbortSignal): unknown =>
 /**
  * One request with the bearer token (null: without one); the parsed JSON body of a 2xx answer (null
  * for a 204 or when `allow404` lets a 404 through). A request still running after `timeoutMs` is
- * ApiUnavailable. Also used by ./linkApi.ts.
+ * ApiUnavailable. Also used by ./linkApi.ts and ./integrationsApi.ts.
  */
 export async function call(
   baseUrl: string,
@@ -96,6 +104,7 @@ export async function call(
     if (res.status === 400) throw new BadRequest();
     if (res.status === 429) throw new TooManyRequests();
     if (res.status === 422) throw new Unprocessable();
+    if (res.status === 409) throw new Conflict();
     if (res.status === 204 || (allow404 && res.status === 404)) return null;
     if (!res.ok) throw new ApiUnavailable(`The server answered ${res.status}`);
     const body: unknown = await res.json();
@@ -111,7 +120,7 @@ export async function call(
   }
 }
 
-const unexpected = () => new ApiUnavailable('The server sent an unexpected response');
+export const unexpected = () => new ApiUnavailable('The server sent an unexpected response');
 
 /** POST /api/v1/pairing-codes: a new code (valid about ten minutes). TooManyRequests over the hourly limit. */
 export async function createPairingCode(baseUrl: string, token: string, opts: Opts = {}): Promise<PairingCode> {

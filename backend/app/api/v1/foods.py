@@ -32,17 +32,31 @@ BARCODE_LOOKUPS_PER_HOUR = 60
 # minute per IP and answers 429 above that. Only a cache miss spends one. Per process: with several
 # workers the total is this times the worker count.
 OFF_READS_PER_MINUTE = 12
+# Per client address (app.state.food_searches), for search and lookup by id, which need no token. The app
+# searches as the user types (150 ms debounce, recent answers cached): a busy hour is a few hundred.
+FOOD_SEARCHES_PER_HOUR = 600
+
+
+def _limit_food_reads(request: Request) -> None:
+    """429 with Retry-After when this address is over FOOD_SEARCHES_PER_HOUR."""
+    address = request.client.host if request.client else "unknown"
+    wait = request.app.state.food_searches.retry_after(address)
+    if wait is not None:
+        retry = {"Retry-After": str(math.ceil(wait))}
+        raise HTTPException(429, "too many food searches, try again later", headers=retry)
 
 
 # Declared before /{fdc_id}, or "search" would be parsed as an id.
 @router.get("/search")
 def search(
+    request: Request,
     session: DbSession,
     q: Annotated[str, Query(min_length=1, max_length=100)],
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
     offset: Annotated[int, Query(ge=0, le=1000)] = 0,
 ) -> FoodSearchResponse:
     """Foods matching q, best first: exact, starts with q, every word, then misspellings. Each with its portions."""
+    _limit_food_reads(request)
     if not food_service.normalize(q):
         raise HTTPException(422, "q must contain text")
     rows, portions = food_service.search_page(session, q, limit, offset)
@@ -117,8 +131,11 @@ def barcode(
 
 
 @router.get("/{fdc_id}")
-def get_food(session: DbSession, fdc_id: Annotated[int, Path(gt=0, le=2**63 - 1)]) -> FoodDetail:
+def get_food(
+    request: Request, session: DbSession, fdc_id: Annotated[int, Path(gt=0, le=2**63 - 1)]
+) -> FoodDetail:
     """One food with its nutrients per 100 g and its portions, smallest first."""
+    _limit_food_reads(request)
     food = food_service.get_food(session, fdc_id)
     if food is None:
         raise HTTPException(404, "food not found")
