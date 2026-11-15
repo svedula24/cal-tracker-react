@@ -164,9 +164,23 @@ const parseWhole = (t: string): number | null => {
   return /^\d{1,7}$/.test(s) ? Number(s) : null;
 };
 
-/** The day's steps: tap the number to type it (Enter or leaving the field saves; anything else is dropped). */
-export function StepsCard({ steps, goal, onSteps }: { steps: number; goal: number; onSteps: (steps: number) => void }) {
+/**
+ * A draft typed into a card, dropped when the card moves to another day (Home keeps the cards
+ * mounted across day switches).
+ */
+function useDayDraft(day: string) {
   const [draft, setDraft] = useState<string | null>(null);
+  const [draftDay, setDraftDay] = useState(day);
+  if (day !== draftDay) {
+    setDraftDay(day);
+    setDraft(null);
+  }
+  return [draft, setDraft] as const;
+}
+
+/** The day's steps: tap the number to type it (Enter or leaving the field saves; anything else is dropped). */
+export function StepsCard({ day, steps, goal, onSteps }: { day: string; steps: number; goal: number; onSteps: (steps: number) => void }) {
+  const [draft, setDraft] = useDayDraft(day);
   const save = () => {
     const n = draft === null ? null : parseWhole(draft);
     if (n !== null && n !== steps) onSteps(n);
@@ -217,12 +231,14 @@ export const DAY_TYPES: { value: DayType; label: string }[] = [
  * day type, shown as the placeholder). Tapping the selected type again clears it.
  */
 export function DayTypeCard({
+  day,
   dayType,
   workoutKcal,
   goalKcal,
   onDayType,
   onWorkoutKcal,
 }: {
+  day: string;
   dayType: DayType | null;
   workoutKcal: number | null;
   goalKcal: number;
@@ -230,13 +246,16 @@ export function DayTypeCard({
   onWorkoutKcal: (kcal: number | null) => void;
 }) {
   const shown = workoutKcal === null ? '' : String(workoutKcal);
-  const [draft, setDraft] = useState<string | null>(null);
+  const [draft, setDraft] = useDayDraft(day);
   const text = draft ?? shown;
   const invalid = draft !== null && draft.trim() !== '' && parseWhole(draft) === null;
   const save = () => {
     if (draft === null) return;
     const next = draft.trim() === '' ? null : parseWhole(draft);
-    if ((draft.trim() === '' || next !== null) && next !== workoutKcal) onWorkoutKcal(next);
+    // Saved even when it equals `workoutKcal`: the draft exists only after typing, and the prop can
+    // lag a moment behind the store (an emptied field then compared null with a stale null and was
+    // dropped). Writing an unchanged value is harmless.
+    if (draft.trim() === '' || next !== null) onWorkoutKcal(next);
     setDraft(null);
   };
   return (
