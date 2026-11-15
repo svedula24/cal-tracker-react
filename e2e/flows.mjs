@@ -170,6 +170,75 @@ const home = [
     },
   },
   {
+    // Must stay after the fresh-install check: it logs (and then deletes) a food of the user's own.
+    name: "home: switching days shows each day's entries; a food logged on a past day appears there",
+    run: async (page, base, { wait }) => {
+      await go(page, base + '/', wait);
+      const now = new Date();
+      const today = btn(page, `${now.toLocaleDateString('en-US', { weekday: 'short' })} ${now.getDate()}`);
+      const past = btn(page, yesterday());
+      const count = (text) => page.getByText(text, { exact: true }).count();
+      // Listed and fully drawn (not left at the start of an animation).
+      const opaque = (name) =>
+        btn(page, `Edit ${name}`).first().evaluate((el) => {
+          for (let n = el; n; n = n.parentElement) if (Number(getComputedStyle(n).opacity) < 0.99) return false;
+          return true;
+        });
+      const expectDay = async (shown, hidden, why) => {
+        await page.getByText(shown, { exact: true }).first().waitFor({ timeout: 3000 });
+        if (!(await opaque(shown))) throw new Error(`${why}: ${shown} not fully shown`);
+        if ((await count(hidden)) > 0) throw new Error(`${why}: ${hidden} still shown`);
+      };
+      // Quick switches back and forth settle on the last day tapped.
+      await past.click();
+      await today.click();
+      await past.click();
+      await wait(500);
+      await expectDay('Oatmeal', 'Honey', 'yesterday after quick switches');
+      await today.click();
+      await wait(500);
+      await expectDay('Honey', 'Oatmeal', 'today');
+      // Log a food on yesterday: it shows there, not on today, and is still there on coming back.
+      await past.click();
+      await wait(400);
+      if ((await count('Banana, raw')) > 0) throw new Error('Banana, raw already logged yesterday: this check would prove nothing');
+      await btn(page, 'Add').click();
+      await btn(page, 'Food Database').click();
+      await page.getByLabel('Search foods').fill('banana');
+      await btn(page, 'Banana, raw').click();
+      await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+      await btn(page, 'Done').click();
+      await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+      try {
+        await wait(600);
+        await expectDay('Banana, raw', 'Honey', 'yesterday after logging');
+        await must(page, 'Oatmeal', 'yesterday after logging');
+        await today.click();
+        await wait(500);
+        await expectDay('Honey', 'Banana, raw', 'today after logging yesterday');
+        await past.click();
+        await wait(500);
+        await expectDay('Banana, raw', 'Honey', 'back on yesterday');
+      } finally {
+        // Delete it again, also after a failed check: a user entry would drop the demo data the
+        // later flows expect.
+        await past.click();
+        await wait(400);
+        if ((await count('Banana, raw')) > 0) {
+          await btn(page, 'Edit Banana, raw').click();
+          await page.getByText('Nutrition', { exact: true }).waitFor({ timeout: 5000 });
+          await btn(page, 'More options').click();
+          await btn(page, 'Delete entry').click();
+          await page.getByText('Recently uploaded').waitFor({ timeout: 5000 });
+          await wait(400);
+        }
+      }
+      if ((await count('Banana, raw')) > 0) throw new Error('Banana, raw still listed after deleting it');
+      await today.click();
+      await wait(400);
+    },
+  },
+  {
     name: 'home: swipe an entry left -> Delete removes it, persists',
     run: async (page, base, { wait }) => {
       await go(page, base + '/', wait);

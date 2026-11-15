@@ -26,11 +26,13 @@ function rollOver() {
 AppState.addEventListener('change', (s) => s === 'active' && rollOver());
 setInterval(rollOver, 60_000);
 
+// One function for every caller, so a memoized component that takes it is not re-rendered for it.
+const setDay = (next: string) => {
+  day = next;
+  emit();
+};
+
 export function useSelectedDay() {
   const value = useSyncExternalStore(subscribe, () => day, () => day);
-  const setDay = (next: string) => {
-    day = next;
-    emit();
-  };
   return [value, setDay] as const;
 }
