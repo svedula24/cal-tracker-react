@@ -159,6 +159,30 @@ const home = [
     },
   },
   {
+    // On web the paging ScrollView wraps each direct child in its own snap page: pages 2 and 3 must be
+    // separate children, or they stack in one page and every page takes that page's height.
+    name: 'home: the card pager has three pages side by side, each a screen wide',
+    run: async (page, base, { wait }) => {
+      await go(page, base + '/', wait);
+      const pages = await page.evaluate(() => {
+        const pagers = [...document.querySelectorAll('div')].filter((d) => getComputedStyle(d).scrollSnapType.startsWith('x'));
+        const pager = pagers.find((d) => (d.innerText || '').includes('Calories eaten'));
+        if (!pager) return null;
+        return [...pager.firstElementChild.children].map((k) => {
+          const r = k.getBoundingClientRect();
+          return { w: Math.round(r.width), h: Math.round(r.height), text: k.innerText || '' };
+        });
+      });
+      if (!pages) throw new Error('no card pager with "Calories eaten" found');
+      const vw = await page.evaluate(() => document.documentElement.clientWidth);
+      if (pages.length !== 3) throw new Error(`the pager has ${pages.length} pages, expected 3: ${pages.map((p) => p.text.slice(0, 20)).join(' / ')}`);
+      if (pages.some((p) => Math.abs(p.w - vw) > 1)) throw new Error(`pages are not a screen wide: ${pages.map((p) => p.w).join(', ')} vs ${vw}`);
+      const [one, two, three] = pages.map((p) => p.text);
+      if (!one.includes('Calories eaten') || !two.includes('Fiber') || two.includes('Steps') || !three.includes('Steps'))
+        throw new Error('pages hold the wrong cards (2 and 3 combined?)');
+    },
+  },
+  {
     name: 'home: + menu opens Food Database',
     run: async (page, base, { wait }) => {
       await go(page, base + '/', wait);

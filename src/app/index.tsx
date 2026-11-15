@@ -102,7 +102,10 @@ export default function Home() {
                 <NutrientRow keys={['protein', 'carbs', 'fat']} totals={d.totals} goals={d.target} />
               </View>
             </View>
-            <MorePages day={shown} width={width} />
+            {/* Separate children: on web the paging ScrollView wraps each direct child in its own snap
+                page, so one component returning both pages would put them in one page, stacked. */}
+            <NutritionPage day={shown} width={width} />
+            <ActivityPage day={shown} width={width} />
           </ScrollView>
 
           <View className="mt-[17px]">
@@ -131,39 +134,47 @@ export default function Home() {
   );
 }
 
-/** Pager pages 2 (more nutrients, health score) and 3 (activity) for `day`. */
-const MorePages = memo(function MorePages({ day, width }: { day: string; width: number }) {
+/**
+ * Pager page 2 (more nutrients, health score) for `day`, the deferred day (Home: `shown`); page 3 is
+ * ActivityPage. Each is a direct child of the pager (see there).
+ */
+const NutritionPage = memo(function NutritionPage({ day, width }: { day: string; width: number }) {
+  const d = useDay(day);
+  return (
+    <View style={{ width }} className="px-[24px]">
+      <NutrientRow keys={['fiber', 'sugar', 'sodium']} totals={d.totals} goals={d.target} />
+      <HealthScoreCard value={d.health.value} text={d.health.text} />
+    </View>
+  );
+});
+
+/** Pager page 3 (steps, burned calories, day type) for `day`. */
+const ActivityPage = memo(function ActivityPage({ day, width }: { day: string; width: number }) {
   const d = useDay(day);
   // The day type's share of the activity calories, and what the goal alone would add for it.
   const typeKcal = d.burned - d.stepsKcal;
   const goalTypeKcal = dayKcal(d.goals, { dayType: d.log.dayType });
   const typeLabel = d.log.dayType === 'active_rest' ? 'Active rest' : 'Workout';
   return (
-    <>
-      <View style={{ width }} className="px-[24px]">
-        <NutrientRow keys={['fiber', 'sugar', 'sodium']} totals={d.totals} goals={d.target} />
-        <HealthScoreCard value={d.health.value} text={d.health.text} />
-      </View>
-      <View style={{ width }} className="px-[24px]">
-        <View className="flex-row" style={{ gap: 10 }}>
-          <StepsCard day={day} steps={d.log.steps} goal={d.goals.steps} onSteps={(steps) => setDayLog(day, { steps })} />
-          <BurnedCard
-            total={d.burned}
-            steps={d.stepsKcal}
-            day={typeKcal !== 0 || d.log.workoutKcal != null ? { label: typeLabel, kcal: typeKcal } : null}
-          />
-        </View>
-        <DayTypeCard
-          day={day}
-          dayType={d.log.dayType ?? null}
-          workoutKcal={d.log.workoutKcal ?? null}
-          goalKcal={goalTypeKcal}
-          // Rest adds nothing, so it also clears the day's typed workout calories.
-          onDayType={(dayType) => setDayLog(day, dayType === 'rest' ? { dayType, workoutKcal: null } : { dayType })}
-          onWorkoutKcal={(workoutKcal) => setDayLog(day, { workoutKcal })}
+    <View style={{ width }} className="px-[24px]">
+      <View className="flex-row" style={{ gap: 10 }}>
+        <StepsCard day={day} steps={d.log.steps} goal={d.goals.steps} onSteps={(steps) => setDayLog(day, { steps })} />
+        <BurnedCard
+          total={d.burned}
+          steps={d.stepsKcal}
+          day={typeKcal !== 0 || d.log.workoutKcal != null ? { label: typeLabel, kcal: typeKcal } : null}
         />
       </View>
-    </>
+      <DayTypeCard
+        day={day}
+        dayType={d.log.dayType ?? null}
+        workoutKcal={d.log.workoutKcal ?? null}
+        goalKcal={goalTypeKcal}
+        // Rest adds nothing, so it also clears the day's typed workout calories.
+        onDayType={(dayType) => setDayLog(day, dayType === 'rest' ? { dayType, workoutKcal: null } : { dayType })}
+        onWorkoutKcal={(workoutKcal) => setDayLog(day, { workoutKcal })}
+      />
+    </View>
   );
 });
 
