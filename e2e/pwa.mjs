@@ -152,7 +152,7 @@ try {
   console.log('\nHome-screen app');
   const manifest = JSON.parse(fs.readFileSync(path.join(DIST, 'manifest.json'), 'utf8'));
   check(manifest.name === 'Kalo' && manifest.short_name === 'Kalo' && manifest.display === 'standalone' && manifest.start_url === '/', 'manifest: Kalo, standalone, starting at /', show(manifest));
-  check(manifest.background_color === '#FFFFFF' && manifest.theme_color === '#FFFFFF', 'manifest colours are the background token (#FFFFFF)');
+  check(manifest.background_color === '#FBF7F2' && manifest.theme_color === '#FBF7F2', 'manifest colours are the background token (#FBF7F2)');
   const pngSize = (file) => {
     const b = fs.readFileSync(path.join(DIST, file));
     return `${b.readUInt32BE(16)}x${b.readUInt32BE(20)}`;
