@@ -28,6 +28,7 @@ from app.api.v1.food_logs import router as food_logs_router
 from app.api.v1.foods import BARCODE_LOOKUPS_PER_HOUR, FOOD_SEARCHES_PER_HOUR, OFF_READS_PER_MINUTE
 from app.api.v1.foods import router as foods_router
 from app.api.v1.goals import daily_activity_router, goals_router
+from app.api.v1.integrations import router as integrations_router
 from app.api.v1.nutrition import router as nutrition_router
 from app.api.v1.sync import router as sync_router
 from app.db.session import make_engine, make_limits_engine
@@ -143,6 +144,7 @@ def create_app(url: str | None = None, settings: Settings | None = None, token_v
     app.include_router(nutrition_router)
     app.include_router(goals_router)
     app.include_router(daily_activity_router)
+    app.include_router(integrations_router)
     # The app asks for pairing codes before a tunnel is up, so these exist with or without PUBLIC_URL.
     app.include_router(connections_router)
     if settings.public_url is not None:

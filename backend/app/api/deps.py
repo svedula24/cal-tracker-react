@@ -34,11 +34,21 @@ def bearer_token(request: Request) -> str:
 
 
 def current_user(request: Request, session: DbSession) -> User:
-    """The user the request's bearer token belongs to; 401 for an unknown or revoked token.
+    """The user the request's bearer token belongs to; 401 for an unknown or revoked token, and for an
+    integration token (it is accepted only by `steps_user`'s route).
 
     The user comes from the token and from nothing else: no endpoint takes a user id from the client.
     """
-    user = user_service.user_for_token(session, bearer_token(request))
+    return _token_user(request, session, integrations=False)
+
+
+def steps_user(request: Request, session: DbSession) -> User:
+    """`current_user`, also accepting an integration token: for PUT /api/v1/daily-activity/{date}/steps only."""
+    return _token_user(request, session, integrations=True)
+
+
+def _token_user(request: Request, session: DbSession, *, integrations: bool) -> User:
+    user = user_service.user_for_token(session, bearer_token(request), integrations=integrations)
     if user is None:
         raise _unauthorized("invalid token")
     # Commits the last_used_at update (if there was one: at most once a minute per token) here, in its
@@ -49,3 +59,4 @@ def current_user(request: Request, session: DbSession) -> User:
 
 
 CurrentUser = Annotated[User, Depends(current_user)]
+StepsUser = Annotated[User, Depends(steps_user)]
