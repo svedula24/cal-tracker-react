@@ -111,7 +111,8 @@ def test_refuses_the_source_itself_however_spelled_before_writing_anything(migra
     with pytest.raises(CopyRefused, match="is the source"):
         copy_database(migrated_url, same, say=lambda _: None)
     assert rows(migrated_url, "SELECT version_num FROM alembic_version") == [("0005",)]  # not migrated
-    assert rows(migrated_url, "SELECT to_regclass('rate_limits')") == [(None,)]
+    # Qualified by the scratch schema: unqualified, the search path also reaches `public`, which CI migrates.
+    assert rows(migrated_url, "SELECT to_regclass(current_schema() || '.rate_limits')") == [(None,)]
 
 
 def test_refuses_a_target_with_data_before_migrating_it(source_url, target_url):
