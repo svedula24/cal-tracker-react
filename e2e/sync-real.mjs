@@ -64,7 +64,7 @@ const until = async (what, probe, ms = 20000) => {
 };
 
 const browser = await chromium.launch();
-const page = await browser.newPage({ viewport: { width: 390, height: 844 } }); // a new profile: the app registers a new device
+const page = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' }); // a new profile: the app registers a new device
 const btn = (name) => page.getByRole('button', { name, exact: true });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
