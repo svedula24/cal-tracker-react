@@ -301,6 +301,10 @@ function NutritionForm({ entry, base, grams }: { entry?: Entry; base: Food | nul
               ))}
             </View>
           ) : null}
+          {/* A scanned product (id off:<code>): Open Food Facts' data is under the ODbL, which asks for the credit. */}
+          {base?.id.startsWith('off:') ? (
+            <Text className="mt-6 text-center text-[11px] text-faint">Product data from Open Food Facts (ODbL)</Text>
+          ) : null}
         </ScrollView>
       </SafeAreaView>
 
