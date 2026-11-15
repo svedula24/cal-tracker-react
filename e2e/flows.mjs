@@ -124,6 +124,11 @@ const home = [
       await wait(900);
       if (!(await visible(day(-6))) || !(await visible(day(-12)))) throw new Error('strip did not show the previous week');
       if (await visible(day(0))) throw new Error('today still on screen after scrolling back');
+      // Two weeks only: a further swipe stays on this page, and day -13 is the oldest that exists.
+      await page.mouse.wheel(-402, 0);
+      await wait(900);
+      if (!(await visible(day(-12)))) throw new Error('the strip went past the second week');
+      if (await btn(page, day(-13)).count()) throw new Error('a day 13 days back is in the strip');
       await btn(page, 'Today').waitFor({ timeout: 2000 });
       // Select a day on that page: Home shows it (selected, and it has no meals logged).
       await btn(page, day(-10)).click();
