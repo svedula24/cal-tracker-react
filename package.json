@@ -34,7 +34,8 @@
     "react-native-screens": "~4.30.1",
     "react-native-svg": "15.16.0",
     "react-native-web": "^0.21.4",
-    "react-native-worklets": "0.13.0"
+    "react-native-worklets": "0.13.0",
+    "zxing-wasm": "3.1.6"
   },
   "devDependencies": {
     "@types/react": "~19.3.0",
@@ -48,8 +49,9 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "verify": "expo export --platform web && node e2e/verify.mjs",
-    "verify:api": "EXPO_PUBLIC_API_URL=http://127.0.0.1:9 expo export --platform web --output-dir dist-api && node e2e/api-mode.mjs",
+    "build:web": "expo export --platform web && node scripts/sw-manifest.mjs dist",
+    "verify": "expo export --platform web && node scripts/sw-manifest.mjs dist && node e2e/verify.mjs",
+    "verify:api": "EXPO_PUBLIC_API_URL=http://127.0.0.1:9 expo export --platform web --output-dir dist-api && node scripts/sw-manifest.mjs dist-api && node e2e/api-mode.mjs && node e2e/pwa.mjs",
     "verify:sync": "node e2e/sync-real.mjs",
     "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --experimental-test-module-mocks --test \"tests/*.test.mjs\"",
     "build:foods": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --max-old-space-size=4096 scripts/build-usda-foods.mjs"

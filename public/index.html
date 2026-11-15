@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="%LANG_ISO_CODE%">
+  <head>
+    <!--
+      The web app's root HTML (web.output "single" in app.json). Expo's way to customize it for a
+      single-page app is this file (`npx expo customize public/index.html`); +html.tsx is for
+      static/server output only. https://docs.expo.dev/guides/progressive-web-apps/
+      Everything in public/ is copied to the export's root as is.
+    -->
+    <meta charset="utf-8" />
+    <!-- viewport-fit=cover: the page runs edge to edge in the home-screen app, and the safe-area
+         insets (env(safe-area-inset-*), read by react-native-safe-area-context) keep content clear of
+         the notch and home indicator. maximum-scale=1 stops iOS zooming in when a field under 16px
+         gets focus; iOS still lets the user pinch-zoom. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+    <title>%WEB_TITLE%</title>
+    <meta name="description" content="Calorie and macro tracker" />
+
+    <!-- Home-screen app (Safari > Share > Add to Home Screen): opens standalone, without Safari's bars. -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Kalo" />
+    <!-- "default": a light status bar with dark text above the page, matching Kalo's white background
+         (tokens.colors.background). "black-translucent" would draw white text over the white page. -->
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="theme-color" content="#FFFFFF" />
+    <meta name="format-detection" content="telephone=no" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <!-- The `react-native-web` recommended style reset: https://necolas.github.io/react-native-web/docs/setup/#root-element -->
+    <style id="expo-reset">
+      /* These styles make the body full-height */
+      html,
+      body {
+        height: 100%;
+      }
+      /* These styles disable body scrolling if you are using <ScrollView> */
+      body {
+        overflow: hidden;
+        background-color: #ffffff;
+        /* No rubber-band bounce of the whole page, no grey flash on tap, no long-press callout. */
+        overscroll-behavior: none;
+        -webkit-tap-highlight-color: transparent;
+        -webkit-touch-callout: none;
+        -webkit-text-size-adjust: 100%;
+      }
+      /* These styles make the root element full-height */
+      #root {
+        display: flex;
+        height: 100%;
+        flex: 1;
+      }
+    </style>
+    <script>
+      // The service worker (public/sw.js): the app opens offline, and never caches the API. Not on
+      // localhost, where `expo start` serves unhashed development bundles.
+      // In the home-screen app, ask for persistent storage: Kalo's data lives in localStorage, and
+      // WebKit grants this to a home-screen web app
+      // (https://webkit.org/blog/14403/updates-to-storage-policy/), which keeps it out of eviction
+      // when the device runs low on space. Not in a browser tab, where Chrome may show a prompt.
+      var standalone = navigator.standalone === true || (window.matchMedia && matchMedia('(display-mode: standalone)').matches);
+      if (standalone && navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(function () {});
+      if ('serviceWorker' in navigator && location.hostname !== 'localhost') {
+        window.addEventListener('load', function () {
+          navigator.serviceWorker.register('/sw.js').catch(function () {});
+        });
+      }
+    </script>
+  </head>
+
+  <body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <!-- The root element for your Expo app. -->
+    <div id="root"></div>
+  </body>
+</html>
