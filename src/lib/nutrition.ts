@@ -189,18 +189,43 @@ export const parseDay = (key: string) => {
 };
 export const todayKey = () => dayKey(new Date());
 
-/** The 7-day strip: five days back, today, tomorrow (matches the reference). */
-export function weekStrip(today = new Date()) {
+/** Whole calendar days from `from` to `to` (local dates; DST-safe: compares the dates, not the instants). */
+export function daysBetween(from: Date, to: Date): number {
+  const utc = (d: Date) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.round((utc(to) - utc(from)) / 86_400_000);
+}
+
+export type StripDay = { key: string; label: string; day: number; isToday: boolean; isFuture: boolean };
+
+/**
+ * Page `page` of the scrolling day strip, oldest first. Page 0 is five days back, today and
+ * tomorrow (matches the reference); page n is the 7 days before page n - 1.
+ */
+export function stripPage(page: number, today = new Date()): StripDay[] {
   return Array.from({ length: 7 }, (_, i) => {
-    const date = addDays(today, i - 5);
+    const offset = i - 5 - 7 * page;
+    const date = addDays(today, offset);
     return {
       key: dayKey(date),
       label: date.toLocaleDateString('en-US', { weekday: 'short' }),
       day: date.getDate(),
-      isToday: i === 5,
-      isFuture: i === 6,
+      isToday: offset === 0,
+      isFuture: offset > 0,
     };
   });
+}
+
+/** The strip page holding day `key` (0 for anything on or after the first page: there are no future pages). */
+export function stripPageOf(key: string, today = new Date()): number {
+  return Math.max(0, Math.floor((1 - daysBetween(today, parseDay(key))) / 7));
+}
+
+/** Calories eaten per day key (rounded like `sum`), in one pass over the entries. */
+export function caloriesByDay(entries: readonly { date: string; servings: number; nutrients: Nutrients }[]): Map<string, number> {
+  const out = new Map<string, number>();
+  for (const e of entries) out.set(e.date, (out.get(e.date) ?? 0) + e.nutrients.calories * e.servings);
+  for (const [k, v] of out) out.set(k, Math.round(v));
+  return out;
 }
 
 export const formatTime = (iso: string) =>

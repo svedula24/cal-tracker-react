@@ -19,7 +19,7 @@ import {
   StepsCard,
   StreakPill,
 } from '@/components/home/HomeCards';
-import { WeekStrip } from '@/components/home/WeekStrip';
+import { TodayButton, WeekStrip, type WeekStripHandle } from '@/components/home/WeekStrip';
 import { setDayLog, useDay, useEntries } from '@/lib/data';
 import { dayKcal, todayKey } from '@/lib/nutrition';
 import { useSelectedDay } from '@/lib/selectedDay';
@@ -39,6 +39,8 @@ export default function Home() {
   const pager = useRef<ScrollViewInstance>(null);
   const [page, setPage] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const strip = useRef<WeekStripHandle>(null);
+  const [stripAway, setStripAway] = useState(false);
   const insets = useSafeAreaInsets();
 
   const goTo = (i: number) => {
@@ -56,13 +58,16 @@ export default function Home() {
           <View className="flex-row items-center justify-between px-[22px] pt-[22px]">
             <KaloLogo />
             <View className="flex-row items-center">
+              {stripAway ? <TodayButton onPress={() => strip.current?.goToday()} /> : null}
               <ScorePill score={d.score.value} />
               <StreakPill />
             </View>
           </View>
 
-          <View className="mt-[15px] px-[14px]">
+          <View className="mt-[15px]">
             <WeekStrip
+              ref={strip}
+              onAwayChange={setStripAway}
               selected={day}
               onSelect={setDay}
               todayProgress={today.budget ? today.totals.calories / today.budget : 0}

@@ -97,6 +97,50 @@ const home = [
     },
   },
   {
+    name: 'home: the day strip scrolls back a week; a past day shows; Today returns',
+    run: async (page, base, { wait }) => {
+      await go(page, base + '/', wait);
+      const day = (offset) => {
+        const d = new Date();
+        d.setDate(d.getDate() + offset);
+        return `${d.toLocaleDateString('en-US', { weekday: 'short' })} ${d.getDate()}`;
+      };
+      // react-native-web drops aria-selected on buttons; the active day is the one with the card.
+      const selected = async (name) => /(^| )bg-card( |$)/.test((await btn(page, name).getAttribute('class')) ?? '');
+      const visible = async (name) => {
+        const box = await btn(page, name).boundingBox().catch(() => null);
+        return !!box && box.x >= 0 && box.x + box.width <= 402;
+      };
+      if (await btn(page, 'Today').count()) throw new Error('Today control shown before scrolling away');
+      // Page 0 fills the width: its first and last cells sit at the 22px margins.
+      const first = await btn(page, day(-5)).boundingBox();
+      const last = await btn(page, day(1)).boundingBox();
+      if (Math.round(first.x) !== 22 || Math.round(402 - last.x - last.width) !== 22)
+        throw new Error(`page 0 cells at ${first.x}..${last.x + last.width}, not 22px from each edge`);
+      // Scroll the strip one page back (a horizontal trackpad swipe towards the past).
+      const strip = await btn(page, day(0)).boundingBox();
+      await page.mouse.move(201, strip.y + strip.height / 2);
+      await page.mouse.wheel(-402, 0);
+      await wait(900);
+      if (!(await visible(day(-6))) || !(await visible(day(-12)))) throw new Error('strip did not show the previous week');
+      if (await visible(day(0))) throw new Error('today still on screen after scrolling back');
+      await btn(page, 'Today').waitFor({ timeout: 2000 });
+      // Select a day on that page: Home shows it (selected, and it has no meals logged).
+      await btn(page, day(-10)).click();
+      await wait(400);
+      if (!(await selected(day(-10)))) throw new Error(`${day(-10)} not selected`);
+      await must(page, 'Tap + to log your first meal of the day.', 'empty past day');
+      if ((await page.getByText('Honey', { exact: true }).count()) > 0) throw new Error("today's Honey still shown");
+      await page.screenshot({ path: 'e2e/shots/index_previous-week.png' });
+      // Today: back to the first page with today selected, and the control goes away.
+      await btn(page, 'Today').click();
+      await wait(900);
+      if (!(await visible(day(0))) || !(await selected(day(0)))) throw new Error('Today did not bring back today');
+      await must(page, 'Honey', "today's entries");
+      if (await btn(page, 'Today').count()) throw new Error('Today control still shown on today');
+    },
+  },
+  {
     // Must stay ahead of every flow that logs a food: storage is shared, and this is the fresh install.
     name: 'home: a fresh install (demo data only) has no Recent foods on the + menu',
     run: async (page, base, { wait }) => {
