@@ -76,7 +76,7 @@ try {
   if (server) server.close();
   process.exit(2);
 }
-const page = await browser.newPage({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2 });
+const page = await browser.newPage({ viewport: { width: 402, height: 874 }, deviceScaleFactor: 2, serviceWorkers: 'block' });
 page.on('pageerror', (e) => errors.push(`[${where}] pageerror: ${e.message}`));
 page.on('console', (m) => {
   // Resource errors carry the failing URL in location(), not in the text.

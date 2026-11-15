@@ -55,7 +55,8 @@ const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const browser = await chromium.launch();
 // A fixed zone, so the checks know what the app sends as its timezone; the clipboard, for Copy.
 const ZONE = 'America/Los_Angeles';
-const page = await browser.newPage({ viewport: { width: 390, height: 844 }, timezoneId: ZONE, permissions: ['clipboard-read', 'clipboard-write'] });
+const page = await browser.newPage({ viewport: { width: 390, height: 844 }, timezoneId: ZONE, permissions: ['clipboard-read', 'clipboard-write'], serviceWorkers: 'block' });
+// (The service worker, public/sw.js, is left out here so every request reaches the routes above; e2e/pwa.mjs tests it.)
 const btn = (name) => page.getByRole('button', { name, exact: true });
 const errors = [];
 page.on('pageerror', (e) => errors.push(String(e)));
@@ -615,7 +616,8 @@ try {
   check(api.healthRevoked.length === 2, 'a token listed after reopening is revoked the same way');
 
   // ── Scan barcode: a typed code is looked up with the token; the product opens in Nutrition ──
-  // (the camera does not run in a headless browser; the typed code takes the same path)
+  // (headless Chromium has no camera, so the screen falls back to the typed number, which takes the
+  // same lookup path; e2e/pwa.mjs drives the camera itself with Chromium's fake camera)
   await settled();
   from = api.requests.length;
   await open('/');
