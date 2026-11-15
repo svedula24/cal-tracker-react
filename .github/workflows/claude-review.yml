@@ -47,6 +47,18 @@ jobs:
       - name: Clear any review.md from the checkout
         run: rm -f review.md
 
+      # CLAUDE_CODE_SUBPROCESS_ENV_SCRUB=1 runs Claude's Bash commands in a bubblewrap sandbox that
+      # needs bubblewrap and socat. The action installs them only when allowed_non_write_users is
+      # set, so install them here; without them every Bash command is refused.
+      - name: Install the Bash sandbox's dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
+          # Ubuntu 24.04 blocks unprivileged user namespaces, which bubblewrap needs.
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+
       - id: claude
         uses: anthropics/claude-code-action@f3b070c88125d33dbae5653df5f143101d4ea9dc # v1.0.276
         with:
@@ -129,6 +141,16 @@ jobs:
       - if: steps.pr-check.outputs.count == '0'
         name: Clear any review.md from the checkout
         run: rm -f review.md
+
+      # See the PR job: the sandbox CLAUDE_CODE_SUBPROCESS_ENV_SCRUB turns on needs these.
+      - if: steps.pr-check.outputs.count == '0'
+        name: Install the Bash sandbox's dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends bubblewrap socat
+          if [ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
 
       - if: steps.pr-check.outputs.count == '0'
         id: claude
