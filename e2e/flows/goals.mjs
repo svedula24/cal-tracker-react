@@ -217,6 +217,23 @@ export const flows = [
       await field(page, 'Workout calories').press('Enter');
       await expectBudget(page, rest + WORKOUT + stepKcal, "an emptied day value goes back to the goal's");
 
+      // The edit right after Enter is kept. react-native-web blurred the field on a 0 ms timer after
+      // Enter; landing between fill('')'s select-all and its Delete, it dropped the Delete, so the
+      // step above failed now and then. This replays that order on purpose.
+      await field(page, 'Workout calories').fill(String(DAY));
+      await field(page, 'Workout calories').press('Enter');
+      await expectBudget(page, rest + DAY + stepKcal, "the day's own workout calories, a third time");
+      await field(page, 'Workout calories').fill(String(DAY + 90));
+      await field(page, 'Workout calories').evaluate((el) => {
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+        el.focus(); // what fill('') does before its Delete
+        el.select();
+      });
+      await page.evaluate(() => new Promise((r) => setTimeout(r, 0))); // a timer set by Enter runs here
+      await page.keyboard.press('Delete');
+      await field(page, 'Workout calories').press('Enter');
+      await expectBudget(page, rest + WORKOUT + stepKcal, 'a value emptied right after Enter');
+
       await btn(page, 'Active rest day').click();
       await expectBudget(page, rest + ACTIVE + stepKcal, 'active rest day with steps');
 
