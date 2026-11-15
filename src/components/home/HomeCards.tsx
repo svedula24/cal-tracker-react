@@ -83,7 +83,7 @@ export function CalorieCard({ eaten, budget, rollover, burned }: { eaten: number
           {burned > 0 ? <Chip icon={<Footprints size={11} color={c.muted} strokeWidth={2.4} />} text={`+${burned}`} label="Calories burned added" /> : null}
         </View>
       </View>
-      <Ring size={107} stroke={7.5} progress={budget ? eaten / budget : 0} color={c.foreground}>
+      <Ring size={107} stroke={7.5} progress={budget ? eaten / budget : 0} color={c.accent}>
         <Flame size={20} color={c.foreground} fill={c.foreground} />
       </Ring>
     </Card>
@@ -221,7 +221,7 @@ export function StepsCard({ day, steps, goal, onSteps }: { day: string; steps: n
         <Text className="mb-[3px] ml-[3px] text-[13px] text-muted">/{goal.toLocaleString('en-US')}</Text>
       </View>
       <View className="mt-[22px] items-center">
-        <Ring size={106} stroke={7.5} progress={goal ? steps / goal : 0} color={c.foreground}>
+        <Ring size={106} stroke={7.5} progress={goal ? steps / goal : 0} color={c.accent}>
           <PersonStanding size={22} color={c.foreground} strokeWidth={2.4} />
         </Ring>
       </View>

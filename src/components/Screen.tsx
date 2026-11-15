@@ -44,7 +44,7 @@ export function ComingSoon({ icon, title, body, action }: { icon: React.ReactNod
 
 /** Soft shadow that separates white cards from the white page (as in the reference). */
 export const cardShadow = {
-  shadowColor: '#1E1A3C',
+  shadowColor: '#3B2416',
   shadowOpacity: 0.07,
   shadowRadius: 14,
   shadowOffset: { width: 0, height: 3 },

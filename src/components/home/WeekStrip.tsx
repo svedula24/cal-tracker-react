@@ -216,7 +216,7 @@ const DayCell = memo(function DayCell({ dayKey, label, day, isToday, isFuture, a
         {label}
       </Text>
       {isToday ? (
-        <Ring size={SIZE} stroke={1.8} progress={todayProgress} color={tokens.colors.foreground}>
+        <Ring size={SIZE} stroke={1.8} progress={todayProgress} color={tokens.colors.accent}>
           <Text className="text-[15px] text-foreground">{day}</Text>
         </Ring>
       ) : (
