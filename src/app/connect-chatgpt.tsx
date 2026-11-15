@@ -7,7 +7,6 @@ import { Press } from '@/components/Press';
 import { Card, PushedScreen } from '@/components/Screen';
 import { API_URL } from '@/lib/config';
 import { codeDeadline, type Connection, createPairingCode, disconnect, listConnections, type ProblemContext, problemMessage } from '@/lib/connectionsApi';
-import { isDemoGoal, useGoals } from '@/lib/data';
 import { deviceToken, syncNow } from '@/lib/sync';
 import { SyncUnauthorized } from '@/lib/sync/types';
 import { tokens } from '@/lib/tokens';
@@ -48,7 +47,6 @@ export default function ConnectChatGPTScreen() {
 
 function Connect() {
   const url = API_URL!;
-  const { goals, ready } = useGoals();
   const [code, setCode] = useState<CodeState>({ kind: 'idle' });
   const [list, setList] = useState<ListState>({ kind: 'loading' });
   const [now, setNow] = useState(() => Date.now());
@@ -131,14 +129,6 @@ function Connect() {
           Ask ChatGPT what you have eaten, or have it log food and change your goals. It works in ChatGPT on the web (chatgpt.com), not in the
           ChatGPT iPhone app.
         </Text>
-        {ready && isDemoGoal(goals) ? (
-          <View testID="demo-goals-note" className="mt-3 rounded-tile bg-chip p-3">
-            <Text className="text-[13.5px] leading-[19px] text-foreground">
-              Your goals are still the demo ones ({goals.calories.toLocaleString()} cal). ChatGPT will see them until you set your own on the Goals
-              screen.
-            </Text>
-          </View>
-        ) : null}
       </Card>
 
       <Card className="p-5">

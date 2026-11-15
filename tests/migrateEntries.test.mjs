@@ -64,17 +64,18 @@ test('the input array and its entries are not mutated', () => {
   assert.notEqual(migrateEntries(items), items);
 });
 
-test('demo entries are dropped once the user has an entry of their own; the rest is kept as is', () => {
-  const demo = [{ ...base, id: id(), seed: true }, { ...base, id: id(), seed: true }];
+test('every demo entry is dropped, with or without entries of the user\'s; the rest is kept as is', () => {
+  const demo = [{ ...base, id: id(), seed: true }, { ...base, id: id(), seed: true, seedGuessed: true }]; // Honey, 1 serving
   const mine = { ...base, id: id(), seed: false, foodId: 'usda:1', measure: G };
-  assert.deepEqual(dropDemoEntries([demo[0], mine, demo[1]]), [mine]);
-  assert.equal(dropDemoEntries([demo[0], mine, demo[1]])[0], mine);
+  const legacy = { ...base, id: 'mhk2j3a1-9x8c7', seed: false }; // a non-UUID id: kept, not sent
+  assert.deepEqual(dropDemoEntries([demo[0], mine, demo[1], legacy]), [mine, legacy]);
+  assert.equal(dropDemoEntries([demo[0], mine])[0], mine);
+  assert.deepEqual(dropDemoEntries(demo), [], 'only demo entries: none left');
 });
 
-test('only demo, only the user\'s, or nothing: the same array comes back (nothing rewritten)', () => {
-  const demo = [{ ...base, id: id(), seed: true }];
+test('nothing demo (only the user\'s, or nothing): the same array comes back (nothing rewritten)', () => {
   const mine = [{ ...base, id: id(), seed: false }];
-  for (const items of [demo, mine, []]) assert.equal(dropDemoEntries(items), items);
+  for (const items of [mine, []]) assert.equal(dropDemoEntries(items), items);
 });
 
 test('at load, an entry the app seeded as demo is dropped next to one of the user\'s', () => {
@@ -82,10 +83,21 @@ test('at load, an entry the app seeded as demo is dropped next to one of the use
   assert.deepEqual(loaded.map((e) => e.foodId), ['usda:1']);
 });
 
-test('an entry tagged demo by the guess is never dropped: it may be one the user edited before the flag', () => {
-  const editedLongAgo = { ...base, id: id(), name: 'My oatmeal' }; // hand-written, no flag: guessed demo
+test('an entry tagged demo by the guess (seedGuessed) that still looks like the demo is dropped, now or tagged earlier', () => {
+  const untagged = { ...base, id: id(), name: 'Sandwich' }; // hand-written, no flag: guessed demo
+  const guessedEarlier = { ...base, id: id(), name: 'Whole Milk Latte', seed: true, seedGuessed: true };
   const mine = { ...base, id: id(), foodId: 'usda:1', measure: G };
-  const loaded = dropDemoEntries(migrateEntries([editedLongAgo, mine]));
-  assert.deepEqual(loaded.map((e) => [e.name, e.seed, e.seedGuessed]), [['My oatmeal', true, true], ['Honey', false, undefined]]);
-  assert.equal(dropDemoEntries(migrateEntries(loaded)), loaded, 'and stays kept at every later load');
+  const loaded = dropDemoEntries(migrateEntries([untagged, guessedEarlier, mine]));
+  assert.deepEqual(loaded.map((e) => [e.name, e.seed]), [['Honey', false]]);
+  assert.equal(dropDemoEntries(migrateEntries(loaded)), loaded, 'and nothing changes at later loads');
+});
+
+test('a guessed entry the user renamed or changed is kept: it may be theirs', () => {
+  const renamed = { ...base, id: id(), name: 'My oatmeal', seed: true, seedGuessed: true };
+  const moreServings = { ...base, id: id(), name: 'Honey', servings: 2, seed: true, seedGuessed: true };
+  const pastDay = { ...base, id: id(), name: 'Oatmeal', servings: 1.5, seed: true, seedGuessed: true }; // as seeded
+  const seeded = { ...base, id: id(), name: 'My oatmeal', servings: 3, seed: true }; // seeded: always dropped
+  assert.deepEqual(dropDemoEntries([renamed, moreServings, pastDay, seeded]), [renamed, moreServings]);
+  const untaggedRenamed = { ...base, id: id(), name: 'Grandma soup' }; // no flag, no food: guessed demo, but not a demo name
+  assert.deepEqual(dropDemoEntries(migrateEntries([untaggedRenamed])).map((e) => [e.name, e.seedGuessed]), [['Grandma soup', true]]);
 });

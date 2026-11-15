@@ -16,6 +16,7 @@ mock.module('@react-native-async-storage/async-storage', {
 });
 globalThis.window = {}; // the store hydrates only where `window` exists
 const { Collection, makeId } = await import('../src/lib/store.ts');
+const { dropDemoEntries, migrateEntries } = await import('../src/lib/migrateEntries.ts');
 
 test('makeId returns a UUID v4 (the server keys logs by client-made UUIDs)', () => {
   assert.match(makeId(), /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
@@ -179,4 +180,32 @@ test('clear empties the collection and stores it empty, so the seed does not com
   assert.equal(disk.get('clearme'), '[]');
   const again = await hydrated(new Collection('clearme', seed));
   assert.deepEqual(again.items, []);
+});
+
+// The entries collection as src/lib/data.ts makes it: nothing at first launch, stored entries
+// migrated and every demo entry dropped at load.
+const loadEntries = (key) => hydrated(new Collection(key, [], (items) => dropDemoEntries(migrateEntries(items))));
+
+test('entries, fresh install: nothing stored yet gives no entries, stored as an empty list', async () => {
+  const c = await loadEntries('entries-fresh');
+  assert.deepEqual(c.items, []);
+  assert.deepEqual(JSON.parse(disk.get('entries-fresh')), []);
+});
+
+test('entries, existing install: every demo entry (guessed ones too) is dropped at load and the rest kept', async () => {
+  const day = { date: '2026-11-15', time: '2026-11-15T08:00:00.000Z', servings: 1, nutrients: {} };
+  const mine = { ...day, id: makeId(), name: 'Banana', seed: false, foodId: 'usda:1', measure: { label: 'g', grams: 1 } };
+  const typed = { ...day, id: makeId(), name: 'Soup', seed: false }; // the user's, typed in by hand
+  const stored = [
+    { ...day, id: makeId(), name: 'Honey', seed: true },
+    mine,
+    { ...day, id: makeId(), name: 'Sandwich', seed: true, seedGuessed: true },
+    typed,
+  ];
+  disk.set('entries-old', JSON.stringify(stored));
+  const c = await loadEntries('entries-old');
+  assert.deepEqual(c.items, [mine, typed]);
+  assert.deepEqual(JSON.parse(disk.get('entries-old')), [mine, typed], 'saved without them');
+  const again = await loadEntries('entries-old');
+  assert.deepEqual(again.items, [mine, typed]);
 });

@@ -50,8 +50,20 @@ export const roundHalfAway = (x: number): number => Math.sign(x) * Math.round(Ma
 export const stepsToCalories = (steps: number) => roundHalfAway((Number.isFinite(steps) ? steps : 0) * 0.035);
 
 // ── Goals over time ──────────────────────────────────────────────────────────
-/** The date of the goal in force since before any log: the seed's, and an old install's one set of goals. */
+/** The date of the goal in force since before any log: the default goal's, and an old install's one set of goals. */
 export const FIRST_GOAL_DATE = '2020-01-01';
+
+/**
+ * The goal a new install starts with, in force since before any log, so Home has targets to draw
+ * its rings against until the user sets their own. e2e/fixture.mjs keeps a copy (a test checks they match).
+ */
+export const DEFAULT_GOAL: Goals = {
+  id: FIRST_GOAL_DATE,
+  effectiveDate: FIRST_GOAL_DATE,
+  source: 'manual',
+  calories: 3027, protein: 182, carbs: 382.5, fat: 94, fiber: 38, sugar: 113, sodium: 2300,
+  steps: 10000, goal: 'gain', workoutKcal: 0, activeRestKcal: 0,
+};
 
 const isDayKey = (x: unknown): x is string => typeof x === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(x);
 
@@ -220,6 +232,25 @@ export function stripPageOf(key: string, today = new Date()): number {
   return Math.max(0, Math.floor((1 - daysBetween(today, parseDay(key))) / 7));
 }
 
+/**
+ * The streak: how many consecutive days, ending `today` (a day key), have at least one entry. A
+ * today with nothing logged yet does not end it: the run ending yesterday counts, so it does not
+ * drop to 0 every morning. 0 when neither today nor yesterday has an entry. Steps a day at a time
+ * from noon, so a DST change (or a zone whose midnight is skipped) never skips or repeats a day.
+ */
+export function streakDays(entryDates: Iterable<string>, today: string): number {
+  const days = new Set(entryDates);
+  const noon = parseDay(today);
+  noon.setHours(12);
+  let d = days.has(today) ? noon : addDays(noon, -1);
+  let n = 0;
+  while (days.has(dayKey(d))) {
+    n++;
+    d = addDays(d, -1);
+  }
+  return n;
+}
+
 /** Calories eaten per day key (rounded like `sum`), in one pass over the entries. */
 export function caloriesByDay(entries: readonly { date: string; servings: number; nutrients: Nutrients }[]): Map<string, number> {
   const out = new Map<string, number>();
@@ -240,7 +271,7 @@ export type ScoreRow = { key: 'calories' | 'protein' | 'carbs' | 'fat'; label: s
 /**
  * Daily Score (0-100): each of calories/protein/carbs/fat scores 100 inside the
  * on-track band (70-115% of goal) and loses 7.5 points per percent outside it.
- * Weighted 30/30/20/20. The seeded reference day scores 89.
+ * Weighted 30/30/20/20. The reference screenshots' day scores 89.
  */
 export function dailyScore(t: Nutrients, calorieBudget: number, g: Nutrients) {
   const defs = [
@@ -270,7 +301,7 @@ export function dailyScore(t: Nutrients, calorieBudget: number, g: Nutrients) {
   return { value, headline, tip, rows };
 }
 
-/** Health Score (0-10) + a one-paragraph summary. Seeded reference day: 7/10. */
+/** Health Score (0-10) + a one-paragraph summary. The reference screenshots' day: 7/10. */
 export function healthScore(t: Nutrients, calorieBudget: number, g: Nutrients & Pick<Goals, 'goal'>) {
   const below: string[] = [];
   if (t.calories < 0.9 * calorieBudget) below.push('calorie');

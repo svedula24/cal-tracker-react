@@ -1,15 +1,14 @@
 // App data on top of the on-device store (src/lib/store.ts). Every action is a
 // local write; when the app has an API URL, the write is also reported to the
-// background sync (src/lib/sync/), which copies it to the server later. First
-// launch is seeded so Home matches the reference screenshots exactly, until the
-// user has entries of their own (dropDemoEntries, at the next load).
+// background sync (src/lib/sync/), which copies it to the server later. A new
+// install starts empty, with only the default goal (DEFAULT_GOAL).
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useMemo } from 'react';
 
 import { getCollection, makeId, useCollection } from '@/lib/store';
 import {
-  addDays,
   dailyScore,
-  dayKey,
+  DEFAULT_GOAL,
   dayTarget,
   type DayType,
   FIRST_GOAL_DATE,
@@ -17,16 +16,17 @@ import {
   type Goals,
   healthScore,
   migrateGoals,
+  streakDays,
   type Nutrients,
   stepsToCalories,
   sum,
   todayKey,
 } from '@/lib/nutrition';
 import type { Food, Portion } from '@/data/foods';
-import { defaultServing, scale } from '@/lib/measure';
+import { demoDayLogs, isDemoSaved } from '@/lib/demoData';
+import { scale } from '@/lib/measure';
 import { dropDemoEntries, migrateEntries } from '@/lib/migrateEntries';
 import { migrateSavedFoods, type SavedFood } from '@/lib/savedFoods';
-import { PAST_DAY_FOODS, SAVED_FOODS } from '@/lib/seedFoods';
 import { markDirty } from '@/lib/sync/dirty';
 import { fdcIdOf } from '@/lib/sync/mapping';
 
@@ -38,7 +38,7 @@ export type Entry = {
   servings: number; // quantity of `measure`
   nutrients: Nutrients; // per one `measure` (what the day's totals sum)
   // The food behind the entry, so its measurement can be changed later. Absent
-  // on the hand-written demo entries, which only have a serving.
+  // on an entry typed in by hand, which only has a serving.
   per100g?: Nutrients;
   // The database food's own values, kept once a value of this entry was typed over
   // (per100g then holds the entry's), so a bookmark still saves the database food.
@@ -48,156 +48,84 @@ export type Entry = {
   foodId?: string;
   foodName?: string; // the database name, even after the entry is renamed
   photo?: string;
-  // Demo data created at first launch: never synced.
-  // Cleared by any edit (the entry is then the user's); never set by `add`.
+  // true: demo data an older version seeded at first launch, dropped at load (dropDemoEntries)
+  // and never synced. false on every entry the user logs or the server sends: an entry without
+  // the flag is one from before it existed, which migrateEntries tags at load.
   seed?: boolean;
-  // `seed` was set by migrateEntries' guess (stored before the flag existed), not by the seeding:
-  // possibly the user's own edited entry, so it is never dropped as demo data.
+  // `seed` was set by migrateEntries' guess, not by the old seeding. Dropped all the same.
   seedGuessed?: boolean;
 };
 // id = date. `dayType` absent or null: not set (nothing added). Rollover stays on the device.
 // `workoutKcal`: calories typed for the day (null = the goal's amount for the day type).
 export type DayLog = { id: string; steps: number; rollover: number; dayType?: DayType | null; workoutKcal?: number | null };
 
-// ── Seed (dated relative to first launch) ────────────────────────────────────
-const n = (calories: number, protein: number, carbs: number, fat: number, fiber: number, sugar: number, sodium: number): Nutrients => ({
-  calories, protein, carbs, fat, fiber, sugar, sodium,
-});
-
-function at(date: Date, h: number, m: number) {
-  const d = new Date(date);
-  d.setHours(h, m, 0, 0);
-  return d.toISOString();
-}
-
-const now = new Date();
-const today = dayKey(now);
-
-// Today's entries sum exactly to the reference: 2543 kcal, 174/322/59 g,
-// fiber 13 g, sugar 54 g, sodium 3791 mg.
-const todaySeed: [string, number, number, Nutrients][] = [
-  ['Whole Milk Latte', 8, 40, n(190, 10, 15, 10, 0, 7, 165)],
-  ['Three Seed Sourdough', 9, 1, n(240, 8, 46, 2, 3, 1, 400)],
-  ['Sliced Part-Skim Mozzarella', 9, 3, n(80, 7, 1, 5, 0, 0, 175)],
-  ['Sandwich', 12, 26, n(725, 40, 75, 29, 4, 6, 1650)],
-  ["Cookies 'n Cream Protein Bar", 15, 6, n(150, 17, 14, 3, 1, 1, 180)],
-  ['Chicken & Jasmine Rice', 17, 40, n(577, 52, 86, 1, 1, 0, 1100)],
-  ['Greek Yogurt Bowl', 19, 10, n(517, 40, 68, 9, 4, 22, 120)],
-  ['Honey', 19, 12, n(64, 0, 17, 0, 0, 17, 1)],
-];
-
-// Previous five days: logged, but under goal (red rings in the week strip).
-// Real USDA foods (src/lib/seedFoods.ts; a test checks they exist).
-
-function seedEntries(): Entry[] {
-  const out: Entry[] = todaySeed.map(([name, h, m, nutrients]) => ({
-    id: makeId(), date: today, time: at(now, h, m), name, servings: 1, nutrients, seed: true,
-  }));
-  for (let back = 1; back <= 5; back++) {
-    const d = addDays(now, -back);
-    for (const [name, h, m, food] of PAST_DAY_FOODS) {
-      out.push({ ...newEntry(food, defaultServing(food), back % 2 ? 1.5 : 1.25, dayKey(d)), time: at(d, h, m), name, seed: true });
-    }
-  }
-  return out;
-}
-
-// One goal, in force since before any log. Today's target adds the 202 kcal of today's steps:
-// 3027 + 202 + 200 rollover = the reference budget of 3429, and carbs 382.5 + 202/4 = 433 g, the
-// reference's 433 g goal (so the seeded day still scores the reference's 89).
-const goalsSeed: Goals[] = [
-  {
-    id: FIRST_GOAL_DATE,
-    effectiveDate: FIRST_GOAL_DATE,
-    source: 'manual',
-    calories: 3027, protein: 182, carbs: 382.5, fat: 94, fiber: 38, sugar: 113, sodium: 2300,
-    steps: 10000, goal: 'gain', workoutKcal: 0, activeRestKcal: 0,
-  },
-];
-
-const dayLogSeed: DayLog[] = [
-  { id: today, steps: 5782, rollover: 200, dayType: null, workoutKcal: null },
-  ...[1, 2, 3, 4, 5].map((b) => ({ id: dayKey(addDays(now, -b)), steps: 4000 + b * 950, rollover: 0, dayType: null, workoutKcal: null })),
-];
-
-// Streak is display-only (reference shows 16 days).
-export const STREAK_DAYS = 16;
+// A new install starts with the default goal (DEFAULT_GOAL). Synced like any goal row: a new
+// install's first sync uploads it to its own new account. An install that has stored goals never uses it.
+const goalsSeed: Goals[] = [DEFAULT_GOAL];
+const NO_ITEMS: never[] = [];
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
-// Each collection is made in one place (key, seed, migration), for the hooks and
+// Each collection is made in one place (key, first-launch items, migration), for the hooks and
 // for sync. The writers are module-level, so the functions the hooks return are
 // stable. Each reports the row to sync AFTER the local write (markDirty does
 // nothing without an API URL and never throws).
-const entriesSeed = seedEntries();
-// Stored entries are upgraded at load (UUID ids, the `seed` flag), and the demo entries dropped
-// once the user has their own; see migrateEntries.ts.
+// Stored entries are upgraded at load (UUID ids, the `seed` flag), and every demo entry an older
+// version seeded is dropped; see migrateEntries.ts.
 const migrateStoredEntries = (items: Entry[]) => dropDemoEntries(migrateEntries(items));
-const entriesStore = () => getCollection<Entry>('entries', entriesSeed, migrateStoredEntries);
-const savedSeed: SavedFood[] = SAVED_FOODS.map((food) => ({ id: food.id, food }));
+const entriesStore = () => getCollection<Entry>('entries', NO_ITEMS, migrateStoredEntries);
 // Stored entries are cleaned once when the list loads (and saved), so every
 // item has a usable snapshot; see migrateSavedFoods.
-const savedStore = () => getCollection<SavedFood>('savedFoods', savedSeed, migrateSavedFoods);
+const savedStore = () => getCollection<SavedFood>('savedFoods', NO_ITEMS, migrateSavedFoods);
 // Every goal the user has had, one row per effective date. An older install's one set of goals is
 // upgraded to the row in force since FIRST_GOAL_DATE once at load (migrateGoals).
 const goalsStore = () => getCollection<Goals>('goals', goalsSeed, migrateGoals);
-const dayLogsStore = () => getCollection<DayLog>('dayLogs', dayLogSeed);
+const dayLogsStore = () => getCollection<DayLog>('dayLogs', NO_ITEMS);
 
 /** The collections sync reads and writes (src/lib/sync/index.ts): the same instances the hooks use. */
 export const syncStores = () => ({ entries: entriesStore(), saved: savedStore(), goals: goalsStore(), dayLogs: dayLogsStore() });
 
 /**
- * Empties the synced collections, demo data included, without reporting anything to sync: for an
+ * Empties the synced collections without reporting anything to sync: for an
  * install that is being linked to another account (src/lib/sync/index.ts linkThisDevice), whose
- * data then arrives from the server. Resolves once all four are stored empty (so the seed does not
- * come back); rejects if one cannot be.
+ * data then arrives from the server. Resolves once all four are stored empty (so the default goal
+ * does not come back); rejects if one cannot be.
  */
 export const clearLocalData = async (): Promise<void> => {
   await Promise.all(Object.values(syncStores()).map((store) => store.clear()));
 };
 
-// A day log without its date: the seed's are dated from the first launch, which may not be today's.
-const logShape = (d: DayLog) => JSON.stringify([d.steps, d.rollover, d.dayType ?? null, d.workoutKcal ?? null]);
+const DEFAULT_TARGETS = ['calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium', 'steps', 'goal'] as const;
+const isDefaultGoal = (g: Goals): boolean => g.id === FIRST_GOAL_DATE && DEFAULT_TARGETS.every((k) => g[k] === DEFAULT_GOAL[k]);
 
 /**
- * How much of this install's data is the user's own rather than the first-launch demo: entries not
- * seeded, and whether any goal, day log or saved food differs from the seed. For the first-run offer
- * to link (only an install with nothing of its own is wiped without asking) and its confirmation.
+ * How much of this install's data is the user's own: its entries, and whether it has any saved
+ * food, day log, or goal other than the default one. For the first-run offer to link (only an
+ * install with nothing of its own is wiped without asking) and its confirmation.
  */
 export function ownData(): { entries: number; other: boolean } {
   const { entries, goals, dayLogs, saved } = syncStores();
-  const seededLogs = dayLogSeed.map(logShape).sort().join();
-  const seededSaved = new Set(savedSeed.map((s) => s.id));
   return {
-    entries: entries.items.filter((e) => e.seed !== true).length,
-    other:
-      goals.items.length !== goalsSeed.length ||
-      goals.items.some((g) => g.id !== FIRST_GOAL_DATE || !isDemoGoal(g)) ||
-      dayLogs.items.map(logShape).sort().join() !== seededLogs ||
-      saved.items.length !== savedSeed.length ||
-      saved.items.some((s) => !seededSaved.has(s.id)),
+    entries: entries.items.length,
+    other: saved.items.length > 0 || dayLogs.items.length > 0 || goals.items.some((g) => !isDefaultGoal(g)),
   };
 }
 
 const addEntry = (entry: Entry) => {
   // Marked as the user's from the start: an entry without the flag is guessed at the next load
-  // (migrateEntries), and that guess takes one that is not measured in grams for demo data.
+  // (migrateEntries), and that guess takes one that is not measured in grams for old demo data.
   entriesStore().add({ ...entry, seed: false });
   markDirty('food_logs', entry.id);
 };
-// Any edit makes a demo entry the user's.
 const updateEntry = (id: string, patch: Partial<Entry>) => {
-  entriesStore().update(id, { ...patch, seed: false, seedGuessed: undefined });
+  entriesStore().update(id, patch);
   markDirty('food_logs', id);
 };
 const removeEntry = (id: string) => {
-  const store = entriesStore();
-  // A demo entry was never sent, so there is nothing to delete on the server.
-  const demo = store.items.find((e) => e.id === id)?.seed === true;
-  store.remove(id);
-  if (!demo) markDirty('food_logs', id, true);
+  entriesStore().remove(id);
+  markDirty('food_logs', id, true);
 };
 export const useEntries = () => ({
-  ...useCollection<Entry>('entries', entriesSeed, migrateStoredEntries),
+  ...useCollection<Entry>('entries', NO_ITEMS, migrateStoredEntries),
   add: addEntry,
   update: updateEntry,
   remove: removeEntry,
@@ -222,7 +150,7 @@ export const setDayLog = (date: string, patch: Partial<Pick<DayLog, 'steps' | 'd
   else addDayLog({ id: date, steps: 0, rollover: 0, dayType: null, workoutKcal: null, ...patch });
 };
 export const useDayLogs = () => ({
-  ...useCollection<DayLog>('dayLogs', dayLogSeed),
+  ...useCollection<DayLog>('dayLogs', NO_ITEMS),
   add: addDayLog,
   update: updateDayLog,
   remove: removeDayLog,
@@ -244,10 +172,43 @@ const removeSaved = (id: string) => {
   markSaved(id, true);
 };
 export const useSavedFoods = () => ({
-  ...useCollection<SavedFood>('savedFoods', savedSeed, migrateSavedFoods),
+  ...useCollection<SavedFood>('savedFoods', NO_ITEMS, migrateSavedFoods),
   add: addSaved,
   remove: removeSaved,
 });
+
+// ── Demo data from older versions ────────────────────────────────────────────
+// Older versions seeded day logs and saved foods at first launch, and those were synced. They are
+// removed once per install, as the user's own deletions would be: tombstones go to the server, so
+// it and every linked device drop them too. Demo entries were never synced: dropped at load
+// (dropDemoEntries). Goals are left alone.
+const DEMO_CLEANED = 'kalo.demo.cleaned';
+let demoCleanup: Promise<boolean> | null = null;
+
+/**
+ * Removes the old demo day logs and bookmarks (src/lib/demoData.ts) once the stored data has loaded,
+ * unless this install already did (DEMO_CLEANED). A seeded day the user has since given a day type
+ * or workout calories keeps those: only its demo steps and rollover are cleared. Resolves true when
+ * it ran now: call markDemoCleaned once its writes are reported to sync, so it does not run again.
+ * Runs once per launch however often it is called; never rejects.
+ */
+export function removeDemoDataOnce(): Promise<boolean> {
+  demoCleanup ??= (async () => {
+    const { dayLogs, saved } = syncStores();
+    await Promise.all([dayLogs.whenReady(), saved.whenReady()]);
+    // Unreadable: not now (the next launch tries again), rather than possibly twice.
+    if ((await AsyncStorage.getItem(DEMO_CLEANED).catch(() => '1')) === '1') return false;
+    const { remove, clear } = demoDayLogs(dayLogs.items);
+    for (const id of remove) removeDayLog(id);
+    for (const id of clear) updateDayLog(id, { steps: 0, rollover: 0 });
+    for (const s of saved.items.filter(isDemoSaved)) removeSaved(s.id);
+    return true;
+  })().catch(() => false);
+  return demoCleanup;
+}
+
+/** Records that this install's demo data is gone (removeDemoDataOnce). */
+export const markDemoCleaned = (): Promise<void> => AsyncStorage.setItem(DEMO_CLEANED, '1').catch(() => {});
 
 // Goals are dated history (user_goals on the server): a change made today is the row dated today,
 // so every earlier day keeps the goal it had. Its sync key is that date.
@@ -258,12 +219,12 @@ export const setGoals = (patch: GoalPatch) => {
   const store = goalsStore();
   const date = todayKey();
   if (store.items.some((g) => g.id === date)) store.update(date, patch);
-  else store.add({ ...(goalOn(store.items, date) ?? goalsSeed[0]), ...patch, id: date, effectiveDate: date });
+  else store.add({ ...(goalOn(store.items, date) ?? DEFAULT_GOAL), ...patch, id: date, effectiveDate: date });
   markDirty('goals', date);
 };
 
-/** The goal in force on `date` (the seed's if no row has begun, which only damaged data can cause). */
-const goalFor = (rows: readonly Goals[], date: string): Goals => goalOn(rows, date) ?? goalsSeed[0];
+/** The goal in force on `date` (the default if no row has begun: no goals at all, as after a link to an account without any). */
+const goalFor = (rows: readonly Goals[], date: string): Goals => goalOn(rows, date) ?? DEFAULT_GOAL;
 
 const useGoalRows = () => useCollection<Goals>('goals', goalsSeed, migrateGoals).items;
 
@@ -272,10 +233,6 @@ export function useGoals() {
   const rows = useGoalRows();
   return { goals: goalFor(rows, todayKey()), rows, ready: goalsStore().ready, set: setGoals };
 }
-
-const DEMO_TARGETS = ['calories', 'protein', 'carbs', 'fat', 'fiber', 'sugar', 'sodium', 'steps', 'goal'] as const;
-/** Whether these targets are still the demo goal's (the user has not set their own yet). */
-export const isDemoGoal = (g: Goals): boolean => DEMO_TARGETS.every((k) => g[k] === goalsSeed[0][k]);
 
 /** The goal in force on `date`. */
 export const useGoalOn = (date: string): Goals => goalFor(useGoalRows(), date);
@@ -305,6 +262,13 @@ export function useDay(date: string) {
       health: healthScore(totals, budget, { ...target, goal: goals.goal }),
     };
   }, [all, logs, goals, date]);
+}
+
+/** The user's streak (streakDays): consecutive days with an entry, ending today (or yesterday). */
+export function useStreak(): number {
+  const entries = useEntries().items;
+  const today = todayKey();
+  return useMemo(() => streakDays(entries.map((e) => e.date), today), [entries, today]);
 }
 
 /** ISO timestamp for "now" moved onto `date` (logging to a selected day). */
